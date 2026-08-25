@@ -296,10 +296,12 @@
 
 /* mobile persistent controls — two compact architectural layers */
 :root {
-  --sys-mobile-nav-h: 2.875rem;
+  --sys-mobile-nav-h: 3rem;
   --sys-mobile-player-h: 2.75rem;
   --sys-mobile-art-size: 1.875rem;
   --sys-mobile-icon-size: 1rem;
+  --sys-mobile-nav-icon-size: 1.125rem;
+  --sys-mobile-nav-label-size: 0.59375rem;
   --sys-mobile-touch-size: 2.75rem;
   --sys-mobile-search-h: 2.25rem;
   --sys-mobile-search-w: 5.25rem;
@@ -309,6 +311,7 @@
   --sys-mobile-gutter: 0.625rem;
   --sys-mobile-layer-gap: 0.625rem;
   --sys-mobile-control-radius: 2px;
+  --sys-mobile-dock-radius: 0.5rem;
   --sys-safe-top: env(safe-area-inset-top, 0px);
   --sys-safe-bottom: env(safe-area-inset-bottom, 0px);
   --sys-dock-base-h: calc(var(--sys-mobile-nav-h) + var(--sys-safe-bottom));
@@ -325,9 +328,11 @@
 
 .mobile-dock__controls {
   display: flex;
+  overflow: hidden;
   flex-direction: column;
   padding-bottom: var(--sys-safe-bottom);
   border-top: 1px solid var(--sys-border);
+  border-radius: var(--sys-mobile-dock-radius) var(--sys-mobile-dock-radius) 0 0;
   background: var(--sys-surface);
 }
 
@@ -440,7 +445,7 @@
   align-items: center;
   justify-content: center;
   flex-direction: column;
-  gap: 0.125rem;
+  gap: 0.1875rem;
   color: var(--sys-foreground-muted);
   transition: color 160ms var(--sys-ease), background-color 160ms var(--sys-ease);
 }
@@ -469,15 +474,15 @@
 }
 
 .mobile-bottom-nav__icon {
-  width: var(--sys-mobile-icon-size);
-  height: var(--sys-mobile-icon-size);
+  width: var(--sys-mobile-nav-icon-size);
+  height: var(--sys-mobile-nav-icon-size);
 }
 
 .mobile-bottom-nav__label {
   overflow: hidden;
   max-width: 100%;
   padding-inline: 0.125rem;
-  font-size: 0.5625rem;
+  font-size: var(--sys-mobile-nav-label-size);
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0.1em;

@@ -3,7 +3,12 @@ const { currentTrack } = usePlayer()
 const { open, query } = useQuickSearch()
 
 const searchExpanded = ref(false)
+const searchShell = ref<HTMLElement | null>(null)
 const searchInput = ref<HTMLInputElement | null>(null)
+
+onClickOutside(searchShell, () => {
+  if (searchExpanded.value) collapseSearch()
+})
 
 async function expandSearch() {
   query.value = ''
@@ -30,6 +35,7 @@ watch(open, (isOpen) => {
   <div class="mobile-dock" :class="{ 'mobile-dock--with-player': currentTrack }">
     <div
       v-if="!open"
+      ref="searchShell"
       class="mobile-quick-search-shell"
       :class="searchExpanded ? 'mobile-quick-search-shell--expanded' : 'mobile-quick-search-shell--idle'"
     >
