@@ -4,12 +4,14 @@
 // and composables/useTheme.ts).
 // ============================================================
 
+import { applyTheme, readStoredTheme } from '~/composables/useTheme'
+
 export default defineNuxtRouteMiddleware(() => {
   if (import.meta.client) {
-    const stored = localStorage.getItem('systema:theme')
-    const theme = stored === 'premium' || stored === 'dark' ? stored : 'default'
-    const el = document.documentElement
-    el.dataset.theme = theme
-    el.classList.toggle('dark', theme === 'dark')
+    try {
+      applyTheme(readStoredTheme())
+    } catch {
+      /* never break navigation on theme sync */
+    }
   }
 })

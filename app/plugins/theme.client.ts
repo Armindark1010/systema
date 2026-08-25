@@ -1,12 +1,15 @@
 // ============================================================
 // Apply the persisted SYSTEMA theme before first paint to
-// avoid a flash of the wrong theme.
+// avoid a flash of the wrong theme. Storage is guarded —
+// the app must never fail to boot on blocked storage.
 // ============================================================
 
+import { applyTheme, readStoredTheme } from '~/composables/useTheme'
+
 export default defineNuxtPlugin(() => {
-  const stored = localStorage.getItem('systema:theme')
-  const theme = stored === 'premium' || stored === 'dark' ? stored : 'default'
-  const el = document.documentElement
-  el.dataset.theme = theme
-  el.classList.toggle('dark', theme === 'dark')
+  try {
+    applyTheme(readStoredTheme())
+  } catch {
+    /* never block app startup on theme application */
+  }
 })
