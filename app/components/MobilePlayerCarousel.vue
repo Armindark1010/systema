@@ -16,6 +16,7 @@ const { getAlbum, getArtist, formatDuration } = useMusicLibrary()
 
 const scroller = ref<HTMLElement | null>(null)
 let settleTimer: ReturnType<typeof setTimeout> | null = null
+let gestureStart: { x: number; y: number } | null = null
 
 function coverFor(albumId: string) {
   return getAlbum(albumId)?.cover
@@ -60,6 +61,31 @@ function settleOnNearestCard() {
   }
 }
 
+function onGestureStart(event: TouchEvent) {
+  const touch = event.touches[0]
+  if (!touch) return
+  gestureStart = { x: touch.clientX, y: touch.clientY }
+}
+
+function onGestureEnd(event: TouchEvent) {
+  const touch = event.changedTouches[0]
+  if (!touch || !gestureStart) return
+
+  const deltaX = touch.clientX - gestureStart.x
+  const deltaY = touch.clientY - gestureStart.y
+  gestureStart = null
+
+  // Vertical intent opens the full player; horizontal intent stays with
+  // the native queue carousel.
+  if (deltaY < -52 && Math.abs(deltaY) > Math.abs(deltaX) * 1.15) {
+    openFullPlayer()
+  }
+}
+
+function cancelGesture() {
+  gestureStart = null
+}
+
 function onScroll() {
   if (settleTimer) clearTimeout(settleTimer)
   settleTimer = setTimeout(settleOnNearestCard, 110)
@@ -93,7 +119,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="mobile-player-carousel" aria-label="Now playing queue">
+  <section
+    class="mobile-player-carousel"
+    aria-label="Now playing queue. Swipe up to open the full player."
+    @touchstart.passive="onGestureStart"
+    @touchend.passive="onGestureEnd"
+    @touchcancel.passive="cancelGesture"
+  >
     <div
       ref="scroller"
       class="mobile-player-carousel__track no-scrollbar"

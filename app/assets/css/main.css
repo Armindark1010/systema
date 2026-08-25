@@ -321,6 +321,7 @@
 .mobile-player-carousel {
   width: 100%;
   overflow: hidden;
+  touch-action: pan-x;
 }
 
 .mobile-player-carousel__track {
@@ -407,6 +408,35 @@
 .mobile-player-card__progress > span {
   border-radius: inherit;
   transition: width 500ms linear;
+}
+
+.mobile-full-player-handle {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  min-height: calc(28px + env(safe-area-inset-top));
+  padding-top: env(safe-area-inset-top);
+  background: color-mix(in srgb, var(--sys-surface) 78%, transparent);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  touch-action: none;
+}
+
+.mobile-full-player-sheet--dragging {
+  user-select: none;
+  will-change: transform;
+}
+
+@media (max-width: 767px) {
+  .mobile-full-player-sheet {
+    overscroll-behavior-y: contain;
+    animation: mobile-full-player-in 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+@keyframes mobile-full-player-in {
+  from { transform: translate3d(0, 100%, 0); }
+  to { transform: translate3d(0, 0, 0); }
 }
 
 .mobile-liquid-nav {
