@@ -15,9 +15,6 @@ withDefaults(defineProps<{
     <div class="library-hero__emo">
       <EmoCompanion
         :expression="expression"
-        :is-playing="false"
-        :energy="0.4"
-        mood="FOCUSED"
         :message="message"
       />
     </div>

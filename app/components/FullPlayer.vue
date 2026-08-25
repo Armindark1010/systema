@@ -153,7 +153,7 @@ function onMoreAction(action: string) {
       showPlaylistPicker.value = true
       break
     case 'queue':
-      if (currentTrack.value) queue.value = [...queue.value, { track: currentTrack.value, context: 'QUEUE' }]
+      if (currentTrack.value) player.addToQueue(currentTrack.value)
       break
     case 'artist':
       if (currentTrack.value) {

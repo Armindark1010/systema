@@ -24,14 +24,11 @@ const { toggleFavorite: toggleLibraryFavorite } = useMusicLibrary()
 
 function onPlay(t: Track) {
   const idx = props.tracks.findIndex((x) => x.id === t.id)
-  const alreadyInQueue = player.queue.value.some((q) => q.track.id === t.id)
+  const alreadyInQueue = player.queue.value.some((q: any) => (q.track ? q.track.id : q.id) === t.id)
   if (alreadyInQueue) {
     player.playTrack(t, props.context)
   } else {
-    player.playQueue(
-      props.tracks.map((track) => ({ track, context: props.context })),
-      idx,
-    )
+    player.playQueue(props.tracks, idx)
   }
 }
 
