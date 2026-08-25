@@ -18,6 +18,7 @@
    we import its entry, but all SYSTEMA application styling is UnoCSS. */
 @import "tailwindcss";
 @import "@nuxt/ui";
+@import "./emo-prototype.css";
 
 /* ------------------------------------------------------------
    1. FONTS
