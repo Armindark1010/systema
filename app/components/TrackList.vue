@@ -44,7 +44,7 @@ function onFavorite(id: string) {
     <!-- column header -->
     <div
       v-if="showHeader"
-      class="hidden sm:grid grid items-center gap-3 h-8 px-2 bg-muted border-b border-line text-[10px] font-bold tracking-[0.14em] text-fg-faint uppercase"
+      class="hidden sm:flex items-center gap-3 h-8 px-2 bg-muted border-b border-line text-[10px] font-bold tracking-[0.14em] text-fg-faint uppercase"
       aria-hidden="true"
     >
       <span class="w-6 shrink-0 text-right">#</span>
