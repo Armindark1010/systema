@@ -1,45 +1,56 @@
 <script setup lang="ts">
-// Mobile header — brand + quick actions (search / theme / settings)
-const { openPalette } = useQuickSearch()
-const { theme, cycleTheme } = useTheme()
+type Greeting = 'GOOD MORNING' | 'GOOD AFTERNOON' | 'GOOD EVENING'
 
-const THEME_LABEL: Record<string, string> = {
-  default: 'WHITE / STEEL',
-  premium: 'IVORY / GOLD',
-  dark: 'ONYX / SILVER',
+function greetingForHour(hour: number): Greeting {
+  if (hour >= 5 && hour < 12) return 'GOOD MORNING'
+  if (hour >= 12 && hour < 18) return 'GOOD AFTERNOON'
+  return 'GOOD EVENING'
 }
+
+const greeting = useState<Greeting>(
+  'mobile-header-greeting',
+  () => greetingForHour(new Date().getHours()),
+)
+
+let greetingTimer: ReturnType<typeof setInterval> | undefined
+
+function updateGreeting() {
+  greeting.value = greetingForHour(new Date().getHours())
+}
+
+onMounted(() => {
+  updateGreeting()
+  greetingTimer = setInterval(updateGreeting, 60_000)
+})
+
+onBeforeUnmount(() => {
+  if (greetingTimer) clearInterval(greetingTimer)
+})
 </script>
 
 <template>
-  <header class="lg:hidden sticky top-0 z-30 h-14 bg-base/95 backdrop-blur-sm border-b border-line flex items-center px-4 gap-3">
-    <BrandMark compact />
-    <div class="flex-1" />
-    <button
-      class="pressable focus-ring w-9 h-9 grid place-items-center text-fg-muted hover:text-fg"
-      aria-label="Quick search"
-      @click="openPalette()"
-    >
-      <UIcon name="lucide:search" class="w-4.5 h-4.5" />
-    </button>
-    <button
-      class="pressable focus-ring w-9 h-9 grid place-items-center text-fg-muted hover:text-fg"
-      :aria-label="`Theme: ${THEME_LABEL[theme]}`"
-      :title="`THEME — ${THEME_LABEL[theme]}`"
-      @click="cycleTheme()"
-    >
-      <span class="grid grid-cols-2 gap-[2px] w-3.5 h-3.5 border border-line" aria-hidden="true">
-        <span class="bg-primary" />
-        <span class="bg-fg" />
-        <span class="bg-line-strong" />
-        <span class="bg-primary-muted" />
-      </span>
-    </button>
-    <NuxtLink
-      to="/settings"
-      class="pressable focus-ring w-9 h-9 grid place-items-center text-fg-muted hover:text-fg"
-      aria-label="Settings"
-    >
-      <UIcon name="lucide:sliders-horizontal" class="w-4.5 h-4.5" />
-    </NuxtLink>
+  <header class="lg:hidden sticky top-0 z-30 bg-base px-4 pt-3 pb-3">
+    <div class="sys-panel rounded-3 shadow-1 px-5 py-5">
+      <div class="flex items-center justify-between">
+        <BrandMark compact />
+
+        <NuxtLink
+          to="/settings"
+          class="pressable focus-ring w-7 h-7 grid place-items-center text-fg-muted hover:text-fg"
+          aria-label="Settings"
+        >
+          <UIcon name="lucide:sliders-horizontal" class="w-4 h-4" />
+        </NuxtLink>
+      </div>
+
+      <div class="mt-6">
+        <p class="text-h2 font-semibold text-fg" aria-live="polite">
+          {{ greeting }}
+        </p>
+        <p class="mt-2 label text-fg">
+          YOUR MUSIC SYSTEM
+        </p>
+      </div>
+    </div>
   </header>
 </template>
