@@ -86,6 +86,9 @@ export default defineNuxtConfig({
     build: {
       cssMinify: 'esbuild',
     },
+    server: {
+      allowedHosts: true,
+    },
   },
   postcss: {
     plugins: {
