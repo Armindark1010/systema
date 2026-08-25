@@ -1,66 +1,160 @@
 <script setup lang="ts">
-// Library — archive behavior
-import type { LibrarySort, ViewMode } from '~/types'
+import type { ArtworkPreference, LibraryDefaultSort } from '~/types/settings'
+import { librarySortOptions, useLibraryStore } from '~/stores/library'
+import { useSettingsStore } from '~/stores/settings'
 
-const settings = reactive({
-  defaultView: 'list' as ViewMode,
-  defaultSort: 'title' as LibrarySort,
-  ignoreArticles: true,
-  artworkProvider: 'LOCAL',
+const settings = useSettingsStore()
+const library = useLibraryStore()
+
+const sortOptions = [
+  { value: 'recently-added' as LibraryDefaultSort, label: 'RECENTLY ADDED' },
+  { value: 'alphabetical' as LibraryDefaultSort, label: 'ALPHABETICAL' },
+  { value: 'artist' as LibraryDefaultSort, label: 'ARTIST' },
+  { value: 'album' as LibraryDefaultSort, label: 'ALBUM' },
+  { value: 'duration' as LibraryDefaultSort, label: 'DURATION' },
+]
+
+const artworkOptions = [
+  { value: 'embedded' as ArtworkPreference, label: 'EMBEDDED' },
+  { value: 'external' as ArtworkPreference, label: 'EXTERNAL' },
+  { value: 'placeholder' as ArtworkPreference, label: 'PLACEHOLDER' },
+]
+
+watch(() => settings.library.defaultSort, (value) => {
+  const map: Record<LibraryDefaultSort, typeof library.sortBy.value> = {
+    'recently-added': 'recently-added',
+    alphabetical: 'title',
+    artist: 'artist',
+    album: 'album',
+    duration: 'duration',
+  }
+  library.setSortBy(map[value])
 })
-
-const toast = useToast()
 </script>
 
 <template>
-  <SettingsSection id="library" index="03" label="LIBRARY" description="ARCHIVE BEHAVIOR — MEDIASTORE SCAN LATER">
-    <div class="border border-line divide-y divide-line">
-      <SettingRow label="DEFAULT VIEW" description="HOW THE TRACKS ARCHIVE OPENS.">
-        <div class="flex border border-line" role="radiogroup" aria-label="Default view">
-          <button
-            v-for="v in (['list', 'grid'] as const)"
-            :key="v"
-            class="h-8 px-3 text-[10px] font-bold tracking-[0.14em] t-all pressable focus-ring"
-            :class="settings.defaultView === v ? 'bg-primary text-primary-fg' : 'text-fg-muted hover:text-fg'"
-            role="radio"
-            :aria-checked="settings.defaultView === v"
-            @click="settings.defaultView = v"
-          >
-            {{ v.toUpperCase() }}
+  <div class="space-y-10">
+    <SettingsSection id="music-library" index="01" label="MUSIC LIBRARY" description="ARCHIVE DISCOVERY">
+      <div class="border border-line divide-y divide-line">
+        <SettingRow
+          label="AUTO SCAN"
+          description="AUTOMATICALLY DETECT NEW MUSIC FILES."
+          coming-soon="REQUIRES MEDIASTORE — NOT AVAILABLE IN THIS BUILD"
+        >
+          <USwitch
+            :model-value="settings.library.autoScan"
+            aria-label="Auto scan"
+            @update:model-value="(value: boolean) => settings.patchLibrary({ autoScan: value })"
+          />
+        </SettingRow>
+        <SettingRow
+          label="SCAN ON STARTUP"
+          description="RESYNC THE INDEX WHEN SYSTEMA OPENS."
+          coming-soon="REQUIRES MEDIASTORE — NOT AVAILABLE IN THIS BUILD"
+        >
+          <USwitch
+            :model-value="settings.library.scanOnStartup"
+            aria-label="Scan on startup"
+            @update:model-value="(value: boolean) => settings.patchLibrary({ scanOnStartup: value })"
+          />
+        </SettingRow>
+        <SettingRow
+          label="INCLUDE SUBDIRECTORIES"
+          description="WALK NESTED FOLDERS WHEN A NATIVE SCAN RUNS."
+        >
+          <USwitch
+            :model-value="settings.library.includeSubdirectories"
+            aria-label="Include subdirectories"
+            @update:model-value="(value: boolean) => settings.patchLibrary({ includeSubdirectories: value })"
+          />
+        </SettingRow>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection id="sorting" index="02" label="SORTING" description="DEFAULT ARCHIVE ORDER">
+      <div class="border border-line divide-y divide-line">
+        <SettingRow label="DEFAULT SORT" description="THE LIBRARY STORE OPENS WITH THIS ORDER. YOU CAN STILL CHANGE IT IN THE ARCHIVE.">
+          <SettingsSegmented
+            :model-value="settings.library.defaultSort"
+            :options="sortOptions"
+            aria-label="Default library sort"
+            compact
+            @update:model-value="value => settings.patchLibrary({ defaultSort: value })"
+          />
+        </SettingRow>
+        <SettingRow label="CURRENT LIBRARY ORDER" description="LIVE VALUE FROM THE LIBRARY STORE.">
+          <span class="label text-fg">{{ librarySortOptions.find(option => option.id === library.sortBy)?.label }}</span>
+        </SettingRow>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection id="metadata" index="03" label="METADATA" description="TAGS AND USER EDITS">
+      <div class="border border-line divide-y divide-line">
+        <SettingRow
+          label="READ EMBEDDED METADATA"
+          description="PREFER ID3 / VORBIS / MP4 ATOMS WHEN THE NATIVE PARSER RUNS."
+        >
+          <USwitch
+            :model-value="settings.library.readEmbeddedMetadata"
+            aria-label="Read embedded metadata"
+            @update:model-value="(value: boolean) => settings.patchLibrary({ readEmbeddedMetadata: value })"
+          />
+        </SettingRow>
+        <SettingRow
+          label="AUTO FETCH ARTWORK"
+          description="ALLOW A NETWORK FALLBACK ONLY WHEN EMBEDDED ART IS MISSING."
+          coming-soon="NETWORK ARTWORK IS NOT ACTIVE IN THIS BUILD"
+        >
+          <USwitch
+            :model-value="settings.library.autoFetchArtwork"
+            aria-label="Auto fetch artwork"
+            @update:model-value="(value: boolean) => settings.patchLibrary({ autoFetchArtwork: value })"
+          />
+        </SettingRow>
+        <SettingRow
+          label="PRESERVE USER EDITS"
+          description="MANUALLY EDITED METADATA IS NEVER OVERWRITTEN AUTOMATICALLY."
+        >
+          <USwitch
+            :model-value="settings.library.preserveUserEdits"
+            aria-label="Preserve user edits"
+            @update:model-value="(value: boolean) => settings.patchLibrary({ preserveUserEdits: value })"
+          />
+        </SettingRow>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection id="artwork" index="04" label="ARTWORK" description="COVER SOURCE PREFERENCE">
+      <div class="border border-line divide-y divide-line">
+        <SettingRow
+          label="ARTWORK SOURCE"
+          description="EMBEDDED FIRST, THEN EXTERNAL FILES, OR GENERATE A PLACEHOLDER. LOCAL PROCESSING COMES WITH THE NATIVE LAYER."
+        >
+          <SettingsSegmented
+            :model-value="settings.library.artworkPreference"
+            :options="artworkOptions"
+            aria-label="Artwork source"
+            @update:model-value="value => settings.patchLibrary({ artworkPreference: value })"
+          />
+        </SettingRow>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection id="scan" index="05" label="SCAN LIBRARY" description="MEDIASTORE">
+      <div class="border border-line">
+        <SettingRow
+          label="SCAN MUSIC LIBRARY"
+          description="A FULL DEVICE SCAN REQUIRES THE ANDROID MEDIASTORE ADAPTER."
+          coming-soon="NOT AVAILABLE IN THIS BUILD"
+        >
+          <button class="sys-btn-outline !h-8" disabled>
+            SCAN
           </button>
-        </div>
-      </SettingRow>
-      <SettingRow label="DEFAULT SORT" description="INITIAL SORTING OF THE TRACK LIST.">
-        <select
-          v-model="settings.defaultSort"
-          class="h-8 pl-3 pr-8 text-[11px] font-bold tracking-[0.12em] bg-surface border border-line text-fg-muted appearance-none cursor-pointer t-col focus-ring"
-          aria-label="Default sort"
-        >
-          <option value="title">TITLE</option>
-          <option value="artist">ARTIST</option>
-          <option value="album">ALBUM</option>
-          <option value="added">DATE ADDED</option>
-        </select>
-      </SettingRow>
-      <SettingRow label="IGNORE ARTICLES IN SORTING" description="‘THE’, ‘A’ — SKIPPED WHEN SORTING TITLES.">
-        <USwitch v-model="settings.ignoreArticles" aria-label="Ignore articles" />
-      </SettingRow>
-      <SettingRow label="ARTWORK PROVIDER" description="LOCAL EMBEDDED ART PREFERRED; NETWORK FALLBACK LATER.">
-        <select
-          v-model="settings.artworkProvider"
-          class="h-8 pl-3 pr-8 text-[11px] font-bold tracking-[0.12em] bg-surface border border-line text-fg-muted appearance-none cursor-pointer t-col focus-ring"
-          aria-label="Artwork provider"
-        >
-          <option>LOCAL</option>
-          <option>NETWORK</option>
-          <option>HYBRID</option>
-        </select>
-      </SettingRow>
-      <SettingRow label="SCAN LIBRARY" description="FULL MEDIASTORE RESCAN — MOCK ACTION.">
-        <button class="sys-btn-outline !h-8" @click="toast.add({ title: 'Scan requested', description: 'MediaStore integration is planned — no native scan yet.', icon: 'lucide:info' })">
-          SCAN
-        </button>
-      </SettingRow>
-    </div>
-  </SettingsSection>
+        </SettingRow>
+      </div>
+      <SettingsNote>
+        NO MOCK SCANNER. WHEN THE NATIVE INDEX EXISTS, THIS BUTTON WILL SHOW REAL PROGRESS — FOR EXAMPLE 128 / 642.
+      </SettingsNote>
+    </SettingsSection>
+  </div>
 </template>

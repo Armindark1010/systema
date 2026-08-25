@@ -1,15 +1,14 @@
 // ============================================================
-// Keeps the document theme attributes in sync on every
-// navigation (defense-in-depth beside plugins/theme.client.ts
-// and composables/useTheme.ts).
+// Keeps document appearance attributes in sync on every
+// navigation (defense-in-depth beside plugins/theme.client.ts).
 // ============================================================
 
-import { applyTheme, readStoredTheme } from '~/composables/useTheme'
+import { applyAppearance, readStoredAppearance } from '~/composables/useAppearance'
 
 export default defineNuxtRouteMiddleware(() => {
   if (import.meta.client) {
     try {
-      applyTheme(readStoredTheme())
+      applyAppearance(readStoredAppearance())
     } catch {
       /* never break navigation on theme sync */
     }

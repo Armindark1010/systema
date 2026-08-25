@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // Compact mobile playback strip. Horizontal swipes move through the queue;
 // an upward swipe or metadata tap opens the full player.
+import { useSettingsStore } from '~/stores/settings'
+
 const {
   currentTrack,
   isPlaying,
@@ -38,6 +40,8 @@ function onTouchEnd(event: TouchEvent) {
     event.preventDefault()
     openFullPlayer()
   } else if (Math.abs(deltaX) > 48 && Math.abs(deltaX) > Math.abs(deltaY) * 1.15) {
+    const swipeEnabled = useSettingsStore().gestures.swipePlayer
+    if (!swipeEnabled) return
     event.preventDefault()
     if (deltaX < 0) next()
     else prev()

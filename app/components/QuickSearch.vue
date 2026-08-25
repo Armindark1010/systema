@@ -2,6 +2,7 @@
 // Desktop keeps the global command palette. Mobile presents the same search
 // architecture as a dedicated, full-screen workspace.
 import { pageIndex, isSemanticQuery } from '~/data/search'
+import { useSettingsStore } from '~/stores/settings'
 
 const { open, query, closePalette } = useQuickSearch()
 const search = useSearch()
@@ -72,7 +73,7 @@ const groups = computed<Group[]>(() => {
   const result: Group[] = []
 
   if (q) {
-    if (isSemanticQuery(q)) {
+    if (isSemanticQuery(q) && useSettingsStore().ai.enabled) {
       const id = 'ai-search'
       register(id, () => {
         closePalette()
@@ -126,19 +127,22 @@ const groups = computed<Group[]>(() => {
     }
 
     if (!result.length) {
-      const id = 'ai-fallback'
-      register(id, () => {
-        closePalette()
-        navigateTo(`/ai/search?q=${encodeURIComponent(q)}`)
-      })
+      const aiOn = useSettingsStore().ai.enabled
+      const id = aiOn ? 'ai-fallback' : 'empty'
+      if (aiOn) {
+        register(id, () => {
+          closePalette()
+          navigateTo(`/ai/search?q=${encodeURIComponent(q)}`)
+        })
+      }
       result.push({
         id: 'empty',
         label: 'NO MATCHES',
         items: [{
           id,
-          label: 'Try an AI semantic search',
+          label: aiOn ? 'Try an AI semantic search' : 'No matches in the archive',
           description: `“${q}”`,
-          icon: 'lucide:sparkles',
+          icon: aiOn ? 'lucide:sparkles' : 'lucide:search',
         }],
       })
     }

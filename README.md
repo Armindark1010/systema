@@ -58,8 +58,14 @@ app/
 /ai/search            Semantic search with staged engine states
 /ai/generate          Playlist generation pipeline
 /ai/insights          Your music profile
-/settings             8 categories (appearance · playback · library · ai ·
-                      import/export · storage · privacy · about)
+/settings             Control center — 7 configuration surfaces
+/settings/appearance  Theme · accent · density · motion · typography
+/settings/playback    Transport + audio engine contract
+/settings/library     Archive, metadata, artwork, scan
+/settings/ai          Intelligence, analysis policy, privacy
+/settings/gestures    Player / queue / long-press
+/settings/data        Import · export · cache · reset
+/settings/about       Architecture + version
 ```
 
 ### Application shell
@@ -110,7 +116,7 @@ without frontend rewrites:
 | useMusicLibrary  | MediaStore + Room (SQLite)                     |
 | usePlaylists     | Room + native file system (import/export)      |
 | useAI            | ONNX Runtime local inference / WorkManager     |
-| useTheme         | (stays frontend — token swap)                  |
+| useTheme / settings | (stays frontend — token swap + Pinia persistence) |
 
 Everything is currently mock state; AI pipelines simulate staged states
 (UNDERSTANDING → SEARCHING → RANKING, ANALYZING → … → FINALIZING).

@@ -9,6 +9,7 @@
 import type { AIGenPhase, AIGenerationForm, AISearchPhase, AnalysisMode, AnalysisState, Track } from '~/types'
 import { aiSearchStages } from '~/data/ai'
 import { tracks as catalog } from '~/data/music'
+import { useSettingsStore } from '~/stores/settings'
 
 // ---- AI search ----------------------------------------------------------
 const searchQuery = ref('')
@@ -47,7 +48,16 @@ let analysisTimer: ReturnType<typeof setInterval> | null = null
 
 export function useAI() {
   // ---------------- AI search ----------------
+  function isEnabled() {
+    try {
+      return useSettingsStore().ai.enabled
+    } catch {
+      return true
+    }
+  }
+
   function runSearch(q: string) {
+    if (!isEnabled()) return
     searchQuery.value = q
     searchPhase.value = 'understanding'
     searchStageIndex.value = 0
@@ -84,6 +94,7 @@ export function useAI() {
 
   // ---------------- generation ----------------
   function runGeneration() {
+    if (!isEnabled()) return
     genPhase.value = 'analyzing'
     genStageIndex.value = 0
     genProgress.value = 0
@@ -115,6 +126,7 @@ export function useAI() {
 
   // ---------------- analysis ----------------
   function startAnalysis() {
+    if (!isEnabled()) return
     if (analysis.value.running) return
     analysis.value.running = true
     if (analysisTimer) clearInterval(analysisTimer)
@@ -137,7 +149,19 @@ export function useAI() {
     analysis.value.mode = mode
   }
 
+  function reset() {
+    resetSearch()
+    resetGeneration()
+    if (analysisTimer) clearInterval(analysisTimer)
+    analysisTimer = null
+    analysis.value.running = false
+    analysis.value.analyzed = 0
+    analysis.value.progress = 0
+  }
+
   return {
+    enabled: computed(() => isEnabled()),
+    reset,
     search: {
       query: searchQuery,
       phase: searchPhase,

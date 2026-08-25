@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { Track } from '~/types'
+import { useSettingsStore } from '~/stores/settings'
 
 export interface AIMessage {
   id: string
@@ -148,7 +149,16 @@ export function usePlayerAI() {
   }
 
   /** Opens a fresh, local AI session for the supplied current-track id. */
+  function isAIEnabled() {
+    try {
+      return useSettingsStore().ai.enabled
+    } catch {
+      return true
+    }
+  }
+
   function openAI(trackId?: string) {
+    if (!isAIEnabled()) return
     const active = currentTrack.value
     if (!active || (trackId && active.id !== trackId)) return
     startSession(active)

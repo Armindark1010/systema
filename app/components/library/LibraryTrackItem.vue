@@ -12,7 +12,34 @@ defineProps<{
 const emit = defineEmits<{
   play: []
   actions: []
+  longpress: []
 }>()
+
+let holdTimer: ReturnType<typeof setTimeout> | null = null
+let holdFired = false
+
+function clearHold() {
+  if (holdTimer) clearTimeout(holdTimer)
+  holdTimer = null
+}
+
+function onPressStart() {
+  holdFired = false
+  clearHold()
+  holdTimer = setTimeout(() => {
+    holdFired = true
+    emit('longpress')
+  }, 420)
+}
+
+function onPressEnd() {
+  clearHold()
+}
+
+function onPlayClick() {
+  if (holdFired) return
+  emit('play')
+}
 </script>
 
 <template>

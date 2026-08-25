@@ -6,7 +6,10 @@
 // grid, spacing, typography and alignment discipline.
 // ============================================================
 
+import { useSettingsStore } from '~/stores/settings'
+
 const route = useRoute()
+const settings = useSettingsStore()
 
 const tabs = [
   { label: 'STUDIO', to: '/ai' },
@@ -45,6 +48,17 @@ function isActive(to: string): boolean {
             {{ t.label }}
           </NuxtLink>
         </nav>
+      </div>
+
+      <div v-if="!settings.ai.enabled" class="sys-container mt-6">
+        <div class="border border-ai-line bg-ai-muted px-4 py-4">
+          <p class="label text-ai-fg-faint">AI FEATURES DISABLED</p>
+          <p class="mt-2 text-small text-ai-fg-muted max-w-[56ch]">
+            Intelligence interactions are off. Stored analysis is kept.
+            Re-enable from Settings → AI.
+          </p>
+          <NuxtLink to="/settings/ai" class="ai-btn-outline mt-4">OPEN AI SETTINGS</NuxtLink>
+        </div>
       </div>
 
       <slot />

@@ -2,6 +2,8 @@
 // useTrackAnalysis — fake AI analysis with states
 // ============================================================
 
+import { useSettingsStore } from '~/stores/settings'
+
 export type AnalysisStatus = 'not-analyzed' | 'analyzing' | 'analyzed' | 'error'
 
 export interface TrackAnalysis {
@@ -93,6 +95,13 @@ export function useTrackAnalysis() {
   }
 
   function analyzeTrack(trackId: string, force = false): Promise<TrackAnalysis> {
+    try {
+      if (!useSettingsStore().ai.enabled) {
+        return Promise.reject(new Error('AI features disabled'))
+      }
+    } catch {
+      /* settings store unavailable — continue */
+    }
     const existing = ANALYSIS_DB.get(trackId)
 
     if (existing && existing.status === 'analyzing') {
@@ -147,6 +156,14 @@ export function useTrackAnalysis() {
     return analyzeTrack(currentTrack.value.id, force)
   }
 
+  function cachedCount() {
+    return ANALYSIS_DB.size
+  }
+
+  function clearCache() {
+    ANALYSIS_DB.clear()
+  }
+
   return {
     currentAnalysis,
     status,
@@ -155,6 +172,8 @@ export function useTrackAnalysis() {
     getAnalysis,
     analyzeTrack,
     analyzeCurrent,
+    cachedCount,
+    clearCache,
     db: ANALYSIS_DB,
   }
 }

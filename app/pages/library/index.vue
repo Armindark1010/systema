@@ -13,6 +13,7 @@ import type { Album, Artist, Playlist, Track } from '~/types'
 import type { EmoExpression } from '~/types/emo'
 import type { LibraryAction } from '~/components/library/LibraryActionsSheet.vue'
 import { librarySections, librarySortOptions, type LibrarySection, type LibrarySortKey } from '~/stores/library'
+import { useSettingsStore } from '~/stores/settings'
 
 useHead({ title: 'Library' })
 definePageMeta({ hideMobileHeader: true })
@@ -120,6 +121,22 @@ function selectTrack(track: Track) {
 function openActions(kind: 'track' | 'album' | 'artist' | 'playlist', item: Track | Album | Artist | Playlist) {
   selectedAction.value = { kind, item } as NonNullable<typeof selectedAction.value>
   react(kind === 'playlist' ? 'happy' : 'curious', 'ACTIONS')
+}
+
+function onTrackLongPress(track: Track) {
+  const target = useSettingsStore().gestures.longPress
+  if (target === 'queue') {
+    player.addToQueue(track)
+    toast.add({ title: 'Added to queue', description: track.title, icon: 'lucide:list-music' })
+    react('curious', 'QUEUED')
+    return
+  }
+  if (target === 'playlist') {
+    addTracksToDefaultPlaylist([track])
+    react('happy', 'PLAYLIST')
+    return
+  }
+  openActions('track', track)
 }
 
 const actionTitle = computed(() => {
@@ -328,6 +345,7 @@ function isPaneVisible(paneIndex: number) {
                 :format-duration="formatDuration"
                 @play="selectTrack"
                 @actions="track => openActions('track', track)"
+                @longpress="onTrackLongPress"
               />
             </div>
 
