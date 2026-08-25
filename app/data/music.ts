@@ -51,6 +51,8 @@ export const artists: Artist[] = [
 // ------------------------------------------------------------
 export const albums: Album[] = [
   { id: 'al-blueprint', title: 'Blueprint 01', artistId: 'a-sys', year: 2025, genreId: 'g-electronic', cover: '/art/blueprint-01.jpg' },
+  { id: 'al-systema-night', title: 'Night Drive', artistId: 'a-sys', year: 2025, genreId: 'g-electronic', cover: '/art/night-drive.jpg' },
+  { id: 'al-systema-echoes', title: 'Architectural Echoes', artistId: 'a-sys', year: 2025, genreId: 'g-electronic', cover: '/art/deep-focus.jpg' },
   { id: 'al-outrun', title: 'OutRun', artistId: 'a-kavinsky', year: 2013, genreId: 'g-synthwave', cover: '/art/outrun.jpg' },
   { id: 'al-ram', title: 'Random Access Memories', artistId: 'a-daftpunk', year: 2013, genreId: 'g-electronic', cover: '/art/random-access-memories.jpg' },
   { id: 'al-huwd', title: "Hurry Up, We're Dreaming", artistId: 'a-m83', year: 2011, genreId: 'g-synthwave', cover: '/art/hurry-up-were-dreaming.jpg' },
@@ -112,6 +114,9 @@ const seeds: TrackSeed[] = [
   ['tr-34', 'Aquarius', 'a-boc', 'al-boc', 'g-ambient', 356, 1998, 40, 'dreamy', 'inst', 1344, false],
   ['tr-35', 'Acid Rain', 'a-lorn', 'al-lorn', 'g-darksynth', 247, 2012, 66, 'dark', 'inst', 2180, false],
   ['tr-36', 'Ghosst(s)', 'a-lorn', 'al-lorn', 'g-darksynth', 239, 2012, 58, 'dark', 'inst', 967, false],
+  // Dedicated prototype navigation companions for the full player.
+  ['tr-37', 'Night Drive', 'a-sys', 'al-systema-night', 'g-electronic', 242, 2025, 69, 'focused', 'inst', 768, false],
+  ['tr-38', 'Architectural Echoes', 'a-sys', 'al-systema-echoes', 'g-electronic', 268, 2025, 61, 'dreamy', 'inst', 644, false],
 ]
 
 function buildTracks(): Track[] {

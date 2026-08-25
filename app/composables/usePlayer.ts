@@ -22,16 +22,30 @@ const queueOpen = ref(false)
 const fullPlayerOpen = ref(false)
 const favorites = ref<Set<string>>(new Set())
 
-// --- ticker: simulates playback time (no audio engine) ------------
+// --- ticker: simulates an audio clock (no audio engine) ------------
+// `progressMs` is deliberately the only playback position source. The
+// high-frequency clock mirrors an audio element's currentTime closely enough
+// for precise scrubbing and lyrics sync, rather than visually faking progress.
 let ticker: ReturnType<typeof setInterval> | null = null
+let tickerLastAt = 0
 let advanceQueue: (() => void) | null = null
+
+function nowMs() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now()
+}
 
 function startTicker() {
   if (ticker) return
+  tickerLastAt = nowMs()
   ticker = setInterval(() => {
     const current = queue.value[index.value]
     if (!current) return
-    progressMs.value += 1000
+
+    const now = nowMs()
+    const elapsed = Math.max(0, now - tickerLastAt)
+    tickerLastAt = now
+    progressMs.value += elapsed
+
     if (progressMs.value >= current.track.duration * 1000) {
       if (repeat.value === 'one') {
         progressMs.value = 0
@@ -39,7 +53,7 @@ function startTicker() {
         advanceQueue?.()
       }
     }
-  }, 1000)
+  }, 250)
 }
 
 function stopTicker() {
@@ -47,6 +61,7 @@ function stopTicker() {
     clearInterval(ticker)
     ticker = null
   }
+  tickerLastAt = 0
 }
 
 export function usePlayer() {
@@ -189,6 +204,29 @@ export function usePlayer() {
     stopTicker()
   }
 
+  /**
+   * The full-player prototype needs a real navigation destination even when
+   * a track was launched as a one-item queue (for example from Search).
+   * Existing playlists/albums are never replaced; only a lone item receives
+   * the local SYSTEMA companion tracks.
+   */
+  function ensureFullPlayerNavigation() {
+    const current = currentTrack.value
+    if (!current || queue.value.length > 1) return
+
+    const companionIds = ['tr-01', 'tr-37', 'tr-38']
+    const companions = companionIds
+      .filter(id => id !== current.id)
+      .map(id => catalog.find(track => track.id === id))
+      .filter((track): track is Track => Boolean(track))
+      .map(track => ({ track, context: 'SYSTEMA FULL PLAYER' }))
+
+    if (companions.length) {
+      queue.value = [{ track: current, context: queue.value[0]?.context ?? 'SYSTEMA FULL PLAYER' }, ...companions]
+      index.value = 0
+    }
+  }
+
   function openFullPlayer() {
     fullPlayerOpen.value = true
     queueOpen.value = false
@@ -227,6 +265,7 @@ export function usePlayer() {
     toggleMute: () => (muted.value = !muted.value),
     removeFromQueue,
     clearQueue,
+    ensureFullPlayerNavigation,
     openFullPlayer,
     setQueueOpen: (v: boolean) => (queueOpen.value = v),
     setFullPlayerOpen: (v: boolean) => (fullPlayerOpen.value = v),

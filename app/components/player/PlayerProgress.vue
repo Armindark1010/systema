@@ -1,9 +1,6 @@
 <script setup lang="ts">
 // ============================================================
-// PlayerProgress — immersive minimal scrubber
-// ============================================================
-// Requirements: scrubbable, keyboard accessible, touch friendly,
-// smooth updates, semantic range input, minimal visual.
+// PlayerProgress — precise, pointer-first playback scrubber
 // ============================================================
 
 const props = defineProps<{
@@ -17,6 +14,8 @@ const emit = defineEmits<{
 
 const isDragging = ref(false)
 const localPct = ref(0)
+const trackRef = ref<HTMLElement | null>(null)
+let activePointerId: number | null = null
 
 const pct = computed(() => {
   if (!props.durationMs) return 0
@@ -26,104 +25,94 @@ const pct = computed(() => {
 const displayPct = computed(() => isDragging.value ? localPct.value : pct.value)
 
 function formatMs(ms: number): string {
-  const s = Math.floor(ms / 1000)
-  const m = Math.floor(s / 60)
-  const sec = s % 60
-  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+  const seconds = Math.max(0, Math.floor(ms / 1000))
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 }
 
 const currentLabel = computed(() => formatMs(props.currentMs))
 const durationLabel = computed(() => formatMs(props.durationMs))
 
-const trackRef = ref<HTMLElement | null>(null)
-
-function pctFromEvent(e: MouseEvent | TouchEvent): number {
-  if (!trackRef.value) return 0
-  const rect = trackRef.value.getBoundingClientRect()
-  const clientX = 'touches' in e ? e.touches[0]!.clientX : (e as MouseEvent).clientX
-  const x = clientX - rect.left
-  return Math.min(100, Math.max(0, (x / rect.width) * 100))
+function pctFromPointer(event: PointerEvent): number {
+  const rect = trackRef.value?.getBoundingClientRect()
+  if (!rect?.width) return 0
+  return Math.min(100, Math.max(0, ((event.clientX - rect.left) / rect.width) * 100))
 }
 
-function onPointerDown(e: MouseEvent | TouchEvent) {
+function seekToPointer(event: PointerEvent) {
+  localPct.value = pctFromPointer(event)
+  // Emit immediately for both taps and drags. `progressMs` in usePlayer is
+  // the source of truth, so the timestamp, lyrics, and visual position agree.
+  emit('seek', (localPct.value / 100) * props.durationMs)
+}
+
+function onPointerDown(event: PointerEvent) {
+  if (!props.durationMs || (event.pointerType === 'mouse' && event.button !== 0)) return
+  activePointerId = event.pointerId
   isDragging.value = true
-  localPct.value = pctFromEvent(e)
-  // prevent scroll on touch
-  if ('touches' in e) e.preventDefault()
+  trackRef.value?.setPointerCapture?.(event.pointerId)
+  seekToPointer(event)
 }
 
-function onPointerMove(e: MouseEvent | TouchEvent) {
-  if (!isDragging.value) return
-  localPct.value = pctFromEvent(e)
+function onPointerMove(event: PointerEvent) {
+  if (!isDragging.value || event.pointerId !== activePointerId) return
+  seekToPointer(event)
 }
 
-function onPointerUp() {
-  if (!isDragging.value) return
+function finishPointer(event: PointerEvent) {
+  if (!isDragging.value || event.pointerId !== activePointerId) return
+  if (trackRef.value?.hasPointerCapture?.(event.pointerId)) trackRef.value.releasePointerCapture(event.pointerId)
+  activePointerId = null
   isDragging.value = false
-  const ms = (localPct.value / 100) * props.durationMs
-  emit('seek', ms)
 }
 
-function onKeySeek(e: KeyboardEvent) {
-  const step = props.durationMs * 0.02 // 2%
+function onKeySeek(event: KeyboardEvent) {
+  if (!props.durationMs) return
+  const fineStep = 1000
+  const coarseStep = 15000
+  const step = event.shiftKey ? coarseStep : fineStep
   let next = props.currentMs
-  if (e.key === 'ArrowLeft') next -= step
-  if (e.key === 'ArrowRight') next += step
-  if (e.key === 'Home') next = 0
-  if (e.key === 'End') next = props.durationMs
-  next = Math.max(0, Math.min(props.durationMs, next))
-  emit('seek', next)
+
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') next -= step
+  else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') next += step
+  else if (event.key === 'PageDown') next -= coarseStep
+  else if (event.key === 'PageUp') next += coarseStep
+  else if (event.key === 'Home') next = 0
+  else if (event.key === 'End') next = props.durationMs
+  else return
+
+  event.preventDefault()
+  emit('seek', Math.max(0, Math.min(props.durationMs, next)))
 }
-
-onMounted(() => {
-  window.addEventListener('mousemove', onPointerMove as any)
-  window.addEventListener('mouseup', onPointerUp)
-  window.addEventListener('touchmove', onPointerMove as any, { passive: false })
-  window.addEventListener('touchend', onPointerUp)
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('mousemove', onPointerMove as any)
-  window.removeEventListener('mouseup', onPointerUp)
-  window.removeEventListener('touchmove', onPointerMove as any)
-  window.removeEventListener('touchend', onPointerUp)
-})
 </script>
 
 <template>
   <div class="player-progress">
-    <div class="player-progress-times">
-      <span class="player-progress-time">{{ currentLabel }}</span>
-      <span class="player-progress-time player-progress-time--duration">{{ durationLabel }}</span>
-    </div>
-
     <div
       ref="trackRef"
       class="player-progress-track"
+      :class="{ 'is-dragging': isDragging }"
       role="slider"
       :aria-valuemin="0"
       :aria-valuemax="durationMs"
-      :aria-valuenow="currentMs"
+      :aria-valuenow="Math.round(currentMs)"
+      :aria-valuetext="`${currentLabel} of ${durationLabel}`"
       :aria-label="`Seek, ${currentLabel} of ${durationLabel}`"
       tabindex="0"
-      @mousedown="onPointerDown"
-      @touchstart.passive="onPointerDown"
+      @pointerdown.stop="onPointerDown"
+      @pointermove.stop="onPointerMove"
+      @pointerup.stop="finishPointer"
+      @pointercancel.stop="finishPointer"
+      @lostpointercapture="(event) => finishPointer(event as PointerEvent)"
       @keydown="onKeySeek"
     >
       <div class="player-progress-rail" />
-      <div class="player-progress-fill" :style="{ width: displayPct + '%' }" />
-      <div class="player-progress-thumb" :style="{ left: displayPct + '%' }" />
-      <!-- native range for semantics, visually hidden but accessible -->
-      <input
-        type="range"
-        :min="0"
-        :max="durationMs"
-        :value="currentMs"
-        class="sr-only"
-        tabindex="-1"
-        aria-hidden="true"
-        @input="(e) => emit('seek', Number((e.target as HTMLInputElement).value))"
-      >
+      <div class="player-progress-fill" :style="{ width: `${displayPct}%` }" />
+      <div class="player-progress-thumb" :style="{ left: `${displayPct}%` }" />
+    </div>
+
+    <div class="player-progress-times" aria-hidden="true">
+      <span class="player-progress-time">{{ currentLabel }}</span>
+      <span class="player-progress-time player-progress-time--duration">{{ durationLabel }}</span>
     </div>
   </div>
 </template>
@@ -134,7 +123,8 @@ onBeforeUnmount(() => {
   padding-inline: var(--player-content-padding);
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.3rem;
+  flex-shrink: 0;
 }
 
 .player-progress-times {
@@ -157,7 +147,7 @@ onBeforeUnmount(() => {
 
 .player-progress-track {
   position: relative;
-  height: 28px;
+  height: 30px;
   display: flex;
   align-items: center;
   cursor: pointer;
@@ -183,7 +173,7 @@ onBeforeUnmount(() => {
   left: 0;
   height: var(--player-progress-height);
   background: var(--player-fg);
-  transition: width 120ms linear;
+  transition: width 80ms linear;
   pointer-events: none;
 }
 
@@ -197,8 +187,13 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   transform: translate(-50%, -50%);
   box-shadow: 0 1px 4px rgba(0,0,0,0.4);
-  transition: transform 160ms var(--player-ease-smooth), left 120ms linear;
+  transition: transform 160ms var(--player-ease-smooth), left 80ms linear;
   will-change: left, transform;
+}
+
+.player-progress-track.is-dragging .player-progress-fill,
+.player-progress-track.is-dragging .player-progress-thumb {
+  transition: none;
 }
 
 .player-progress-track:active .player-progress-thumb,
@@ -207,8 +202,6 @@ onBeforeUnmount(() => {
 }
 
 @media (min-width: 768px) {
-  .player-progress-track {
-    height: 32px;
-  }
+  .player-progress-track { height: 32px; }
 }
 </style>

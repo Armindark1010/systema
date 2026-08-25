@@ -123,10 +123,18 @@ const analysisLabel = computed(() => {
 .player-actions {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
+  justify-content: space-between;
+  gap: 0.4rem;
   padding-inline: var(--player-content-padding);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+@media (min-width: 420px) {
+  .player-actions {
+    justify-content: center;
+    gap: 0.5rem;
+  }
 }
 
 .player-action-btn {

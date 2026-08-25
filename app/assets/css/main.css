@@ -700,8 +700,11 @@
 
 /* mobile Search workspace */
 html.mobile-search-is-open,
-html.mobile-search-is-open body {
+html.mobile-search-is-open body,
+html.systema-player-open,
+html.systema-player-open body {
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .mobile-search-overlay {

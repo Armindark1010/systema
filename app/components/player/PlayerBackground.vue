@@ -38,6 +38,9 @@ const props = withDefaults(defineProps<{
     <!-- vertical gradient -->
     <div class="player-bg-gradient" />
 
+    <!-- a very low-intensity moving light, behind all UI layers -->
+    <div class="player-bg-light" />
+
     <!-- subtle vignette for depth -->
     <div class="player-bg-vignette" />
   </div>
@@ -82,6 +85,19 @@ const props = withDefaults(defineProps<{
   );
 }
 
+.player-bg-light {
+  position: absolute;
+  inset: -22%;
+  pointer-events: none;
+  opacity: 0.3;
+  background:
+    radial-gradient(32% 26% at 24% 26%, color-mix(in srgb, var(--player-accent) 24%, transparent), transparent 74%),
+    radial-gradient(30% 24% at 76% 72%, rgba(237, 240, 244, 0.1), transparent 75%);
+  mix-blend-mode: screen;
+  animation: player-soft-light 28s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
 .player-bg-vignette {
   position: absolute;
   inset: 0;
@@ -93,9 +109,17 @@ const props = withDefaults(defineProps<{
   );
 }
 
+@keyframes player-soft-light {
+  0% { transform: translate3d(-2%, -1%, 0) scale(1); }
+  50% { transform: translate3d(3%, 2%, 0) scale(1.03); }
+  100% { transform: translate3d(-1%, 4%, 0) scale(1.01); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .player-bg-art {
+  .player-bg-art,
+  .player-bg-light {
     transition: none;
+    animation: none;
   }
 }
 </style>
