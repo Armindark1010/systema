@@ -25,6 +25,8 @@ const filterOptions: { id: SearchFilterType; label: string }[] = [
   { id: 'albums', label: 'ALBUMS' },
   { id: 'artists', label: 'ARTISTS' },
   { id: 'playlists', label: 'PLAYLISTS' },
+  // Genre discovery remains an all-result query until genre-only results exist.
+  { id: 'all', label: 'GENRES' },
 ]
 </script>
 

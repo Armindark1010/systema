@@ -1,196 +1,23 @@
 <script setup lang="ts">
-// ============================================================
-// SearchInput — primary search input field
-// ============================================================
-// Features:
-// - Autofocus on open
-// - Responsive mobile keyboard handling (enterkeyhint="search")
-// - Clear button with accessible label
-// - Subtle mode indicator (TEXT / AI INTENT)
-// ============================================================
-
-const props = defineProps<{
-  modelValue: string
-  isSearching?: boolean
-  isSemantic?: boolean
-}>()
-
-const emit = defineEmits<{
-  'update:modelValue': [value: string]
-  submit: []
-  clear: []
-}>()
-
+const props = defineProps<{ modelValue: string; isSearching?: boolean; isSemantic?: boolean }>()
+const emit = defineEmits<{ 'update:modelValue': [value: string]; submit: []; clear: [] }>()
 const inputRef = ref<HTMLInputElement | null>(null)
 
-function onInput(event: Event) {
-  const target = event.target as HTMLInputElement
-  emit('update:modelValue', target.value)
-}
-
-function onClear() {
-  emit('clear')
-  emit('update:modelValue', '')
-  inputRef.value?.focus()
-}
-
-function onSubmit() {
-  emit('submit')
-  // Blur to dismiss mobile keyboard naturally
-  inputRef.value?.blur()
-}
-
-onMounted(() => {
-  nextTick(() => {
-    inputRef.value?.focus()
-  })
-})
+function onInput(event: Event) { emit('update:modelValue', (event.target as HTMLInputElement).value) }
+function onClear() { emit('clear'); emit('update:modelValue', ''); inputRef.value?.focus() }
+function onSubmit() { emit('submit'); inputRef.value?.blur() }
+onMounted(() => nextTick(() => inputRef.value?.focus()))
 </script>
 
 <template>
-  <div class="search-input-shell">
-    <form class="search-input-box focus-within:border-fg-muted" role="search" @submit.prevent="onSubmit">
-      <!-- Search icon or loading spinner -->
-      <span class="search-input-icon-wrap" aria-hidden="true">
-        <UIcon
-          v-if="isSearching"
-          name="lucide:loader-2"
-          class="search-input-icon animate-spin text-primary"
-        />
-        <UIcon
-          v-else
-          :name="isSemantic ? 'lucide:sparkles' : 'lucide:search'"
-          class="search-input-icon"
-          :class="isSemantic ? 'text-primary' : 'text-fg-muted'"
-        />
-      </span>
-
-      <!-- Primary text input -->
-      <input
-        ref="inputRef"
-        :value="modelValue"
-        type="search"
-        class="search-input-field focus:outline-none"
-        placeholder="Search music..."
-        aria-label="Search music"
-        autofocus
-        autocomplete="off"
-        autocorrect="off"
-        autocapitalize="off"
-        spellcheck="false"
-        enterkeyhint="search"
-        @input="onInput"
-      >
-
-      <!-- Mode indicator tag -->
-      <span
-        v-if="isSemantic"
-        class="search-input-mode"
-        aria-label="AI Semantic mode detected"
-      >
-        <UIcon name="lucide:sparkles" class="w-2.5 h-2.5" />
-        <span>AI INTENT</span>
-      </span>
-
-      <!-- Clear button -->
-      <button
-        v-if="modelValue"
-        type="button"
-        class="search-input-clear focus-ring"
-        aria-label="Clear search"
-        @click="onClear"
-      >
-        <UIcon name="lucide:x" class="w-3.5 h-3.5" />
-      </button>
+  <div class="w-full px-4 py-4 sm:px-6">
+    <p class="mb-2 text-micro font-bold tracking-[0.16em] text-fg-muted">SEARCH MUSIC, ARTISTS, ALBUMS, GENRES...</p>
+    <form class="flex h-14 w-full items-center gap-3 border border-line-strong bg-surface px-4 text-fg shadow-1 transition-colors focus-within:border-primary focus-within:bg-base" role="search" @submit.prevent="onSubmit">
+      <UIcon v-if="isSearching" name="lucide:loader-2" class="h-5 w-5 flex-none animate-spin text-primary" aria-hidden="true" />
+      <UIcon v-else :name="isSemantic ? 'lucide:sparkles' : 'lucide:search'" class="h-5 w-5 flex-none" :class="isSemantic ? 'text-primary' : 'text-fg-muted'" aria-hidden="true" />
+      <input ref="inputRef" :value="modelValue" type="search" class="h-full min-w-0 flex-1 bg-transparent text-body font-medium text-fg outline-none placeholder:text-fg-muted" placeholder="Search music, artists, albums, genres..." aria-label="Search music, artists, albums, genres" autofocus autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" @input="onInput">
+      <span v-if="isSemantic" class="hidden items-center gap-1 border border-line bg-primary-muted px-2 py-1 text-micro font-bold tracking-[0.1em] text-primary sm:inline-flex"><UIcon name="lucide:sparkles" class="h-3 w-3" />AI</span>
+      <button v-if="modelValue" type="button" class="grid h-9 w-9 flex-none place-items-center border border-line bg-surface-muted text-fg-muted transition-colors hover:bg-hover hover:text-fg focus-ring" aria-label="Clear search" @click="onClear"><UIcon name="lucide:x" class="h-4 w-4" /></button>
     </form>
   </div>
 </template>
-
-<style scoped>
-.search-input-shell {
-  width: 100%;
-  padding: 0.75rem var(--sys-content-pad, 1rem);
-}
-
-.search-input-box {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-  width: 100%;
-  height: 3rem;
-  padding: 0 0.875rem;
-  background: var(--sys-surface, rgba(255, 255, 255, 0.04));
-  border: 1px solid var(--sys-border, rgba(255, 255, 255, 0.12));
-  border-radius: 4px;
-  transition: border-color 160ms ease, background 160ms ease;
-}
-
-.search-input-icon-wrap {
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-}
-
-.search-input-icon {
-  width: 1.125rem;
-  height: 1.125rem;
-}
-
-.search-input-field {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  border: none;
-  background: transparent;
-  color: var(--sys-foreground, #fff);
-  font-size: 0.9375rem;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-}
-
-.search-input-field::placeholder {
-  color: var(--sys-foreground-faint, #6b7280);
-}
-
-/* Hide native webkit search cancel button */
-.search-input-field::-webkit-search-cancel-button {
-  -webkit-appearance: none;
-  display: none;
-}
-
-.search-input-mode {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.2rem 0.45rem;
-  border-radius: 2px;
-  background: rgba(var(--sys-primary-rgb, 100, 160, 255), 0.12);
-  border: 1px solid rgba(var(--sys-primary-rgb, 100, 160, 255), 0.3);
-  color: var(--sys-primary, #64a0ff);
-  font-size: 0.625rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.search-input-clear {
-  display: grid;
-  place-items: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  border-radius: 999px;
-  border: 0;
-  background: transparent;
-  color: var(--sys-foreground-muted, #9ba3af);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 140ms ease;
-}
-
-.search-input-clear:hover {
-  color: var(--sys-foreground, #fff);
-  background: var(--sys-surface-hover, rgba(255, 255, 255, 0.08));
-}
-</style>

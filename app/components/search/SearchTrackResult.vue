@@ -25,27 +25,27 @@ const emit = defineEmits<{
 }>()
 
 const track = computed(() => props.result.item)
+const player = usePlayerStore()
+const isCurrentTrack = computed(() => player.currentTrack?.id === track.value.id)
 </script>
 
 <template>
-  <article class="search-track-row">
+  <article class="grid min-h-18 grid-cols-[minmax(0,1fr)_auto_2.5rem] items-center gap-3 border-b border-line px-2 py-2 transition-colors last:border-b-0" :class="isCurrentTrack ? 'bg-primary-muted' : 'bg-transparent'">
     <!-- Click to play immediately -->
     <button
       type="button"
-      class="search-track-play focus-ring"
+      class="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-3 bg-transparent p-0 text-left focus-ring"
       :aria-label="`Play ${track.title} by ${artistName}`"
       @click="emit('play', track)"
     >
-      <Artwork
-        :src="cover"
-        :alt="`${track.title} artwork`"
-        :seed="track.id"
-        class="search-track-art"
-      />
-      <div class="search-track-meta">
-        <span class="search-track-title">{{ track.title }}</span>
-        <span class="search-track-artist">{{ artistName }}</span>
-        <span v-if="result.aiExplanation" class="search-track-ai-badge">
+      <div class="relative h-11 w-11 overflow-hidden">
+        <Artwork :src="cover" :alt="`${track.title} artwork`" :seed="track.id" class="h-11 w-11" />
+        <span v-if="isCurrentTrack" class="absolute inset-0 grid place-items-center bg-primary/80 text-primary-fg" aria-label="Currently playing"><UIcon name="lucide:audio-lines" class="h-5 w-5 animate-pulse" /></span>
+      </div>
+      <div class="flex min-w-0 flex-col gap-0.5">
+        <span class="truncate text-body font-semibold text-fg">{{ track.title }}</span>
+        <span class="truncate text-micro font-bold tracking-[0.08em] text-fg-muted">{{ artistName }}</span>
+        <span v-if="result.aiExplanation" class="inline-flex min-w-0 items-center gap-1 truncate text-micro font-semibold text-primary">
           <UIcon name="lucide:sparkles" class="w-2.5 h-2.5" />
           <span>{{ result.aiExplanation }}</span>
         </span>
@@ -53,128 +53,17 @@ const track = computed(() => props.result.item)
     </button>
 
     <!-- Duration -->
-    <span class="search-track-duration">{{ durationFormatted }}</span>
+    <span class="text-micro font-semibold tabular-nums text-fg-muted">{{ durationFormatted }}</span>
 
     <!-- Three-dot contextual actions button -->
     <button
       type="button"
-      class="search-track-menu-btn focus-ring"
+      class="grid h-10 w-10 place-items-center border border-transparent bg-transparent text-fg-muted transition-colors hover:border-line hover:bg-hover hover:text-fg focus-ring"
       :aria-label="`More actions for ${track.title}`"
       @click.stop="emit('actions', track)"
     >
-      <UIcon name="lucide:ellipsis" class="search-track-menu-icon" />
+        <UIcon name="lucide:ellipsis" class="h-5 w-5" />
     </button>
   </article>
 </template>
 
-<style scoped>
-.search-track-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 2.5rem;
-  gap: 0.75rem;
-  align-items: center;
-  min-height: 3.75rem;
-  padding: 0.25rem 0;
-  border-bottom: 1px solid var(--sys-border, rgba(255, 255, 255, 0.08));
-}
-
-.search-track-row:last-child {
-  border-bottom: 0;
-}
-
-.search-track-play {
-  display: grid;
-  grid-template-columns: 2.75rem minmax(0, 1fr);
-  gap: 0.75rem;
-  align-items: center;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  padding: 0.25rem 0;
-}
-
-.search-track-play:hover .search-track-title {
-  color: var(--sys-primary, #64a0ff);
-}
-
-.search-track-art {
-  width: 2.75rem;
-  height: 2.75rem;
-  aspect-ratio: 1;
-}
-
-.search-track-meta {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.search-track-title,
-.search-track-artist {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.search-track-title {
-  color: var(--sys-foreground, #fff);
-  font-size: 0.875rem;
-  font-weight: 600;
-}
-
-.search-track-artist {
-  color: var(--sys-foreground-muted, #9ba3af);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.search-track-ai-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.625rem;
-  font-weight: 600;
-  color: var(--sys-primary, #64a0ff);
-  margin-top: 0.1rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.search-track-duration {
-  color: var(--sys-foreground-faint, #6b7280);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.search-track-menu-btn {
-  display: grid;
-  place-items: center;
-  width: 2.25rem;
-  height: 2.25rem;
-  border-radius: 999px;
-  border: 0;
-  background: transparent;
-  color: var(--sys-foreground-muted, #9ba3af);
-  cursor: pointer;
-  transition: all 140ms ease;
-}
-
-.search-track-menu-btn:hover {
-  color: var(--sys-foreground, #fff);
-  background: var(--sys-surface-hover, rgba(255, 255, 255, 0.08));
-}
-
-.search-track-menu-icon {
-  width: 1.125rem;
-  height: 1.125rem;
-}
-</style>

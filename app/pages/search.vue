@@ -59,10 +59,13 @@ function onSelectQuery(term: string) {
 </script>
 
 <template>
-  <div class="search-page-shell">
-    <div class="search-page-container">
-      <!-- Dedicated search header with Back button & EMO -->
+  <div class="min-h-[100dvh] w-full bg-base pb-[calc(4.5rem+var(--sys-safe-bottom))] text-fg">
+    <div class="mx-auto flex w-full max-w-3xl flex-col">
       <SearchHeader :expression="emoExpression" :message="emoMessage" />
+      <div class="px-4 pt-5 sm:px-6">
+        <h2 class="m-0 text-h2 font-bold tracking-[-0.02em] text-fg">SEARCH</h2>
+        <p class="mt-1 text-small text-fg-muted">Find music with clarity and precision.</p>
+      </div>
 
       <!-- Primary search input -->
       <SearchInput
@@ -120,21 +123,3 @@ function onSelectQuery(term: string) {
     </div>
   </div>
 </template>
-
-<style scoped>
-.search-page-shell {
-  width: 100%;
-  min-height: 100dvh;
-  background: var(--sys-background, #0b0d12);
-  color: var(--sys-foreground, #fff);
-  padding-bottom: calc(4.5rem + var(--sys-safe-bottom, 0px));
-}
-
-.search-page-container {
-  width: 100%;
-  max-width: 48rem;
-  margin-inline: auto;
-  display: flex;
-  flex-direction: column;
-}
-</style>
