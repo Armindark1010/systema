@@ -17,7 +17,12 @@ export default defineNuxtConfig({
     '@vueuse/nuxt',
     '@nuxt/fonts',
     '@nuxt/icon',
+    '@pinia/nuxt',
   ],
+
+  pinia: {
+    storesDirs: ['./app/stores/**'],
+  },
 
   // ---- global styles -------------------------------------------------
   css: ['~/assets/css/main.css'],

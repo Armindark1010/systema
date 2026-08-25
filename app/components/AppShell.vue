@@ -9,16 +9,15 @@
 // ============================================================
 
 const route = useRoute()
-const { isPlaying, togglePlay } = usePlayer()
+const { currentTrack, isPlaying, togglePlay } = usePlayer()
 const { openPalette } = useQuickSearch()
 const showMobileHeader = computed(() => route.meta.hideMobileHeader !== true)
 
-// real audio engine — drives the generative synth from player state
-const engine = useAudioEngine()
-const { currentTrack, volume, muted } = usePlayer()
-watch(currentTrack, (t) => (t ? engine.start(t) : engine.stop()))
-watch(isPlaying, (p) => engine.setPaused(!p), { immediate: true })
-watch([volume, muted], ([v, m]) => engine.setLevel(m ? 0 : v), { immediate: true })
+// Connect audio engine to centralized Pinia store
+const playerEngine = usePlayerEngine()
+onMounted(() => {
+  playerEngine.init()
+})
 
 // global keyboard: ⌘K / Ctrl+K → palette, Space → play/pause
 function onKeydown(e: KeyboardEvent) {

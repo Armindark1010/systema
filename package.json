@@ -8,7 +8,8 @@
     "build": "nuxt build",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "postinstall": "nuxt prepare"
+    "postinstall": "nuxt prepare",
+    "test": "npx tsx scripts/test-search.ts"
   },
   "engines": {
     "node": ">=20.19.0"
@@ -18,9 +19,11 @@
     "@nuxt/fonts": "^0.14.0",
     "@nuxt/icon": "^2.5.0",
     "@nuxt/ui": "3.3.7",
+    "@pinia/nuxt": "^1.0.2",
     "@vueuse/core": "^14.4.0",
     "@vueuse/nuxt": "^14.4.0",
     "nuxt": "4.5.2",
+    "pinia": "^4.0.3",
     "unocss": "^66.8.1",
     "vue": "^3.5.41"
   },

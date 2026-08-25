@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { EmoExpression, EmoGaze } from '~/types/emo'
 import { emoBehavior } from '~/data/emo'
+import { usePlayerStore } from '~/stores/player'
 
 const props = withDefaults(defineProps<{
-  expression: EmoExpression
+  expression?: EmoExpression
   isPlaying?: boolean
   bpm?: number
   energy?: number
@@ -12,11 +13,12 @@ const props = withDefaults(defineProps<{
   isThinking?: boolean
   message?: string
 }>(), {
-  isPlaying: false,
-  bpm: 118,
-  energy: 0.5,
-  mood: 'FOCUSED',
-  volume: 0.8,
+  expression: undefined,
+  isPlaying: undefined,
+  bpm: undefined,
+  energy: undefined,
+  mood: undefined,
+  volume: undefined,
   isThinking: false,
   message: '',
 })
@@ -26,29 +28,113 @@ const emit = defineEmits<{
   'expression-change': [expression: EmoExpression]
 }>()
 
+const player = usePlayerStore()
+
 const blinking = ref(false)
 const gaze = ref<EmoGaze>('center')
 const mounted = ref(false)
 
-const activeExpression = computed<EmoExpression>(() =>
-  props.isThinking ? 'thinking' : props.expression,
+// Effective reactive bindings: use prop override if provided, otherwise consume centralized Pinia player state
+const effectiveIsPlaying = computed(() =>
+  props.isPlaying !== undefined ? props.isPlaying : player.isPlaying,
+)
+const effectiveEnergy = computed(() => {
+  if (props.energy !== undefined) return props.energy
+  return player.currentTrack ? player.currentTrack.energy / 100 : 0.5
+})
+const effectiveBpm = computed(() => {
+  if (props.bpm !== undefined) return props.bpm
+  return player.currentTrack?.ai?.bpm ?? 118
+})
+const effectiveMood = computed(() => {
+  if (props.mood !== undefined) return props.mood
+  return player.currentTrack?.mood?.toUpperCase() ?? 'FOCUSED'
+})
+
+// Transient subtle reactions to player store events
+const transientReaction = ref<{ expression: EmoExpression; message: string } | null>(null)
+let reactionTimer: ReturnType<typeof setTimeout> | undefined
+
+function setTransient(expression: EmoExpression, message: string, duration = 750) {
+  if (reactionTimer) clearTimeout(reactionTimer)
+  transientReaction.value = { expression, message }
+  reactionTimer = setTimeout(() => {
+    transientReaction.value = null
+  }, duration)
+}
+
+// Watchers on Player Store
+watch(
+  () => player.currentTrack?.id,
+  (newId, oldId) => {
+    if (!mounted.value || !newId || newId === oldId) return
+    const title = player.currentTrack?.title ?? 'TRACK'
+    setTransient('curious', `TRACK · ${title.toUpperCase()}`, 800)
+  },
 )
 
+watch(
+  () => player.isPlaying,
+  (playing) => {
+    if (!mounted.value || props.isPlaying !== undefined) return
+    if (playing) {
+      const expr = effectiveEnergy.value >= emoBehavior.music.highEnergy ? 'dancing' : 'listening'
+      setTransient(expr, 'PLAYING', 650)
+    } else {
+      setTransient('idle', 'PAUSED', 650)
+    }
+  },
+)
+
+watch(
+  () => player.isShuffle,
+  () => {
+    if (!mounted.value) return
+    setTransient('excited', `SHUFFLE ${player.isShuffle ? 'ON' : 'OFF'}`, 700)
+  },
+)
+
+// Queue order watcher for subtle reaction
+let prevQueueSummary = ''
+watch(
+  () => player.queue.map(t => t.id).join(','),
+  (summary) => {
+    if (!mounted.value) {
+      prevQueueSummary = summary
+      return
+    }
+    if (prevQueueSummary && summary !== prevQueueSummary) {
+      setTransient('thinking', 'QUEUE UPDATED', 700)
+    }
+    prevQueueSummary = summary
+  },
+)
+
+const activeExpression = computed<EmoExpression>(() => {
+  if (props.isThinking) return 'thinking'
+  if (props.expression !== undefined) return props.expression
+  if (transientReaction.value?.expression) return transientReaction.value.expression
+  if (effectiveIsPlaying.value) {
+    return effectiveEnergy.value >= emoBehavior.music.highEnergy ? 'dancing' : 'listening'
+  }
+  return 'idle'
+})
+
 const energyBand = computed(() => {
-  if (props.energy >= emoBehavior.music.highEnergy) return 'high'
-  if (props.energy <= emoBehavior.music.lowEnergy) return 'low'
+  if (effectiveEnergy.value >= emoBehavior.music.highEnergy) return 'high'
+  if (effectiveEnergy.value <= emoBehavior.music.lowEnergy) return 'low'
   return 'medium'
 })
 
 const motion = computed(() => {
   if (activeExpression.value === 'thinking' || activeExpression.value === 'analyzing') return 'idle'
-  if (activeExpression.value === 'dancing' || (props.isPlaying && energyBand.value === 'high')) return 'dancing'
-  if (props.isPlaying) return 'listening'
+  if (activeExpression.value === 'dancing' || (effectiveIsPlaying.value && energyBand.value === 'high')) return 'dancing'
+  if (effectiveIsPlaying.value) return 'listening'
   return 'idle'
 })
 
 const companionStyle = computed(() => {
-  const beatDuration = emoBehavior.music.secondsPerMinute / Math.max(emoBehavior.music.minimumBpm, props.bpm)
+  const beatDuration = emoBehavior.music.secondsPerMinute / Math.max(emoBehavior.music.minimumBpm, effectiveBpm.value)
   return {
     '--emo-beat-duration': `${beatDuration}s`,
     '--emo-beat-duration-double': `${beatDuration * emoBehavior.music.slowBeatMultiplier}s`,
@@ -57,9 +143,11 @@ const companionStyle = computed(() => {
   }
 })
 
-const statusText = computed(() =>
-  props.message || `${activeExpression.value.toUpperCase()} · ${props.mood.toUpperCase()}`,
-)
+const statusText = computed(() => {
+  if (props.message) return props.message
+  if (transientReaction.value?.message) return transientReaction.value.message
+  return `${activeExpression.value.toUpperCase()} · ${effectiveMood.value}`
+})
 
 let blinkTimer: ReturnType<typeof setTimeout> | undefined
 let blinkEndTimer: ReturnType<typeof setTimeout> | undefined
@@ -225,7 +313,7 @@ onBeforeUnmount(() => {
       :data-expression="activeExpression"
       :data-motion="motion"
       :data-energy="energyBand"
-      :data-playing="isPlaying"
+      :data-playing="effectiveIsPlaying"
       :aria-label="`Interact with EMO. Current expression: ${activeExpression}`"
       @click="onTap"
     >

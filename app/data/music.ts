@@ -115,8 +115,10 @@ const seeds: TrackSeed[] = [
   ['tr-35', 'Acid Rain', 'a-lorn', 'al-lorn', 'g-darksynth', 247, 2012, 66, 'dark', 'inst', 2180, false],
   ['tr-36', 'Ghosst(s)', 'a-lorn', 'al-lorn', 'g-darksynth', 239, 2012, 58, 'dark', 'inst', 967, false],
   // Dedicated prototype navigation companions for the full player.
-  ['tr-37', 'Night Drive', 'a-sys', 'al-systema-night', 'g-electronic', 242, 2025, 69, 'focused', 'inst', 768, false],
+  ['tr-37', 'Night Drive', 'a-sys', 'al-systema-night', 'g-electronic', 258, 2025, 69, 'focused', 'inst', 768, false],
   ['tr-38', 'Architectural Echoes', 'a-sys', 'al-systema-echoes', 'g-electronic', 268, 2025, 61, 'dreamy', 'inst', 644, false],
+  ['tr-39', 'Concrete Dreams', 'a-sys', 'al-systema-echoes', 'g-electronic', 238, 2025, 65, 'focused', 'inst', 512, false],
+  ['tr-40', 'Digital Memory', 'a-sys', 'al-systema-echoes', 'g-electronic', 301, 2025, 54, 'calm', 'inst', 420, false],
 ]
 
 function makeLocalAI(seed: TrackSeed, index: number): Track['ai'] {
@@ -140,22 +142,31 @@ function makeLocalAI(seed: TrackSeed, index: number): Track['ai'] {
 
 function buildTracks(): Track[] {
   const added = (i: number) => new Date(Date.UTC(2025, 4 + (i % 9), 1 + ((i * 3) % 27))).toISOString()
-  return seeds.map((s, i) => ({
-    id: s[0],
-    title: s[1],
-    artistId: s[2],
-    albumId: s[3],
-    genreId: s[4],
-    duration: s[5],
-    year: s[6],
-    energy: s[7],
-    mood: s[8],
-    lang: s[9],
-    plays: s[10],
-    favorite: s[11],
-    addedAt: added(i),
-    ai: makeLocalAI(s, i),
-  }))
+  return seeds.map((s, i) => {
+    const artist = artists.find(a => a.id === s[2])?.name ?? 'SYSTEMA'
+    const albumObj = albums.find(a => a.id === s[3])
+    const album = albumObj?.title ?? 'SYSTEMA'
+    const artwork = albumObj?.cover ?? '/art/blueprint-01.jpg'
+    return {
+      id: s[0],
+      title: s[1],
+      artistId: s[2],
+      albumId: s[3],
+      genreId: s[4],
+      duration: s[5],
+      year: s[6],
+      energy: s[7],
+      mood: s[8],
+      lang: s[9],
+      plays: s[10],
+      favorite: s[11],
+      addedAt: added(i),
+      ai: makeLocalAI(s, i),
+      artist,
+      album,
+      artwork,
+    }
+  })
 }
 
 export const tracks: Track[] = buildTracks()

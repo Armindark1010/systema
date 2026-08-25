@@ -66,6 +66,9 @@ export interface Track {
   addedAt: string
   /** Optional until the on-device analysis pipeline has completed. */
   ai?: TrackAI
+  artist?: string
+  album?: string
+  artwork?: string
 }
 
 export type PlaylistKind = 'user' | 'system' | 'ai'
