@@ -8,7 +8,10 @@
 // ============================================================
 
 /** Visual theme — swaps --sys-* design tokens, never components. */
-export type Theme = 'default' | 'premium' | 'dark'
+export type Theme = 'default' | 'premium' | 'dark' | 'midcentury' | 'bauhaus'
+
+export * from './settings'
+export * from './playlists'
 
 export interface Genre {
   id: string

@@ -9,7 +9,7 @@
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
-    "test": "npx tsx scripts/test-search.ts"
+    "test": "npx tsx scripts/test-search.ts && npx tsx scripts/test-settings.ts"
   },
   "engines": {
     "node": ">=20.19.0"

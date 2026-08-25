@@ -10,6 +10,7 @@ import { defineStore } from 'pinia'
 import type { Album, Playlist, RepeatMode, Track } from '~/types'
 import { tracks as catalog } from '~/data/music'
 import { recordPlayed } from '~/composables/usePlaybackHistory'
+import { useSettingsStore } from '~/stores/settings'
 
 export interface PlayerSleepTimerState {
   active: boolean
@@ -160,9 +161,47 @@ export const usePlayerStore = defineStore('player', () => {
       currentTime.value = 0
       isPlaying.value = true
       recordPlayed(first.id)
+    } else if (shouldAutoplay()) {
+      const related = relatedTracks(currentTrack.value)
+      if (related.length) {
+        queue.value = related.slice(1)
+        const first = related[0]!
+        if (currentTrack.value) history.value.push(currentTrack.value)
+        currentTrack.value = first
+        duration.value = first.duration
+        currentTime.value = 0
+        isPlaying.value = true
+        recordPlayed(first.id)
+      } else {
+        isPlaying.value = false
+        currentTime.value = 0
+      }
     } else {
       isPlaying.value = false
       currentTime.value = 0
+    }
+  }
+
+  function shouldAutoplay() {
+    try {
+      return useSettingsStore().playback.autoplay
+    } catch {
+      return false
+    }
+  }
+
+  function relatedTracks(track: Track | null): Track[] {
+    if (!track) return []
+    return catalog
+      .filter(item => item.id !== track.id && (item.artistId === track.artistId || item.genreId === track.genreId))
+      .slice(0, 8)
+  }
+
+  function queueMode(): 'replace' | 'append' {
+    try {
+      return useSettingsStore().playback.queueAfterPlaylist
+    } catch {
+      return 'replace'
     }
   }
 
@@ -322,13 +361,21 @@ export const usePlayerStore = defineStore('player', () => {
   function playQueue(tracks: Track[], startIndex = 0) {
     if (!tracks.length) return
     const safeIndex = Math.max(0, Math.min(startIndex, tracks.length - 1))
+    const start = tracks[safeIndex]!
+    const rest = tracks.slice(safeIndex + 1)
+
+    if (queueMode() === 'append' && currentTrack.value) {
+      queue.value = [...queue.value, start, ...rest]
+      return
+    }
+
     history.value = tracks.slice(0, safeIndex)
-    currentTrack.value = tracks[safeIndex]!
-    duration.value = tracks[safeIndex]!.duration
-    queue.value = tracks.slice(safeIndex + 1)
+    currentTrack.value = start
+    duration.value = start.duration
+    queue.value = rest
     currentTime.value = 0
     isPlaying.value = true
-    recordPlayed(tracks[safeIndex]!.id)
+    recordPlayed(start.id)
   }
 
   function playPlaylist(pl: Playlist, startIndex = 0) {

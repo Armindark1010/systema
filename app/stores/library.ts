@@ -10,6 +10,7 @@ import type { Album, Artist, Playlist, Track } from '~/types'
 import { tracks as catalogTracks, albums as catalogAlbums, artists as catalogArtists } from '~/data/music'
 import { usePlaybackHistory } from '~/composables/usePlaybackHistory'
 import { usePlaylists } from '~/composables/usePlaylists'
+import { useSettingsStore } from '~/stores/settings'
 
 export type LibrarySection = 'tracks' | 'albums' | 'artists' | 'playlists'
 export type LibrarySortKey =
@@ -50,7 +51,18 @@ export const librarySortOptions: LibrarySortOption[] = [
 export const useLibraryStore = defineStore('library', () => {
   // ---- State -------------------------------------------------
   const activeSection = ref<LibrarySection>('tracks')
-  const sortBy = ref<LibrarySortKey>('recently-added')
+  function defaultSortFromSettings(): LibrarySortKey {
+    try {
+      const sort = useSettingsStore().library.defaultSort
+      if (sort === 'alphabetical') return 'title'
+      if (sort === 'artist' || sort === 'album' || sort === 'duration' || sort === 'recently-added') return sort
+    } catch {
+      /* settings store not ready */
+    }
+    return 'recently-added'
+  }
+
+  const sortBy = ref<LibrarySortKey>(defaultSortFromSettings())
   const tracks = ref<Track[]>(catalogTracks)
   const albums = ref<Album[]>(catalogAlbums)
   const artists = ref<Artist[]>(catalogArtists)
@@ -147,6 +159,11 @@ export const useLibraryStore = defineStore('library', () => {
     sortBy.value = key
   }
 
+  function resetPresentation() {
+    activeSection.value = 'tracks'
+    sortBy.value = defaultSortFromSettings()
+  }
+
   function getAlbum(id: string): Album | undefined {
     return albums.value.find(a => a.id === id)
   }
@@ -199,6 +216,7 @@ export const useLibraryStore = defineStore('library', () => {
     nextSection,
     prevSection,
     setSortBy,
+    resetPresentation,
     getAlbum,
     getArtist,
     trackCountForArtist,

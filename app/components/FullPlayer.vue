@@ -5,6 +5,7 @@
 
 import type { Track } from '~/types'
 import type { EmoExpression } from '~/types/emo'
+import { useSettingsStore } from '~/stores/settings'
 
 const player = usePlayer()
 const {
@@ -119,8 +120,14 @@ function onCustomSleep(minutes: number) {
   showCustomSleepInput.value = false
 }
 
+function onArtworkDoubleClick() {
+  if (!useSettingsStore().gestures.doubleTap) return
+  toggleFavorite()
+}
+
 function onAiToggle() {
   if (!currentTrack.value) return
+  if (!useSettingsStore().ai.enabled) return
   lyrics.setLyricsMode(false)
   // Always open a new session, explicitly scoped to this track.
   ai.openAI(currentTrack.value.id)
@@ -296,6 +303,7 @@ function isInteractiveTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest('button, input, textarea, select, a, [role="slider"], [data-player-no-swipe]'))
 }
 function onPlayerPointerDown(event: PointerEvent) {
+  if (!useSettingsStore().gestures.swipePlayer) return
   if (isInteractiveTarget(event.target) || event.pointerType === 'mouse' && event.button !== 0) return
   swipeStartX = event.clientX
   swipeStartY = event.clientY
@@ -478,7 +486,7 @@ if (import.meta.client) {
                     />
                   </div>
 
-                  <div v-else key="artwork" class="player-visual-pane player-visual-pane--artwork">
+                  <div v-else key="artwork" class="player-visual-pane player-visual-pane--artwork" @dblclick="onArtworkDoubleClick">
                     <Transition name="player-artwork" mode="out-in">
                       <div :key="currentTrack.id" class="player-artwork-wrap">
                         <img

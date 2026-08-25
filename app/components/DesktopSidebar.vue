@@ -37,6 +37,8 @@ const THEME_LABEL: Record<string, string> = {
   default: 'WHITE / STEEL',
   premium: 'IVORY / GOLD',
   dark: 'ONYX / SILVER',
+  midcentury: 'TEAK / OLIVE',
+  bauhaus: 'PRIMARY GRID',
 }
 
 function isActive(to: string): boolean {

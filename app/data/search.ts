@@ -10,7 +10,10 @@ export const pageIndex: { label: string; description: string; to: string }[] = [
   { label: 'Playlists', description: 'Curated and generated sets', to: '/playlists' },
   { label: 'AI Studio', description: 'What do you want to hear?', to: '/ai' },
   { label: 'AI Insights', description: 'Your music profile', to: '/ai/insights' },
-  { label: 'Settings', description: 'Playback, library, AI, appearance', to: '/settings' },
+  { label: 'Settings', description: 'System configuration', to: '/settings' },
+  { label: 'Appearance', description: 'Theme, accent, density, motion', to: '/settings/appearance' },
+  { label: 'Playback settings', description: 'Autoplay, queue, audio engine', to: '/settings/playback' },
+  { label: 'AI settings', description: 'Intelligence and analysis policy', to: '/settings/ai' },
 ]
 
 /** Heuristic: descriptive / non-latin queries are treated as semantic. */

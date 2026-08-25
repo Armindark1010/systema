@@ -11,6 +11,7 @@ defineProps<{
 const emit = defineEmits<{
   play: [track: Track]
   actions: [track: Track]
+  longpress: [track: Track]
 }>()
 </script>
 
@@ -26,6 +27,7 @@ const emit = defineEmits<{
       :duration="formatDuration(track.duration)"
       @play="emit('play', track)"
       @actions="emit('actions', track)"
+      @longpress="emit('longpress', track)"
     />
   </section>
   <LibraryEmptyState v-else title="NO TRACKS YET">Your music library is empty.</LibraryEmptyState>

@@ -1,69 +1,105 @@
 <script setup lang="ts">
-// Appearance — the three SYSTEMA themes. Switching = token swap.
-const { theme, setTheme } = useTheme()
+import type { AccentId, DensityId, MotionId } from '~/types/settings'
+import { ACCENT_SWATCHES } from '~/data/settings'
+import { useSettingsStore } from '~/stores/settings'
 
-const themes = [
-  {
-    id: 'default' as const,
-    name: 'DEFAULT',
-    tag: 'WHITE / STEEL',
-    desc: 'A WHITE DIAL — QUIET GENEVA STEEL BLUE ON PURE WHITE.',
-    swatch: ['#ffffff', '#1e3a66', '#10141c', '#e6e9ee'],
-  },
-  {
-    id: 'premium' as const,
-    name: 'PREMIUM',
-    tag: 'IVORY / GOLD',
-    desc: 'DEEP CHAMPAGNE GOLD ON IVORY ENAMEL — MINIMAL LUXURY, NO EXCESS.',
-    swatch: ['#fcfbf7', '#8a6d2c', '#181510', '#e8e3d3'],
-  },
-  {
-    id: 'dark' as const,
-    name: 'DARK',
-    tag: 'ONYX / SILVER',
-    desc: 'AN ONYX DIAL — APPLIED SILVER INDICES, NOTHING ELSE.',
-    swatch: ['#0a0b0e', '#dde3ea', '#edf0f4', '#22262e'],
-  },
+const settings = useSettingsStore()
+
+const densityOptions = [
+  { value: 'compact' as DensityId, label: 'COMPACT' },
+  { value: 'default' as DensityId, label: 'DEFAULT' },
+  { value: 'comfortable' as DensityId, label: 'COMFORTABLE' },
+]
+
+const motionOptions = [
+  { value: 'full' as MotionId, label: 'FULL' },
+  { value: 'reduced' as MotionId, label: 'REDUCED' },
+  { value: 'off' as MotionId, label: 'OFF' },
 ]
 </script>
 
 <template>
-  <SettingsSection id="appearance" index="01" label="APPEARANCE" description="THEME — TOKENS SWAP, COMPONENTS NEVER CHANGE">
-    <div class="border border-line divide-y divide-line">
-      <button
-        v-for="t in themes"
-        :key="t.id"
-        class="w-full flex items-center gap-5 px-4 py-4 text-left t-all pressable focus-ring hover:bg-hover"
-        role="radio"
-        :aria-checked="theme === t.id"
-        :aria-label="`Theme ${t.name}`"
-        @click="setTheme(t.id)"
-      >
-        <!-- swatch -->
-        <span class="grid grid-cols-2 gap-[2px] w-14 h-14 border border-line shrink-0 p-1" :style="{ backgroundColor: t.swatch[0] }" aria-hidden="true">
-          <span :style="{ backgroundColor: t.swatch[1] }" />
-          <span :style="{ backgroundColor: t.swatch[2] }" />
-          <span :style="{ backgroundColor: t.swatch[3] }" />
-          <span :style="{ backgroundColor: t.swatch[0] }" />
-        </span>
-        <span class="flex-1 min-w-0">
-          <span class="flex items-baseline gap-3">
-            <span class="text-[14px] font-bold tracking-[0.14em] text-fg">{{ t.name }}</span>
-            <span class="label text-fg-faint">{{ t.tag }}</span>
-          </span>
-          <span class="block text-[11.5px] text-fg-muted mt-1">{{ t.desc }}</span>
-        </span>
-        <span
-          class="w-4 h-4 shrink-0 grid place-items-center border t-all"
-          :class="theme === t.id ? 'border-primary bg-primary' : 'border-line-strong'"
-          aria-hidden="true"
+  <div class="space-y-10">
+    <SettingsSection id="theme" index="01" label="THEME" description="TOKEN SWAP — THE WHOLE SYSTEM FOLLOWS">
+      <ThemeSelector />
+      <SettingsNote>
+        AI PAGES KEEP THE INTELLIGENCE VISUAL SYSTEM. EVERY OTHER SURFACE — HEADER, HOME, LIBRARY, SEARCH, PLAYER, DIALOGS — FOLLOWS THESE TOKENS.
+      </SettingsNote>
+    </SettingsSection>
+
+    <SettingsSection id="accent" index="02" label="ACCENT" description="PRIMARY SIGNAL COLOR">
+      <div class="border border-line divide-y divide-line">
+        <SettingRow
+          icon="lucide:paintbrush"
+          label="ACCENT"
+          description="Updates primary controls, focus rings, and active states globally."
         >
-          <UIcon v-if="theme === t.id" name="lucide:check" class="w-3 h-3 text-primary-fg" />
-        </span>
-      </button>
-    </div>
-    <p class="mt-3 text-[11px] text-fg-faint leading-relaxed">
-      AI PAGES RETAIN THE AI VISUAL SYSTEM REGARDLESS OF THEME — SWISS STRUCTURE + GENERATIVE LANGUAGE.
-    </p>
-  </SettingsSection>
+          <div class="flex flex-wrap gap-2" role="radiogroup" aria-label="Accent color">
+            <button
+              v-for="accent in ACCENT_SWATCHES"
+              :key="accent.id"
+              type="button"
+              class="flex items-center gap-2 h-8 px-2 border t-all pressable focus-ring"
+              :class="settings.appearance.accent === accent.id ? 'border-primary bg-primary-muted' : 'border-line hover:border-line-strong'"
+              role="radio"
+              :aria-checked="settings.appearance.accent === accent.id"
+              :aria-label="accent.label"
+              @click="settings.patchAppearance({ accent: accent.id as AccentId })"
+            >
+              <span class="w-3.5 h-3.5 border border-line-strong" :style="{ backgroundColor: accent.sample }" />
+              <span class="text-[10px] font-bold tracking-[0.1em] text-fg">{{ accent.label }}</span>
+            </button>
+          </div>
+        </SettingRow>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection id="density" index="03" label="INTERFACE DENSITY" description="SPACING TOKENS, NOT PER-COMPONENT HACKS">
+      <div class="border border-line divide-y divide-line">
+        <SettingRow
+          icon="lucide:rows-3"
+          label="DENSITY"
+          description="Controls card spacing, list rows, and control height through design tokens."
+        >
+          <SettingsSegmentedControl
+            :model-value="settings.appearance.density"
+            :options="densityOptions"
+            aria-label="Interface density"
+            @update:model-value="value => settings.patchAppearance({ density: value })"
+          />
+        </SettingRow>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection id="motion" index="04" label="MOTION" description="GLOBAL TRANSITIONS">
+      <div class="border border-line divide-y divide-line">
+        <SettingRow
+          icon="lucide:activity"
+          label="MOTION"
+          description="Full keeps SYSTEMA transitions. Reduced shortens them. Off disables non-essential animation. The operating system preference is always respected."
+        >
+          <SettingsSegmentedControl
+            :model-value="settings.appearance.motion"
+            :options="motionOptions"
+            aria-label="Motion"
+            @update:model-value="value => settings.patchAppearance({ motion: value })"
+          />
+        </SettingRow>
+      </div>
+    </SettingsSection>
+
+    <SettingsSection id="typography" index="05" label="TYPOGRAPHY" description="NEO-GROTESK SYSTEM">
+      <div class="border border-line divide-y divide-line">
+        <SettingRow icon="lucide:type" label="LATIN" description="Inter — neo-grotesk, the SYSTEMA default.">
+          <span class="label text-fg">INTER</span>
+        </SettingRow>
+        <SettingRow icon="lucide:languages" label="PERSIAN" description="Vazirmatn is first-class for Persian strings. No substitute fonts.">
+          <span class="label text-fg font-persian">وزیرمتن</span>
+        </SettingRow>
+        <SettingRow icon="lucide:ruler" label="SCALE" description="Micro → small → body → lead → title → h2 → h1 → display. Locked to the design system.">
+          <span class="label text-fg-muted">SYSTEM</span>
+        </SettingRow>
+      </div>
+    </SettingsSection>
+  </div>
 </template>

@@ -13,6 +13,7 @@
 
 import type { Track } from '~/types'
 import { usePlayerStore } from '~/stores/player'
+import { useSettingsStore } from '~/stores/settings'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{
@@ -133,8 +134,8 @@ watch(
           <div
             class="player-queue-sheet__handle"
             aria-label="Swipe down to close queue"
-            @pointerdown="reorder.isReordering.value ? undefined : sheetDrag.onDragStart($event)"
-            @pointermove="reorder.isReordering.value ? undefined : sheetDrag.onDragMove($event)"
+            @pointerdown="reorder.isReordering.value || !useSettingsStore().gestures.swipeQueue ? undefined : sheetDrag.onDragStart($event)"
+            @pointermove="reorder.isReordering.value || !useSettingsStore().gestures.swipeQueue ? undefined : sheetDrag.onDragMove($event)"
             @pointerup="sheetDrag.onDragEnd"
             @pointercancel="sheetDrag.onDragEnd"
           >
