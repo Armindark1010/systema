@@ -3,8 +3,8 @@
 // AppShell — the persistent application frame
 // ============================================================
 // Desktop : fixed sidebar + main column + bottom player bar
-// Mobile  : sticky header + content + fixed dock
-//           (mini player → bottom navigation → quick search)
+// Mobile  : sticky header + content + fixed liquid-glass dock
+//           (mini player → floating search → bottom navigation)
 // Global  : command palette, full player, queue drawer
 // ============================================================
 
@@ -46,14 +46,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
     <MobileHeader />
 
     <!-- main column -->
-    <main class="lg:pl-[248px] sys-dock-pad lg:pb-[68px]">
+    <main
+      class="lg:pl-[248px] lg:pb-[68px]"
+      :class="currentTrack ? 'sys-dock-pad-player' : 'sys-dock-pad'"
+    >
       <slot />
     </main>
 
     <!-- desktop global mini player -->
     <MiniPlayer class="hidden lg:block fixed bottom-0 left-[248px] right-0 z-40 border-t border-line" />
 
-    <!-- mobile dock: mini player → bottom nav → quick search -->
+    <!-- mobile dock: mini player → floating search → bottom navigation -->
     <div class="lg:hidden fixed inset-x-0 bottom-0 z-40">
       <MobileDock />
     </div>
