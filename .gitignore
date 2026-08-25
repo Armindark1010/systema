@@ -2,6 +2,17 @@ node_modules
 .nuxt
 .output
 .data
+dist
 .env
 .DS_Store
 *.log
+
+# Capacitor / Android local and generated build files
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+*.keystore
+*.jks

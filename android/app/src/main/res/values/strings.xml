@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SYSTEMA</string>
+    <string name="title_activity_main">SYSTEMA</string>
+    <string name="package_name">com.systema.music</string>
+    <string name="custom_url_scheme">com.systema.music</string>
+</resources>

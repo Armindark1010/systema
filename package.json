@@ -7,6 +7,9 @@
     "dev": "nuxt dev",
     "build": "nuxt build",
     "generate": "nuxt generate",
+    "build:android": "npm run generate && npx cap sync android",
+    "sync:android": "npx cap sync android",
+    "open:android": "npx cap open android",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "test": "npx tsx scripts/test-search.ts && npx tsx scripts/test-settings.ts"
@@ -15,6 +18,8 @@
     "node": ">=20.19.0"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
     "@iconify-json/lucide": "^1.2.126",
     "@nuxt/fonts": "^0.14.0",
     "@nuxt/icon": "^2.5.0",
@@ -28,6 +33,7 @@
     "vue": "^3.5.41"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
     "@unocss/nuxt": "^66.8.1",
     "typescript": "^5.6.3"
   }
