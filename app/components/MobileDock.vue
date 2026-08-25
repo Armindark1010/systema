@@ -13,10 +13,11 @@ const { open, openPalette } = useQuickSearch()
       @click="openPalette()"
     >
       <UIcon name="lucide:search" class="mobile-quick-search__icon" />
-      <span class="mobile-quick-search__label">SEARCH</span>
     </button>
 
-    <MobileMiniPlayer v-if="currentTrack" />
-    <MobileBottomNavigation />
+    <div class="mobile-dock__controls">
+      <MobileMiniPlayer v-if="currentTrack" />
+      <MobileBottomNavigation />
+    </div>
   </div>
 </template>
