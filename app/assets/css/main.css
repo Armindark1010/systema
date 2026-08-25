@@ -279,6 +279,21 @@
    6. STRUCTURE HELPERS
    ------------------------------------------------------------ */
 
+/* compact track lists use the divider color as a true grid gutter.
+   Mobile stays a single, touch-friendly list. */
+@media (min-width: 1024px) {
+  .track-list-split {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--sys-border);
+  }
+
+  .track-list-split > li {
+    border-bottom: 0;
+  }
+}
+
 /* mobile dock: mini player + bottom navigation + quick search */
 :root {
   --sys-dock-quicksearch: 3rem;

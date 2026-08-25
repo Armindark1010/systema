@@ -162,11 +162,6 @@ export function formatMs(ms: number): string {
   return formatDuration(ms / 1000)
 }
 
-/** tracks most recently played first (mock ordering) */
-export function recentlyPlayed(limit = 12): Track[] {
-  return [...tracks].sort((a, b) => b.plays - a.plays).slice(0, limit)
-}
-
 /** albums to continue listening to (mock) */
 export function continueListening(): Album[] {
   return [

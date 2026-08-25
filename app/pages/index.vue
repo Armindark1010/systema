@@ -23,7 +23,7 @@ const dateLabel = computed(() =>
 )
 
 const rail = computed(() => continueListening())
-const recent = computed(() => recentlyPlayed(12))
+const recent = computed(() => recentlyPlayed(8))
 const s = computed(() => stats())
 
 // mock "continue listening" progress per album
@@ -93,7 +93,13 @@ const progress = { 'al-outrun': 62, 'al-blueprint': 38, 'al-hg': 74, 'al-ram': 1
     <section class="sys-container mt-12" aria-label="Recently played">
       <SectionHeader index="02" label="RECENTLY PLAYED" to="/library/tracks" />
       <div class="mt-4">
-        <TrackList :tracks="recent" context="RECENTLY PLAYED" hide-album />
+        <TrackList
+          :tracks="recent"
+          context="RECENTLY PLAYED"
+          hide-album
+          :show-header="false"
+          split
+        />
       </div>
     </section>
 
