@@ -168,6 +168,64 @@
 }
 
 /* ------------------------------------------------------------
+   3.5 IMMERSIVE PLAYER TOKENS (fixed — dark atmospheric)
+   The full-screen player is always dark and artwork-driven.
+   ------------------------------------------------------------ */
+:root {
+  /* base immersive */
+  --player-bg: #0a0b0e;
+  --player-bg-soft: #101216;
+  --player-overlay: rgba(10, 11, 14, 0.72);
+  --player-overlay-strong: rgba(10, 11, 14, 0.88);
+  --player-overlay-faint: rgba(10, 11, 14, 0.42);
+  --player-gradient-top: rgba(10, 11, 14, 0.28);
+  --player-gradient-mid: rgba(10, 11, 14, 0.62);
+  --player-gradient-bottom: rgba(10, 11, 14, 0.94);
+
+  --player-fg: #edf0f4;
+  --player-fg-muted: #9aa2ae;
+  --player-fg-faint: #5e6673;
+  --player-fg-soft: rgba(237, 240, 244, 0.72);
+
+  --player-line: rgba(237, 240, 244, 0.10);
+  --player-line-strong: rgba(237, 240, 244, 0.18);
+  --player-line-faint: rgba(237, 240, 244, 0.06);
+
+  --player-control: rgba(237, 240, 244, 0.08);
+  --player-control-hover: rgba(237, 240, 244, 0.14);
+  --player-control-active: rgba(237, 240, 244, 0.92);
+  --player-control-fg: #edf0f4;
+
+  --player-primary: #edf0f4;
+  --player-primary-fg: #0a0b0e;
+  --player-accent: #8b5cf6;
+
+  /* dimensions */
+  --player-max-width: 480px;
+  --player-content-padding: clamp(1rem, 4vw, 1.5rem);
+  --player-safe-top: env(safe-area-inset-top, 0px);
+  --player-safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  --player-art-size: clamp(18rem, 62vw, 22rem);
+  --player-emo-size: 7.5rem;
+  --player-track-title-size: clamp(1.375rem, 5.2vw, 1.875rem);
+  --player-track-artist-size: 0.75rem;
+  --player-progress-height: 2px;
+  --player-progress-thumb: 14px;
+  --player-control-size: 3rem;
+  --player-control-play-size: 3.75rem;
+  --player-action-size: 2.5rem;
+
+  --player-sheet-radius: 16px;
+  --player-sheet-bg: #14171c;
+  --player-sheet-line: rgba(237, 240, 244, 0.12);
+
+  /* motion */
+  --player-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --player-ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ------------------------------------------------------------
    4. NUXT UI VARIABLE MAPPING
    Primitives (command palette, drawers, modals, sliders…)
    follow SYSTEMA tokens per theme.

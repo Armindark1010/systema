@@ -236,6 +236,15 @@ onBeforeUnmount(() => {
             :gaze="gaze"
             :blinking="blinking"
           />
+          <span class="emo-headphones" aria-hidden="true">
+            <span class="emo-headband" />
+            <span class="emo-earcup emo-earcup--left">
+              <span class="emo-earcup__pad" />
+            </span>
+            <span class="emo-earcup emo-earcup--right">
+              <span class="emo-earcup__pad" />
+            </span>
+          </span>
         </span>
         <span class="emo-neck" />
         <span class="emo-body">
