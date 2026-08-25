@@ -32,6 +32,8 @@ const items: MoreMenuItem[] = [
   { label: 'REMOVE FROM LIBRARY', icon: 'lucide:trash-2', action: 'remove', danger: true },
 ]
 
+const sheetDrag = useSwipeToDismiss(() => emit('close'))
+
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') emit('close')
 }
@@ -55,8 +57,15 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
         aria-label="More options"
         @click.self="emit('close')"
       >
-        <div class="player-sheet">
-          <div class="player-sheet-handle" aria-hidden="true"><span /></div>
+        <div class="player-sheet" :class="{ 'is-dragging': sheetDrag.isDragging.value }" :style="sheetDrag.dragStyle.value">
+          <div
+            class="player-sheet-handle"
+            aria-label="Swipe down to close"
+            @pointerdown="sheetDrag.onDragStart"
+            @pointermove="sheetDrag.onDragMove"
+            @pointerup="sheetDrag.onDragEnd"
+            @pointercancel="sheetDrag.onDragEnd"
+          ><span /></div>
 
           <div class="player-sheet-header">
             <div>
@@ -105,8 +114,9 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
 .player-sheet {
   width: 100%;
   max-width: 480px;
-  max-height: 88dvh;
+  max-height: calc(100dvh - var(--player-safe-top));
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--player-sheet-bg);
   border: 1px solid var(--player-sheet-line);
   border-bottom: 0;
@@ -115,11 +125,19 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey))
   animation: sheet-in 360ms var(--player-ease);
 }
 
+.player-sheet.is-dragging {
+  animation: none;
+  user-select: none;
+}
+
 .player-sheet-handle {
   display: grid;
   place-items: center;
   height: 28px;
+  cursor: grab;
+  touch-action: none;
 }
+.player-sheet-handle:active { cursor: grabbing; }
 .player-sheet-handle span {
   width: 32px;
   height: 3px;

@@ -83,11 +83,11 @@ watch(() => props.currentIndex, (idx) => {
   position: relative;
   width: 100%;
   max-width: var(--player-max-width);
+  height: 100%;
+  min-height: 0;
   margin-inline: auto;
   display: flex;
   flex-direction: column;
-  min-height: clamp(22rem, 58vh, 32rem);
-  max-height: clamp(24rem, 62vh, 38rem);
   padding-inline: var(--player-content-padding);
   overflow: hidden;
 }

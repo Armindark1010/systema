@@ -6,14 +6,14 @@ const { closePalette } = useQuickSearch()
 
 const items = [
   { label: 'HOME', to: '/', icon: 'lucide:house' },
-  { label: 'LIBRARY', to: '/library/tracks', icon: 'lucide:library' },
+  { label: 'LIBRARY', to: '/library', icon: 'lucide:library' },
   { label: 'SEARCH', to: '/search', icon: 'lucide:search' },
   { label: 'AI', to: '/ai', icon: 'lucide:sparkles' },
 ]
 
 function isActive(to: string): boolean {
   if (to === '/') return route.path === '/'
-  if (to === '/library/tracks') return route.path.startsWith('/library')
+  if (to === '/library') return route.path.startsWith('/library')
   if (to === '/ai') return route.path === '/ai' || route.path.startsWith('/ai/')
   return route.path === to || route.path.startsWith(to + '/')
 }

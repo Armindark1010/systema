@@ -18,7 +18,7 @@ const groups = [
   {
     label: 'LIBRARY',
     items: [
-      { index: '03', label: 'TRACKS', to: '/library/tracks' },
+      { index: '03', label: 'LIBRARY', to: '/library' },
       { index: '04', label: 'ALBUMS', to: '/library/albums' },
       { index: '05', label: 'ARTISTS', to: '/library/artists' },
       { index: '06', label: 'PLAYLISTS', to: '/playlists' },

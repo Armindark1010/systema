@@ -219,10 +219,72 @@
   --player-sheet-radius: 16px;
   --player-sheet-bg: #14171c;
   --player-sheet-line: rgba(237, 240, 244, 0.12);
+  /* up next / queue */
+  --player-queue-sheet-width: 30rem;
+  --player-queue-row-height: 4.25rem;
+  --player-queue-art-size: 2.75rem;
+  --player-queue-handle-size: 2.5rem;
+  --player-queue-icon-size: 1rem;
+  --player-queue-border-width: 1px;
+  --player-queue-pill-radius: 999px;
+  --player-queue-overlay-bg: rgba(10, 11, 14, 0.56);
+  --player-queue-overlay-blur: 8px;
+  --player-queue-sheet-shadow: 0 -8px 32px rgba(0, 0, 0, 0.4);
+  --player-queue-drag-shadow: 0 8px 22px rgba(0, 0, 0, 0.38);
+  --player-queue-grip-width: 2rem;
+  --player-queue-grip-height: 3px;
+  --player-queue-grip-opacity: 0.7;
+  --player-queue-heading-size: 0.75rem;
+  --player-queue-heading-weight: 700;
+  --player-queue-heading-tracking: 0.18em;
+  --player-queue-meta-size: 0.625rem;
+  --player-queue-meta-weight: 600;
+  --player-queue-meta-tracking: 0.1em;
+  --player-queue-duration-size: 0.6875rem;
+  --player-queue-title-size: 0.875rem;
+  --player-queue-title-weight: 600;
+  --player-queue-empty-size: 0.8125rem;
+  --player-queue-copy-gap: 0.2rem;
+  --player-queue-count-gap: 0.25rem;
+  --player-queue-row-gap: 0.5rem;
+  --player-queue-content-gap: 0.625rem;
+  --player-queue-action-gap: 0.75rem;
+  --player-queue-item-transition: 180ms;
+  --player-queue-sheet-transition: 360ms;
+  --player-queue-drag-lift: 1.01;
 
   /* motion */
   --player-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --player-ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ------------------------------------------------------------
+   3.6 LIBRARY LAYOUT TOKENS
+   The archive uses the music theme rather than a separate visual system.
+   ------------------------------------------------------------ */
+:root {
+  --library-max-width: 64rem;
+  --library-gutter: 1rem;
+  --library-gutter-wide: 1.5rem;
+  --library-gap: 0.5rem;
+  --library-gap-tight: 0.25rem;
+  --library-hero-emo-height: 7.5rem;
+  --library-control-pad: 1rem;
+  --library-tab-height: 2.75rem;
+  --library-row-height: 4.5rem;
+  --library-art-size: 2.75rem;
+  --library-menu-size: 2.75rem;
+  --library-number-column: 2rem;
+  --library-duration-column: 2.75rem;
+  --library-row-gap: 0.75rem;
+  --library-album-gap: 1rem;
+  --library-sheet-width: 32rem;
+  --library-sheet-radius: 1rem;
+  --library-motion: 220ms;
+  --library-line-width: 1px;
+  --library-indicator-height: 2px;
+  --library-icon-size: 1rem;
+  --library-skeleton-opacity: 0.55;
 }
 
 /* ------------------------------------------------------------
@@ -700,8 +762,13 @@
 
 /* mobile Search workspace */
 html.mobile-search-is-open,
-html.mobile-search-is-open body {
+html.mobile-search-is-open body,
+html.systema-player-open,
+html.systema-player-open body,
+html.library-sheet-open,
+html.library-sheet-open body {
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .mobile-search-overlay {

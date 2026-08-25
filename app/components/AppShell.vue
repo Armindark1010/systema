@@ -8,8 +8,10 @@
 // Global  : command palette, full player, queue drawer
 // ============================================================
 
+const route = useRoute()
 const { isPlaying, togglePlay } = usePlayer()
 const { openPalette } = useQuickSearch()
+const showMobileHeader = computed(() => route.meta.hideMobileHeader !== true)
 
 // real audio engine — drives the generative synth from player state
 const engine = useAudioEngine()
@@ -43,7 +45,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
     <DesktopSidebar />
 
     <!-- mobile header -->
-    <MobileHeader />
+    <MobileHeader v-if="showMobileHeader" />
 
     <!-- main column -->
     <main

@@ -22,16 +22,30 @@ const queueOpen = ref(false)
 const fullPlayerOpen = ref(false)
 const favorites = ref<Set<string>>(new Set())
 
-// --- ticker: simulates playback time (no audio engine) ------------
+// --- ticker: simulates an audio clock (no audio engine) ------------
+// `progressMs` is deliberately the only playback position source. The
+// high-frequency clock mirrors an audio element's currentTime closely enough
+// for precise scrubbing and lyrics sync, rather than visually faking progress.
 let ticker: ReturnType<typeof setInterval> | null = null
+let tickerLastAt = 0
 let advanceQueue: (() => void) | null = null
+
+function nowMs() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now()
+}
 
 function startTicker() {
   if (ticker) return
+  tickerLastAt = nowMs()
   ticker = setInterval(() => {
     const current = queue.value[index.value]
     if (!current) return
-    progressMs.value += 1000
+
+    const now = nowMs()
+    const elapsed = Math.max(0, now - tickerLastAt)
+    tickerLastAt = now
+    progressMs.value += elapsed
+
     if (progressMs.value >= current.track.duration * 1000) {
       if (repeat.value === 'one') {
         progressMs.value = 0
@@ -39,7 +53,7 @@ function startTicker() {
         advanceQueue?.()
       }
     }
-  }, 1000)
+  }, 250)
 }
 
 function stopTicker() {
@@ -47,6 +61,7 @@ function stopTicker() {
     clearInterval(ticker)
     ticker = null
   }
+  tickerLastAt = 0
 }
 
 export function usePlayer() {
@@ -170,6 +185,32 @@ export function usePlayer() {
     repeat.value = repeat.value === 'off' ? 'all' : repeat.value === 'all' ? 'one' : 'off'
   }
 
+  /** Play a specific entry in the centralized playback queue. */
+  function playQueueItem(queueIndex: number) {
+    if (queueIndex < 0 || queueIndex >= queue.value.length) return
+    index.value = queueIndex
+    progressMs.value = 0
+    isPlaying.value = true
+    const track = queue.value[queueIndex]?.track
+    if (track) recordPlayed(track.id)
+    startTicker()
+  }
+
+  /** Reorders the actual playback queue; the player always reads this order. */
+  function reorderQueue(from: number, to: number) {
+    if (from === to || from < 0 || to < 0 || from >= queue.value.length || to >= queue.value.length) return
+    const nextQueue = [...queue.value]
+    const [moved] = nextQueue.splice(from, 1)
+    if (!moved) return
+    nextQueue.splice(to, 0, moved)
+    queue.value = nextQueue
+
+    // Keep the same playing item active when another item moves around it.
+    if (index.value === from) index.value = to
+    else if (from < index.value && to >= index.value) index.value -= 1
+    else if (from > index.value && to <= index.value) index.value += 1
+  }
+
   function removeFromQueue(i: number) {
     if (i < 0 || i >= queue.value.length) return
     queue.value.splice(i, 1)
@@ -187,6 +228,29 @@ export function usePlayer() {
     progressMs.value = 0
     isPlaying.value = false
     stopTicker()
+  }
+
+  /**
+   * The full-player prototype needs a real navigation destination even when
+   * a track was launched as a one-item queue (for example from Search).
+   * Existing playlists/albums are never replaced; only a lone item receives
+   * the local SYSTEMA companion tracks.
+   */
+  function ensureFullPlayerNavigation() {
+    const current = currentTrack.value
+    if (!current || queue.value.length > 1) return
+
+    const companionIds = ['tr-01', 'tr-37', 'tr-38']
+    const companions = companionIds
+      .filter(id => id !== current.id)
+      .map(id => catalog.find(track => track.id === id))
+      .filter((track): track is Track => Boolean(track))
+      .map(track => ({ track, context: 'SYSTEMA FULL PLAYER' }))
+
+    if (companions.length) {
+      queue.value = [{ track: current, context: queue.value[0]?.context ?? 'SYSTEMA FULL PLAYER' }, ...companions]
+      index.value = 0
+    }
   }
 
   function openFullPlayer() {
@@ -225,8 +289,11 @@ export function usePlayer() {
     toggleShuffle: () => (shuffle.value = !shuffle.value),
     setVolume: (v: number) => (volume.value = Math.max(0, Math.min(1, v))),
     toggleMute: () => (muted.value = !muted.value),
+    playQueueItem,
+    reorderQueue,
     removeFromQueue,
     clearQueue,
+    ensureFullPlayerNavigation,
     openFullPlayer,
     setQueueOpen: (v: boolean) => (queueOpen.value = v),
     setFullPlayerOpen: (v: boolean) => (fullPlayerOpen.value = v),
