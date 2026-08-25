@@ -58,6 +58,19 @@ export default defineConfig({
       success: 'var(--sys-success)',
       warning: 'var(--sys-warning)',
 
+      // ---- immersive player (fixed dark) ----
+      'player-bg': 'var(--player-bg)',
+      'player-bg-soft': 'var(--player-bg-soft)',
+      'player-fg': 'var(--player-fg)',
+      'player-fg-muted': 'var(--player-fg-muted)',
+      'player-fg-faint': 'var(--player-fg-faint)',
+      'player-line': 'var(--player-line)',
+      'player-line-strong': 'var(--player-line-strong)',
+      'player-control': 'var(--player-control)',
+      'player-control-hover': 'var(--player-control-hover)',
+      'player-primary': 'var(--player-primary)',
+      'player-accent': 'var(--ai-primary)',
+
       // ---- AI visual system (fixed) ----
       'ai-base': 'var(--ai-bg)',
       'ai-surface': 'var(--ai-surface)',
