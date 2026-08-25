@@ -37,35 +37,41 @@ watch(() => settings.library.defaultSort, (value) => {
     <SettingsSection id="music-library" index="01" label="MUSIC LIBRARY" description="ARCHIVE DISCOVERY">
       <div class="border border-line divide-y divide-line">
         <SettingRow
+          id="auto-scan"
+          icon="lucide:radar"
           label="AUTO SCAN"
-          description="AUTOMATICALLY DETECT NEW MUSIC FILES."
+          description="Automatically detect new music files."
           coming-soon="REQUIRES MEDIASTORE — NOT AVAILABLE IN THIS BUILD"
         >
-          <USwitch
+          <SettingsToggle
             :model-value="settings.library.autoScan"
             aria-label="Auto scan"
-            @update:model-value="(value: boolean) => settings.patchLibrary({ autoScan: value })"
+            @update:model-value="value => settings.patchLibrary({ autoScan: value })"
           />
         </SettingRow>
         <SettingRow
+          id="scan-startup"
+          icon="lucide:power"
           label="SCAN ON STARTUP"
-          description="RESYNC THE INDEX WHEN SYSTEMA OPENS."
+          description="Resync the index when SYSTEMA opens."
           coming-soon="REQUIRES MEDIASTORE — NOT AVAILABLE IN THIS BUILD"
         >
-          <USwitch
+          <SettingsToggle
             :model-value="settings.library.scanOnStartup"
             aria-label="Scan on startup"
-            @update:model-value="(value: boolean) => settings.patchLibrary({ scanOnStartup: value })"
+            @update:model-value="value => settings.patchLibrary({ scanOnStartup: value })"
           />
         </SettingRow>
         <SettingRow
+          id="subdirectories"
+          icon="lucide:folder-tree"
           label="INCLUDE SUBDIRECTORIES"
-          description="WALK NESTED FOLDERS WHEN A NATIVE SCAN RUNS."
+          description="Walk nested folders when a native scan runs."
         >
-          <USwitch
+          <SettingsToggle
             :model-value="settings.library.includeSubdirectories"
             aria-label="Include subdirectories"
-            @update:model-value="(value: boolean) => settings.patchLibrary({ includeSubdirectories: value })"
+            @update:model-value="value => settings.patchLibrary({ includeSubdirectories: value })"
           />
         </SettingRow>
       </div>
@@ -73,16 +79,21 @@ watch(() => settings.library.defaultSort, (value) => {
 
     <SettingsSection id="sorting" index="02" label="SORTING" description="DEFAULT ARCHIVE ORDER">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="DEFAULT SORT" description="THE LIBRARY STORE OPENS WITH THIS ORDER. YOU CAN STILL CHANGE IT IN THE ARCHIVE.">
-          <SettingsSegmented
+        <SettingRow
+          id="default-sort"
+          icon="lucide:arrow-up-down"
+          label="DEFAULT SORT"
+          description="The library store opens with this order. You can still change it in the archive."
+        >
+          <SettingsSelect
             :model-value="settings.library.defaultSort"
             :options="sortOptions"
             aria-label="Default library sort"
-            compact
+            title="DEFAULT SORT"
             @update:model-value="value => settings.patchLibrary({ defaultSort: value })"
           />
         </SettingRow>
-        <SettingRow label="CURRENT LIBRARY ORDER" description="LIVE VALUE FROM THE LIBRARY STORE.">
+        <SettingRow icon="lucide:list-ordered" label="CURRENT LIBRARY ORDER" description="Live value from the library store.">
           <span class="label text-fg">{{ librarySortOptions.find(option => option.id === library.sortBy)?.label }}</span>
         </SettingRow>
       </div>
@@ -91,34 +102,40 @@ watch(() => settings.library.defaultSort, (value) => {
     <SettingsSection id="metadata" index="03" label="METADATA" description="TAGS AND USER EDITS">
       <div class="border border-line divide-y divide-line">
         <SettingRow
+          id="embedded-metadata"
+          icon="lucide:file-text"
           label="READ EMBEDDED METADATA"
-          description="PREFER ID3 / VORBIS / MP4 ATOMS WHEN THE NATIVE PARSER RUNS."
+          description="Prefer ID3 / Vorbis / MP4 atoms when the native parser runs."
         >
-          <USwitch
+          <SettingsToggle
             :model-value="settings.library.readEmbeddedMetadata"
             aria-label="Read embedded metadata"
-            @update:model-value="(value: boolean) => settings.patchLibrary({ readEmbeddedMetadata: value })"
+            @update:model-value="value => settings.patchLibrary({ readEmbeddedMetadata: value })"
           />
         </SettingRow>
         <SettingRow
+          id="auto-artwork"
+          icon="lucide:image"
           label="AUTO FETCH ARTWORK"
-          description="ALLOW A NETWORK FALLBACK ONLY WHEN EMBEDDED ART IS MISSING."
+          description="Allow a network fallback only when embedded art is missing."
           coming-soon="NETWORK ARTWORK IS NOT ACTIVE IN THIS BUILD"
         >
-          <USwitch
+          <SettingsToggle
             :model-value="settings.library.autoFetchArtwork"
             aria-label="Auto fetch artwork"
-            @update:model-value="(value: boolean) => settings.patchLibrary({ autoFetchArtwork: value })"
+            @update:model-value="value => settings.patchLibrary({ autoFetchArtwork: value })"
           />
         </SettingRow>
         <SettingRow
+          id="preserve-edits"
+          icon="lucide:lock"
           label="PRESERVE USER EDITS"
-          description="MANUALLY EDITED METADATA IS NEVER OVERWRITTEN AUTOMATICALLY."
+          description="Manually edited metadata is never overwritten automatically."
         >
-          <USwitch
+          <SettingsToggle
             :model-value="settings.library.preserveUserEdits"
             aria-label="Preserve user edits"
-            @update:model-value="(value: boolean) => settings.patchLibrary({ preserveUserEdits: value })"
+            @update:model-value="value => settings.patchLibrary({ preserveUserEdits: value })"
           />
         </SettingRow>
       </div>
@@ -127,10 +144,11 @@ watch(() => settings.library.defaultSort, (value) => {
     <SettingsSection id="artwork" index="04" label="ARTWORK" description="COVER SOURCE PREFERENCE">
       <div class="border border-line divide-y divide-line">
         <SettingRow
+          icon="lucide:image-plus"
           label="ARTWORK SOURCE"
-          description="EMBEDDED FIRST, THEN EXTERNAL FILES, OR GENERATE A PLACEHOLDER. LOCAL PROCESSING COMES WITH THE NATIVE LAYER."
+          description="Embedded first, then external files, or generate a placeholder. Local processing comes with the native layer."
         >
-          <SettingsSegmented
+          <SettingsSegmentedControl
             :model-value="settings.library.artworkPreference"
             :options="artworkOptions"
             aria-label="Artwork source"
@@ -143,8 +161,10 @@ watch(() => settings.library.defaultSort, (value) => {
     <SettingsSection id="scan" index="05" label="SCAN LIBRARY" description="MEDIASTORE">
       <div class="border border-line">
         <SettingRow
+          id="scan-library"
+          icon="lucide:scan-search"
           label="SCAN MUSIC LIBRARY"
-          description="A FULL DEVICE SCAN REQUIRES THE ANDROID MEDIASTORE ADAPTER."
+          description="A full device scan requires the Android MediaStore adapter."
           coming-soon="NOT AVAILABLE IN THIS BUILD"
         >
           <button class="sys-btn-outline !h-8" disabled>

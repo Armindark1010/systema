@@ -4,14 +4,7 @@ import { useSettingsStore } from '~/stores/settings'
 
 const settings = useSettingsStore()
 
-const crossfadeOptions = [
-  { value: 0 as CrossfadeSeconds, label: 'OFF' },
-  { value: 2 as CrossfadeSeconds, label: '2S' },
-  { value: 4 as CrossfadeSeconds, label: '4S' },
-  { value: 6 as CrossfadeSeconds, label: '6S' },
-  { value: 8 as CrossfadeSeconds, label: '8S' },
-  { value: 10 as CrossfadeSeconds, label: '10S' },
-]
+const crossfadeOptions: CrossfadeSeconds[] = [0, 2, 4, 6, 8, 10]
 
 const replayGainOptions = [
   { value: 'off' as ReplayGainMode, label: 'OFF' },
@@ -23,49 +16,69 @@ const queueOptions = [
   { value: 'replace' as QueueAfterPlaylist, label: 'REPLACE' },
   { value: 'append' as QueueAfterPlaylist, label: 'APPEND' },
 ]
+
+function setCrossfade(value: number) {
+  const next = crossfadeOptions.reduce((closest, option) =>
+    Math.abs(option - value) < Math.abs(closest - value) ? option : closest,
+  0)
+  settings.patchPlayback({ crossfade: next })
+}
 </script>
 
 <template>
   <div class="space-y-10">
     <SettingsSection id="playback" index="01" label="PLAYBACK" description="TRANSPORT CONTRACT FOR THE PLAYER STORE">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="AUTOPLAY" description="CONTINUE WITH RELATED MUSIC FROM THE LOCAL CATALOG AFTER THE QUEUE ENDS.">
-          <USwitch
+        <SettingRow
+          id="autoplay"
+          icon="lucide:play"
+          label="AUTOPLAY"
+          description="Continue with related music from the local catalog after the queue ends."
+        >
+          <SettingsToggle
             :model-value="settings.playback.autoplay"
             aria-label="Autoplay"
-            @update:model-value="(value: boolean) => settings.patchPlayback({ autoplay: value })"
+            @update:model-value="value => settings.patchPlayback({ autoplay: value })"
           />
         </SettingRow>
         <SettingRow
+          id="gapless"
+          icon="lucide:link"
           label="GAPLESS PLAYBACK"
-          description="REDUCE SILENCE BETWEEN CONSECUTIVE TRACKS."
+          description="Reduce silence between consecutive tracks."
           coming-soon="PREPARED FOR MEDIA3 — NOT APPLIED IN THE WEB ENGINE"
         >
-          <USwitch
+          <SettingsToggle
             :model-value="settings.playback.gapless"
             aria-label="Gapless playback"
-            @update:model-value="(value: boolean) => settings.patchPlayback({ gapless: value })"
+            @update:model-value="value => settings.patchPlayback({ gapless: value })"
           />
         </SettingRow>
         <SettingRow
+          id="crossfade"
+          icon="lucide:blend"
           label="CROSSFADE"
-          :description="settings.playback.crossfade === 0 ? 'NO OVERLAP BETWEEN TRACKS.' : `${settings.playback.crossfade} SECONDS OF OVERLAP BETWEEN TRACKS.`"
+          :description="settings.playback.crossfade === 0 ? 'No overlap between tracks.' : `${settings.playback.crossfade} seconds of overlap between tracks.`"
           coming-soon="PREPARED FOR THE NATIVE AUDIO ENGINE"
         >
-          <SettingsSegmented
+          <SettingsSlider
             :model-value="settings.playback.crossfade"
-            :options="crossfadeOptions"
+            :min="0"
+            :max="10"
+            :step="2"
             aria-label="Crossfade duration"
-            compact
-            @update:model-value="value => settings.patchPlayback({ crossfade: value })"
+            suffix="s"
+            @update:model-value="setCrossfade"
           />
         </SettingRow>
         <SettingRow
+          id="replay-gain"
+          icon="lucide:audio-lines"
           label="REPLAY GAIN"
-          description="NORMALIZE PERCEIVED LOUDNESS BETWEEN TRACKS. NO DSP RUNS IN THE NUXT LAYER."
+          description="Normalize perceived loudness between tracks. No DSP runs in the Nuxt layer."
           coming-soon="CONSUMED LATER BY THE NATIVE AUDIO ENGINE"
         >
-          <SettingsSegmented
+          <SettingsSegmentedControl
             :model-value="settings.playback.replayGain"
             :options="replayGainOptions"
             aria-label="Replay gain"
@@ -73,18 +86,25 @@ const queueOptions = [
           />
         </SettingRow>
         <SettingRow
+          id="resume"
+          icon="lucide:rotate-ccw"
           label="RESUME PLAYBACK"
-          description="WHEN ENABLED, THE NATIVE LAYER WILL RESTORE THE LAST POSITION ON LAUNCH."
+          description="When enabled, the native layer will restore the last position on launch."
           coming-soon="POSITION PERSISTENCE IS NOT IMPLEMENTED IN THIS BUILD"
         >
-          <USwitch
+          <SettingsToggle
             :model-value="settings.playback.resumePlayback"
             aria-label="Resume playback"
-            @update:model-value="(value: boolean) => settings.patchPlayback({ resumePlayback: value })"
+            @update:model-value="value => settings.patchPlayback({ resumePlayback: value })"
           />
         </SettingRow>
-        <SettingRow label="QUEUE AFTER PLAYLIST" description="REPLACE THE CURRENT QUEUE, OR APPEND THE PLAYLIST TO WHAT IS ALREADY QUEUED. THE PLAYER STORE READS THIS DIRECTLY.">
-          <SettingsSegmented
+        <SettingRow
+          id="queue-behavior"
+          icon="lucide:list-plus"
+          label="QUEUE AFTER PLAYLIST"
+          description="Replace the current queue, or append the playlist to what is already queued. The player store reads this directly."
+        >
+          <SettingsSegmentedControl
             :model-value="settings.playback.queueAfterPlaylist"
             :options="queueOptions"
             aria-label="Queue after playlist"
@@ -97,29 +117,32 @@ const queueOptions = [
     <SettingsSection id="audio" index="02" label="AUDIO" description="OUTPUT AND ENGINE">
       <div class="border border-line divide-y divide-line">
         <SettingRow
+          icon="lucide:speaker"
           label="OUTPUT"
-          description="ROUTE PLAYBACK TO A SPECIFIC DEVICE."
+          description="Route playback to a specific device."
           coming-soon="COMING WITH ANDROID AUDIO ENGINE"
         >
-          <span class="label text-fg-faint">SYSTEM DEFAULT</span>
+          <span class="label text-fg-muted">SYSTEM DEFAULT</span>
         </SettingRow>
         <SettingRow
+          icon="lucide:volume-2"
           label="VOLUME NORMALIZATION"
-          description="EVEN LOUDNESS ACROSS THE ARCHIVE."
+          description="Even loudness across the archive."
           coming-soon="COMING WITH ANDROID AUDIO ENGINE"
         >
-          <USwitch
+          <SettingsToggle
             :model-value="settings.audio.volumeNormalization"
             aria-label="Volume normalization"
-            @update:model-value="(value: boolean) => settings.patchAudio({ volumeNormalization: value })"
+            @update:model-value="value => settings.patchAudio({ volumeNormalization: value })"
           />
         </SettingRow>
         <SettingRow
+          icon="lucide:gauge"
           label="AUDIO QUALITY"
-          description="PREFERRED DECODE QUALITY."
+          description="Preferred decode quality."
           coming-soon="COMING WITH ANDROID AUDIO ENGINE"
         >
-          <SettingsSegmented
+          <SettingsSelect
             :model-value="settings.audio.quality"
             :options="[
               { value: 'lossless', label: 'LOSSLESS' },
@@ -127,12 +150,14 @@ const queueOptions = [
               { value: 'standard', label: 'STANDARD' },
             ]"
             aria-label="Audio quality"
+            title="AUDIO QUALITY"
             @update:model-value="value => settings.patchAudio({ quality: value })"
           />
         </SettingRow>
         <SettingRow
+          icon="lucide:cpu"
           label="PLAYBACK ENGINE"
-          description="THE WEB BUILD USES THE BROWSER AUDIO ELEMENT."
+          description="The web build uses the browser audio element."
           coming-soon="COMING WITH ANDROID AUDIO ENGINE"
         >
           <span class="label text-fg">WEB</span>

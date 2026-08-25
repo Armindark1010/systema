@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { hydrateSettings } from '../app/services/persistence/settingsHydrate.ts'
-import { DEFAULT_SETTINGS } from '../app/data/settings.ts'
+import { DEFAULT_SETTINGS, searchSettings } from '../app/data/settings.ts'
+import { SYSTEMA_ABOUT } from '../app/data/about.ts'
 
 const merged = hydrateSettings({
   appearance: { theme: 'dark', accent: 'gold' },
@@ -29,5 +30,18 @@ assert.equal(invalid.appearance.motion, 'full')
 
 const empty = hydrateSettings(null)
 assert.deepEqual(empty.gestures, DEFAULT_SETTINGS.gestures)
+
+const crossfadeHits = searchSettings('crossfade')
+assert.ok(crossfadeHits.some(entry => entry.id === 'crossfade' && entry.category === 'playback'))
+
+const aiHits = searchSettings('AI')
+assert.ok(aiHits.some(entry => entry.category === 'ai'))
+assert.ok(aiHits.length >= 3)
+
+const emptySearch = searchSettings('   ')
+assert.equal(emptySearch.length, 0)
+
+assert.equal(SYSTEMA_ABOUT.version, null)
+assert.equal(SYSTEMA_ABOUT.packageName, 'systema')
 
 console.log('settings hydration ok')

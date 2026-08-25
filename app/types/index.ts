@@ -11,6 +11,7 @@
 export type Theme = 'default' | 'premium' | 'dark' | 'midcentury' | 'bauhaus'
 
 export * from './settings'
+export * from './playlists'
 
 export interface Genre {
   id: string

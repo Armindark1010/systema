@@ -10,6 +10,20 @@ import { SETTINGS_CATEGORIES } from '~/data/settings'
 const route = useRoute()
 const isIndex = computed(() => route.path === '/settings')
 const active = computed(() => SETTINGS_CATEGORIES.find(category => route.path === category.to || route.path.startsWith(`${category.to}/`)))
+
+function scrollToHash() {
+  if (!import.meta.client) return
+  const hash = route.hash.replace('#', '')
+  if (!hash) return
+  nextTick(() => {
+    const target = document.getElementById(hash)
+    if (!target) return
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    target.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' })
+  })
+}
+
+watch(() => route.fullPath, scrollToHash, { immediate: true })
 </script>
 
 <template>
@@ -25,12 +39,12 @@ const active = computed(() => SETTINGS_CATEGORIES.find(category => route.path ==
           <UIcon name="lucide:arrow-left" class="w-4 h-4" />
         </NuxtLink>
         <div class="min-w-0">
-          <p class="label text-fg-faint">{{ isIndex ? 'CONTROL CENTER' : (active?.index ?? '00') }}</p>
+          <p class="label text-fg-muted">{{ isIndex ? 'CONTROL CENTER' : (active?.index ?? '00') }}</p>
           <div class="flex flex-wrap items-baseline gap-3">
             <h1 class="text-h1 font-bold tracking-tight text-fg">
               {{ isIndex ? 'SETTINGS' : (active?.label ?? 'SETTINGS') }}
             </h1>
-            <span class="label tnum text-fg-faint hidden sm:inline">
+            <span class="label tnum text-fg-muted hidden sm:inline">
               {{ isIndex ? `${String(SETTINGS_CATEGORIES.length).padStart(2, '0')} CATEGORIES` : (active?.kicker ?? '') }}
             </span>
           </div>
@@ -51,7 +65,7 @@ const active = computed(() => SETTINGS_CATEGORIES.find(category => route.path ==
               :class="active?.id === category.id ? 'bg-primary-muted text-primary' : 'text-fg-muted hover:(bg-hover text-fg)'"
               :aria-current="active?.id === category.id ? 'page' : undefined"
             >
-              <span class="tnum text-[10px] text-fg-faint w-5 shrink-0 text-right">{{ category.index }}</span>
+              <UIcon :name="category.icon" class="w-3.5 h-3.5 shrink-0" />
               <span>{{ category.label }}</span>
             </NuxtLink>
           </li>
@@ -59,6 +73,7 @@ const active = computed(() => SETTINGS_CATEGORIES.find(category => route.path ==
       </nav>
 
       <div class="min-w-0">
+        <SettingsSearch class="mb-6" />
         <slot />
       </div>
     </div>

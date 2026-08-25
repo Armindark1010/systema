@@ -8,7 +8,7 @@ withDefaults(defineProps<{
   <p
     class="mt-3 text-[11px] leading-relaxed"
     :class="{
-      'text-fg-faint': tone === 'muted',
+      'text-fg-muted': tone === 'muted',
       'text-warning': tone === 'warning',
       'text-ai-fg-muted': tone === 'ai',
     }"

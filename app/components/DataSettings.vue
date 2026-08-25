@@ -52,7 +52,7 @@ function resetLibraryIndex() {
 
 function resetEverything() {
   resetSettingsOnly()
-  analysis.reset()
+  resetAISession()
   trackAnalysis.clearCache()
   library.resetPresentation()
   toast.add({ title: 'SYSTEMA reset', description: 'Settings, AI session data, and library presentation restored. Music files were not deleted.', icon: 'lucide:rotate-ccw' })
@@ -79,10 +79,11 @@ function onConfirm() {
         <SettingRow
           v-for="row in storageRows"
           :key="row.label"
+          icon="lucide:hard-drive"
           :label="row.label"
           :description="row.note"
         >
-          <span class="label text-fg-faint">UNAVAILABLE</span>
+          <span class="label text-fg-muted">UNAVAILABLE</span>
         </SettingRow>
       </div>
       <SettingsNote>
@@ -92,7 +93,7 @@ function onConfirm() {
 
     <SettingsSection id="import" index="02" label="IMPORT" description="EXISTING PLAYLIST PIPELINE">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="IMPORT PLAYLIST" description="M3U · JSON · SYSTEMA FORMAT — THE EXISTING IMPORT STATE MACHINE.">
+        <SettingRow id="import-playlist" icon="lucide:file-input" label="IMPORT PLAYLIST" description="M3U · JSON · SYSTEMA format — the existing import state machine.">
           <button class="sys-btn-outline !h-8" @click="importOpen = true">
             <UIcon name="lucide:file-input" class="w-3.5 h-3.5" /> IMPORT
           </button>
@@ -102,12 +103,12 @@ function onConfirm() {
 
     <SettingsSection id="export" index="03" label="EXPORT" description="PLAYLISTS AND SETTINGS">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="EXPORT PLAYLISTS" description="REUSES THE EXISTING PLAYLIST EXPORT SYSTEM.">
+        <SettingRow id="export-playlist" icon="lucide:file-output" label="EXPORT PLAYLISTS" description="Reuses the existing playlist export system.">
           <button class="sys-btn-outline !h-8" @click="exportOpen = true">
             <UIcon name="lucide:file-output" class="w-3.5 h-3.5" /> EXPORT
           </button>
         </SettingRow>
-        <SettingRow label="EXPORT SETTINGS" description="DOWNLOAD THE CURRENT SETTINGS SNAPSHOT AS JSON.">
+        <SettingRow icon="lucide:download" label="EXPORT SETTINGS" description="Download the current settings snapshot as JSON.">
           <button class="sys-btn-outline !h-8" @click="exportSettingsFile">
             <UIcon name="lucide:download" class="w-3.5 h-3.5" /> EXPORT
           </button>
@@ -117,37 +118,39 @@ function onConfirm() {
 
     <SettingsSection id="cache" index="04" label="CACHE" description="SELECTIVE CLEARS">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="CLEAR IMAGE CACHE" description="ARTWORK DISK CACHE IS A NATIVE CONCERN." coming-soon="NO IMAGE CACHE API">
+        <SettingRow icon="lucide:image-off" label="CLEAR IMAGE CACHE" description="Artwork disk cache is a native concern." coming-soon="NO IMAGE CACHE API">
           <button class="sys-btn-outline !h-8" disabled>CLEAR</button>
         </SettingRow>
-        <SettingRow label="CLEAR AI CACHE" description="SESSION ANALYSES ONLY.">
+        <SettingRow icon="lucide:sparkles" label="CLEAR AI CACHE" description="Session analyses only.">
           <button class="sys-btn-outline !h-8" :disabled="trackAnalysis.cachedCount() === 0" @click="confirm = 'ai-cache'">
             CLEAR
           </button>
         </SettingRow>
-        <SettingRow label="CLEAR APP CACHE" description="NO APPLICATION CACHE LAYER IS INSTALLED." coming-soon="UNAVAILABLE">
+        <SettingRow icon="lucide:eraser" label="CLEAR APP CACHE" description="No application cache layer is installed." coming-soon="UNAVAILABLE">
           <button class="sys-btn-outline !h-8" disabled>CLEAR</button>
         </SettingRow>
       </div>
     </SettingsSection>
 
     <SettingsSection id="reset" index="05" label="RESET SYSTEMA" description="DANGER ZONE">
-      <div class="border border-danger/40 divide-y divide-line">
-        <SettingRow label="RESET SETTINGS" description="RESTORE DEFAULT CONFIGURATION. DOES NOT TOUCH MUSIC FILES.">
-          <button class="sys-btn-outline !h-8" @click="confirm = 'settings'">RESET</button>
-        </SettingRow>
-        <SettingRow label="RESET AI DATA" description="CLEARS AI SESSION STATE. DELETES CACHED ANALYSIS ONLY IF THAT POLICY IS ENABLED.">
-          <button class="sys-btn-outline !h-8" @click="confirm = 'ai'">RESET</button>
-        </SettingRow>
-        <SettingRow label="RESET LIBRARY INDEX" description="RESTORES LIBRARY PRESENTATION (SECTION AND SORT). DOES NOT DELETE MUSIC FILES.">
-          <button class="sys-btn-outline !h-8" @click="confirm = 'library'">RESET</button>
-        </SettingRow>
-        <SettingRow label="RESET EVERYTHING" description="SETTINGS + AI SESSION DATA + LIBRARY PRESENTATION. MUSIC FILES ON DISK ARE NEVER DELETED.">
-          <button class="sys-btn-outline !h-8 !border-danger !text-danger" @click="confirm = 'everything'">
-            RESET
-          </button>
-        </SettingRow>
-      </div>
+      <SettingsDangerZone title="IRREVERSIBLE ACTIONS">
+        <div class="divide-y divide-danger">
+          <SettingRow icon="lucide:sliders-horizontal" label="RESET SETTINGS" description="Restore default configuration. Does not touch music files.">
+            <button class="sys-btn-outline !h-8" @click="confirm = 'settings'">RESET</button>
+          </SettingRow>
+          <SettingRow icon="lucide:sparkles" label="RESET AI DATA" description="Clears AI session state. Deletes cached analysis only if that policy is enabled.">
+            <button class="sys-btn-outline !h-8" @click="confirm = 'ai'">RESET</button>
+          </SettingRow>
+          <SettingRow icon="lucide:library" label="RESET LIBRARY INDEX" description="Restores library presentation (section and sort). Does not delete music files.">
+            <button class="sys-btn-outline !h-8" @click="confirm = 'library'">RESET</button>
+          </SettingRow>
+          <SettingRow icon="lucide:triangle-alert" label="RESET EVERYTHING" description="Settings + AI session data + library presentation. Music files on disk are never deleted.">
+            <button class="sys-btn-outline !h-8 !border-danger !text-danger" @click="confirm = 'everything'">
+              RESET
+            </button>
+          </SettingRow>
+        </div>
+      </SettingsDangerZone>
     </SettingsSection>
   </div>
 

@@ -120,4 +120,5 @@ export interface SettingsCategory {
   kicker: string
   description: string
   to: string
+  icon: string
 }

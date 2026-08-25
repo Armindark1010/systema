@@ -44,17 +44,27 @@ function clearCache() {
   <div class="space-y-10">
     <SettingsSection id="engine" index="01" label="AI ENGINE" description="INTELLIGENCE LAYER">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="AI FEATURES" description="DISABLE INTERACTIONS WITHOUT DESTROYING STORED ANALYSIS.">
-          <USwitch
+        <SettingRow
+          id="ai-enabled"
+          icon="lucide:sparkles"
+          label="AI FEATURES"
+          description="Disable interactions without destroying stored analysis."
+        >
+          <SettingsToggle
             :model-value="settings.ai.enabled"
             aria-label="AI features"
-            @update:model-value="(value: boolean) => settings.patchAI({ enabled: value })"
+            @update:model-value="value => settings.patchAI({ enabled: value })"
           />
         </SettingRow>
-        <SettingRow label="MODEL CONFIGURATION" description="NO ON-DEVICE MODEL IS INSTALLED IN THIS FRONTEND BUILD.">
-          <span class="label text-fg-faint">NOT CONFIGURED</span>
+        <SettingRow
+          id="ai-model"
+          icon="lucide:box"
+          label="MODEL CONFIGURATION"
+          description="No on-device model is installed in this frontend build."
+        >
+          <span class="label text-fg-muted">NOT CONFIGURED</span>
         </SettingRow>
-        <SettingRow label="STATUS" description="THE UI IS READY. INFERENCE IS NOT.">
+        <SettingRow icon="lucide:circle-dot" label="STATUS" description="The UI is ready. Inference is not running.">
           <span class="label text-fg">STANDBY</span>
         </SettingRow>
       </div>
@@ -62,33 +72,45 @@ function clearCache() {
 
     <SettingsSection id="analysis" index="02" label="ANALYSIS" description="WHEN AND HOW DEEP">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="AUTOMATIC ANALYSIS" description="ANALYZE NEWLY DISCOVERED MUSIC WHEN THE PIPELINE EXISTS.">
-          <USwitch
+        <SettingRow
+          id="auto-analysis"
+          icon="lucide:scan-line"
+          label="AUTOMATIC ANALYSIS"
+          description="Analyze newly discovered music when the pipeline exists."
+        >
+          <SettingsToggle
             :model-value="settings.ai.autoAnalysis"
             aria-label="Automatic analysis"
-            @update:model-value="(value: boolean) => settings.patchAI({ autoAnalysis: value })"
+            @update:model-value="value => settings.patchAI({ autoAnalysis: value })"
           />
         </SettingRow>
         <SettingRow
+          id="analyze-charging"
+          icon="lucide:battery-charging"
           label="ANALYZE WHILE CHARGING"
-          description="ALLOW BACKGROUND ANALYSIS WHEN THE DEVICE IS CHARGING."
+          description="Allow background analysis when the device is charging."
           coming-soon="PREPARED FOR ANDROID WORKMANAGER — NUXT CANNOT RUN DEVICE BACKGROUND WORK"
         >
-          <USwitch
+          <SettingsToggle
             :model-value="settings.ai.analyzeWhileCharging"
             aria-label="Analyze while charging"
-            @update:model-value="(value: boolean) => settings.patchAI({ analyzeWhileCharging: value })"
+            @update:model-value="value => settings.patchAI({ analyzeWhileCharging: value })"
           />
         </SettingRow>
-        <SettingRow label="ANALYSIS DEPTH" description="QUICK: BASIC METADATA. STANDARD: MOOD, GENRE, ENERGY, TEMPO, LANGUAGE, INSTRUMENTS. DEEP: ADDITIONAL SEMANTIC ANALYSIS.">
-          <SettingsSegmented
+        <SettingRow
+          id="analysis-depth"
+          icon="lucide:layers"
+          label="ANALYSIS DEPTH"
+          description="Quick: basic metadata. Standard: mood, genre, energy, tempo, language, instruments. Deep: additional semantic analysis."
+        >
+          <SettingsSegmentedControl
             :model-value="settings.ai.depth"
             :options="depthOptions"
             aria-label="Analysis depth"
             @update:model-value="value => settings.patchAI({ depth: value })"
           />
         </SettingRow>
-        <SettingRow label="ANALYSIS PROGRESS" description="LOCAL SESSION COUNTERS ONLY — NOT A DEVICE-WIDE INDEX.">
+        <SettingRow icon="lucide:loader" label="ANALYSIS PROGRESS" description="Local session counters only — not a device-wide index.">
           <span class="tnum text-[12px] font-semibold text-fg">
             {{ analysis.state.value.analyzed }} / {{ analysis.state.value.total }}
           </span>
@@ -99,30 +121,40 @@ function clearCache() {
     <SettingsSection id="conditions" index="03" label="ANALYSIS CONDITIONS" description="FUTURE BACKGROUND WORKER">
       <div class="border border-line divide-y divide-line">
         <SettingRow
+          id="charging-required"
+          icon="lucide:plug"
           label="CHARGING REQUIRED"
-          description="ONLY SCHEDULE ANALYSIS WHILE PLUGGED IN."
+          description="Only schedule analysis while plugged in."
         >
-          <USwitch
+          <SettingsToggle
             :model-value="settings.ai.chargingRequired"
             aria-label="Charging required"
-            @update:model-value="(value: boolean) => settings.patchAI({ chargingRequired: value })"
+            @update:model-value="value => settings.patchAI({ chargingRequired: value })"
           />
         </SettingRow>
         <SettingRow
+          id="wifi-required"
+          icon="lucide:wifi"
           label="WI-FI REQUIRED"
-          description="RESERVED FOR OPTIONAL CLOUD ANALYSIS. LOCAL ANALYSIS DOES NOT NEED A NETWORK."
+          description="Reserved for optional cloud analysis. Local analysis does not need a network."
         >
-          <USwitch
+          <SettingsToggle
             :model-value="settings.ai.wifiRequired"
             aria-label="Wi-Fi required"
-            @update:model-value="(value: boolean) => settings.patchAI({ wifiRequired: value })"
+            @update:model-value="value => settings.patchAI({ wifiRequired: value })"
           />
         </SettingRow>
-        <SettingRow label="BATTERY THRESHOLD" description="DO NOT START BACKGROUND ANALYSIS BELOW THIS LEVEL.">
-          <SettingsSegmented
+        <SettingRow
+          id="battery-threshold"
+          icon="lucide:battery"
+          label="BATTERY THRESHOLD"
+          description="Do not start background analysis below this level."
+        >
+          <SettingsSelect
             :model-value="settings.ai.batteryThreshold"
             :options="batteryOptions"
             aria-label="Battery threshold"
+            title="BATTERY THRESHOLD"
             @update:model-value="value => settings.patchAI({ batteryThreshold: value })"
           />
         </SettingRow>
@@ -134,8 +166,13 @@ function clearCache() {
 
     <SettingsSection id="language" index="04" label="LANGUAGE" description="PERSIAN IS FIRST-CLASS">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="AI LANGUAGE" description="AUTO FOLLOWS THE QUERY. PERSIAN AND ENGLISH ARE EQUAL OUTPUT TARGETS.">
-          <SettingsSegmented
+        <SettingRow
+          id="ai-language"
+          icon="lucide:languages"
+          label="AI LANGUAGE"
+          description="Auto follows the query. Persian and English are equal output targets."
+        >
+          <SettingsSegmentedControl
             :model-value="settings.ai.language"
             :options="languageOptions"
             aria-label="AI language"
@@ -147,27 +184,40 @@ function clearCache() {
 
     <SettingsSection id="privacy" index="05" label="AI PRIVACY" description="LOCAL FIRST">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="PRIVACY MODE" description="KEEP MUSIC ANALYSIS ON THE DEVICE WHENEVER POSSIBLE.">
-          <SettingsSegmented
+        <SettingRow
+          id="ai-privacy"
+          icon="lucide:shield"
+          label="PRIVACY MODE"
+          description="Keep music analysis on the device whenever possible."
+        >
+          <SettingsSelect
             :model-value="settings.ai.privacy"
             :options="privacyOptions"
             aria-label="AI privacy"
-            compact
+            title="PRIVACY MODE"
             @update:model-value="value => settings.patchAI({ privacy: value })"
           />
         </SettingRow>
-        <SettingRow label="KEEP ANALYSIS" description="RETAIN COMPLETED ANALYSES BETWEEN SESSIONS WHEN NATIVE STORAGE EXISTS.">
-          <USwitch
+        <SettingRow
+          icon="lucide:save"
+          label="KEEP ANALYSIS"
+          description="Retain completed analyses between sessions when native storage exists."
+        >
+          <SettingsToggle
             :model-value="settings.ai.keepAnalysis"
             aria-label="Keep analysis"
-            @update:model-value="(value: boolean) => settings.patchAI({ keepAnalysis: value })"
+            @update:model-value="value => settings.patchAI({ keepAnalysis: value })"
           />
         </SettingRow>
-        <SettingRow label="DELETE ANALYSIS AFTER RESET" description="IF ENABLED, RESET AI DATA WILL CLEAR ANALYSIS. TOGGLING THIS DOES NOT DELETE ANYTHING NOW.">
-          <USwitch
+        <SettingRow
+          icon="lucide:trash-2"
+          label="DELETE ANALYSIS AFTER RESET"
+          description="If enabled, reset AI data will clear analysis. Toggling this does not delete anything now."
+        >
+          <SettingsToggle
             :model-value="settings.ai.deleteAnalysisAfterReset"
             aria-label="Delete analysis after reset"
-            @update:model-value="(value: boolean) => settings.patchAI({ deleteAnalysisAfterReset: value })"
+            @update:model-value="value => settings.patchAI({ deleteAnalysisAfterReset: value })"
           />
         </SettingRow>
       </div>
@@ -178,13 +228,18 @@ function clearCache() {
 
     <SettingsSection id="cache" index="06" label="AI CACHE" description="IN-MEMORY ANALYSES ONLY">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="CACHED ANALYSES" description="RESULTS HELD IN THE CURRENT SESSION.">
+        <SettingRow
+          id="ai-cache"
+          icon="lucide:database"
+          label="CACHED ANALYSES"
+          description="Results held in the current session."
+        >
           <span class="tnum text-[12px] font-semibold text-fg">{{ cachedCount }}</span>
         </SettingRow>
-        <SettingRow label="STORAGE USED" description="BYTE ACCOUNTING REQUIRES NATIVE STORAGE.">
-          <span class="label text-fg-faint">UNAVAILABLE</span>
+        <SettingRow icon="lucide:hard-drive" label="STORAGE USED" description="Byte accounting requires native storage.">
+          <span class="label text-fg-muted">UNAVAILABLE</span>
         </SettingRow>
-        <SettingRow label="CLEAR AI CACHE" description="REMOVES SESSION ANALYSIS RESULTS. MUSIC FILES ARE NEVER TOUCHED.">
+        <SettingRow icon="lucide:eraser" label="CLEAR AI CACHE" description="Removes session analysis results. Music files are never touched.">
           <button class="sys-btn-outline !h-8" :disabled="cachedCount === 0" @click="confirmClear = true">
             CLEAR
           </button>
@@ -199,6 +254,7 @@ function clearCache() {
     description="Remove cached analyses from this session. Music files and playlists stay untouched."
     confirm-label="CLEAR CACHE"
     danger
+    @update:open="value => (confirmClear = value)"
     @confirm="clearCache"
   />
 </template>

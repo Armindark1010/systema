@@ -15,25 +15,40 @@ const longPressOptions = [
   <div class="space-y-10">
     <SettingsSection id="player-swipe" index="01" label="PLAYER" description="EXISTING PLAYER GESTURES">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="SWIPE PLAYER" description="SWIPE LEFT OR RIGHT ON THE MINI PLAYER AND FULL PLAYER TO CHANGE TRACKS. USES THE EXISTING PLAYER GESTURE, NOT A SECOND SYSTEM.">
-          <USwitch
+        <SettingRow
+          id="swipe-player"
+          icon="lucide:move-horizontal"
+          label="SWIPE PLAYER"
+          description="Swipe left or right on the mini player and full player to change tracks. Uses the existing player gesture, not a second system."
+        >
+          <SettingsToggle
             :model-value="settings.gestures.swipePlayer"
             aria-label="Swipe player"
-            @update:model-value="(value: boolean) => settings.patchGestures({ swipePlayer: value })"
+            @update:model-value="value => settings.patchGestures({ swipePlayer: value })"
           />
         </SettingRow>
-        <SettingRow label="SWIPE QUEUE" description="SWIPE DOWN ON THE QUEUE SHEET TO DISMISS IT.">
-          <USwitch
+        <SettingRow
+          id="swipe-queue"
+          icon="lucide:chevrons-down"
+          label="SWIPE QUEUE"
+          description="Swipe down on the queue sheet to dismiss it."
+        >
+          <SettingsToggle
             :model-value="settings.gestures.swipeQueue"
             aria-label="Swipe queue"
-            @update:model-value="(value: boolean) => settings.patchGestures({ swipeQueue: value })"
+            @update:model-value="value => settings.patchGestures({ swipeQueue: value })"
           />
         </SettingRow>
-        <SettingRow label="DOUBLE TAP" description="DOUBLE TAP ARTWORK IN THE FULL PLAYER TO LIKE THE TRACK.">
-          <USwitch
+        <SettingRow
+          id="double-tap"
+          icon="lucide:pointer"
+          label="DOUBLE TAP"
+          description="Double tap artwork in the full player to like the track."
+        >
+          <SettingsToggle
             :model-value="settings.gestures.doubleTap"
             aria-label="Double tap"
-            @update:model-value="(value: boolean) => settings.patchGestures({ doubleTap: value })"
+            @update:model-value="value => settings.patchGestures({ doubleTap: value })"
           />
         </SettingRow>
       </div>
@@ -41,11 +56,16 @@ const longPressOptions = [
 
     <SettingsSection id="long-press" index="02" label="LONG PRESS" description="TRACK CONTEXT">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="LONG PRESS ON TRACK" description="CHOOSE WHICH ACTION SET OPENS. THE EXISTING LIBRARY ACTIONS SHEET IS REUSED.">
-          <SettingsSegmented
+        <SettingRow
+          icon="lucide:hand"
+          label="LONG PRESS ON TRACK"
+          description="Choose which action set opens. The existing library actions sheet is reused."
+        >
+          <SettingsSelect
             :model-value="settings.gestures.longPress"
             :options="longPressOptions"
             aria-label="Long press on track"
+            title="LONG PRESS"
             @update:model-value="value => settings.patchGestures({ longPress: value })"
           />
         </SettingRow>
@@ -55,14 +75,15 @@ const longPressOptions = [
     <SettingsSection id="haptics" index="03" label="HAPTIC FEEDBACK" description="NATIVE ONLY">
       <div class="border border-line divide-y divide-line">
         <SettingRow
+          icon="lucide:vibrate"
           label="HAPTIC FEEDBACK"
-          description="PREPARED FOR CAPACITOR / KOTLIN HAPTICS."
+          description="Prepared for Capacitor / Kotlin haptics."
           coming-soon="NOT ACTIVE IN THIS WEB BUILD"
         >
-          <USwitch
+          <SettingsToggle
             :model-value="settings.gestures.hapticFeedback"
             aria-label="Haptic feedback"
-            @update:model-value="(value: boolean) => settings.patchGestures({ hapticFeedback: value })"
+            @update:model-value="value => settings.patchGestures({ hapticFeedback: value })"
           />
         </SettingRow>
       </div>

@@ -58,6 +58,8 @@ export function createLocalStorageAdapter(): StorageAdapter {
 
 export const SETTINGS_STORAGE_KEY = 'systema:settings'
 export const LEGACY_THEME_KEY = 'systema:theme'
+export const PLAYLISTS_STORAGE_KEY = 'systema:playlists'
+export const FAVORITES_STORAGE_KEY = 'systema:favorites'
 
 const memory = new Map<string, string>()
 

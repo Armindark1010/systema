@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { AccentId, DensityId, MotionId } from '~/types/settings'
 import { ACCENT_SWATCHES } from '~/data/settings'
-import { THEME_META, THEMES } from '~/composables/useAppearance'
 import { useSettingsStore } from '~/stores/settings'
 
 const settings = useSettingsStore()
@@ -22,43 +21,7 @@ const motionOptions = [
 <template>
   <div class="space-y-10">
     <SettingsSection id="theme" index="01" label="THEME" description="TOKEN SWAP — THE WHOLE SYSTEM FOLLOWS">
-      <div class="grid sm:grid-cols-2 gap-px bg-line border border-line">
-        <button
-          v-for="id in THEMES"
-          :key="id"
-          type="button"
-          class="bg-surface flex items-start gap-4 px-4 py-4 text-left t-all pressable focus-ring hover:bg-hover"
-          role="radio"
-          :aria-checked="settings.appearance.theme === id"
-          :aria-label="`Theme ${THEME_META[id].name}`"
-          @click="settings.setTheme(id)"
-        >
-          <span
-            class="grid grid-cols-2 gap-[2px] w-14 h-14 border border-line shrink-0 p-1"
-            :style="{ backgroundColor: THEME_META[id].swatch[0] }"
-            aria-hidden="true"
-          >
-            <span :style="{ backgroundColor: THEME_META[id].swatch[1] }" />
-            <span :style="{ backgroundColor: THEME_META[id].swatch[2] }" />
-            <span :style="{ backgroundColor: THEME_META[id].swatch[3] }" />
-            <span :style="{ backgroundColor: THEME_META[id].swatch[0] }" />
-          </span>
-          <span class="min-w-0 flex-1">
-            <span class="flex items-baseline gap-2">
-              <span class="text-[13px] font-bold tracking-[0.12em] text-fg">{{ THEME_META[id].name }}</span>
-            </span>
-            <span class="block label text-fg-faint mt-1">{{ THEME_META[id].tag }}</span>
-            <span class="block text-[11px] text-fg-muted mt-1 leading-relaxed">{{ THEME_META[id].desc }}</span>
-          </span>
-          <span
-            class="w-4 h-4 shrink-0 grid place-items-center border t-all mt-1"
-            :class="settings.appearance.theme === id ? 'border-primary bg-primary' : 'border-line-strong'"
-            aria-hidden="true"
-          >
-            <UIcon v-if="settings.appearance.theme === id" name="lucide:check" class="w-3 h-3 text-primary-fg" />
-          </span>
-        </button>
-      </div>
+      <ThemeSelector />
       <SettingsNote>
         AI PAGES KEEP THE INTELLIGENCE VISUAL SYSTEM. EVERY OTHER SURFACE — HEADER, HOME, LIBRARY, SEARCH, PLAYER, DIALOGS — FOLLOWS THESE TOKENS.
       </SettingsNote>
@@ -66,7 +29,11 @@ const motionOptions = [
 
     <SettingsSection id="accent" index="02" label="ACCENT" description="PRIMARY SIGNAL COLOR">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="ACCENT" description="UPDATES PRIMARY CONTROLS, FOCUS RINGS, AND ACTIVE STATES GLOBALLY.">
+        <SettingRow
+          icon="lucide:paintbrush"
+          label="ACCENT"
+          description="Updates primary controls, focus rings, and active states globally."
+        >
           <div class="flex flex-wrap gap-2" role="radiogroup" aria-label="Accent color">
             <button
               v-for="accent in ACCENT_SWATCHES"
@@ -89,8 +56,12 @@ const motionOptions = [
 
     <SettingsSection id="density" index="03" label="INTERFACE DENSITY" description="SPACING TOKENS, NOT PER-COMPONENT HACKS">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="DENSITY" description="CONTROLS CARD SPACING, LIST ROWS, AND CONTROL HEIGHT THROUGH DESIGN TOKENS.">
-          <SettingsSegmented
+        <SettingRow
+          icon="lucide:rows-3"
+          label="DENSITY"
+          description="Controls card spacing, list rows, and control height through design tokens."
+        >
+          <SettingsSegmentedControl
             :model-value="settings.appearance.density"
             :options="densityOptions"
             aria-label="Interface density"
@@ -102,8 +73,12 @@ const motionOptions = [
 
     <SettingsSection id="motion" index="04" label="MOTION" description="GLOBAL TRANSITIONS">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="MOTION" description="FULL KEEPS SYSTEMA TRANSITIONS. REDUCED SHORTENS THEM. OFF DISABLES NON-ESSENTIAL ANIMATION. THE OPERATING SYSTEM PREFERENCE IS ALWAYS RESPECTED.">
-          <SettingsSegmented
+        <SettingRow
+          icon="lucide:activity"
+          label="MOTION"
+          description="Full keeps SYSTEMA transitions. Reduced shortens them. Off disables non-essential animation. The operating system preference is always respected."
+        >
+          <SettingsSegmentedControl
             :model-value="settings.appearance.motion"
             :options="motionOptions"
             aria-label="Motion"
@@ -115,14 +90,14 @@ const motionOptions = [
 
     <SettingsSection id="typography" index="05" label="TYPOGRAPHY" description="NEO-GROTESK SYSTEM">
       <div class="border border-line divide-y divide-line">
-        <SettingRow label="LATIN" description="INTER — NEO-GROTESK, THE SYSTEMA DEFAULT.">
+        <SettingRow icon="lucide:type" label="LATIN" description="Inter — neo-grotesk, the SYSTEMA default.">
           <span class="label text-fg">INTER</span>
         </SettingRow>
-        <SettingRow label="PERSIAN" description="VAZIRMATN IS FIRST-CLASS FOR PERSIAN STRINGS. NO SUBSTITUTE FONTS.">
+        <SettingRow icon="lucide:languages" label="PERSIAN" description="Vazirmatn is first-class for Persian strings. No substitute fonts.">
           <span class="label text-fg font-persian">وزیرمتن</span>
         </SettingRow>
-        <SettingRow label="SCALE" description="MICRO → SMALL → BODY → LEAD → TITLE → H2 → H1 → DISPLAY. LOCKED TO THE DESIGN SYSTEM.">
-          <span class="label text-fg-faint">SYSTEM</span>
+        <SettingRow icon="lucide:ruler" label="SCALE" description="Micro → small → body → lead → title → h2 → h1 → display. Locked to the design system.">
+          <span class="label text-fg-muted">SYSTEM</span>
         </SettingRow>
       </div>
     </SettingsSection>
