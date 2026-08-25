@@ -49,7 +49,7 @@ withDefaults(defineProps<{
   width: 2rem;
   height: 2rem;
   flex: 0 0 2rem;
-  @apply place-items-center;
+  place-items: center;
   border: 1px solid var(--sys-border);
   color: var(--sys-foreground-muted);
   background: var(--sys-surface-muted);
