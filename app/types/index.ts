@@ -35,6 +35,19 @@ export interface Album {
 export type TrackMood = 'dark' | 'dreamy' | 'energetic' | 'calm' | 'focused' | 'melancholic'
 export type TrackLang = 'en' | 'fa' | 'inst'
 
+/** Local analysis shape. The native AI pipeline will hydrate this later. */
+export interface TrackAI {
+  analyzed: boolean
+  mood: string[]
+  genres: string[]
+  /** 0–1 */
+  energy: number
+  bpm: number
+  language: string
+  themes: string[]
+  confidence: number
+}
+
 export interface Track {
   id: string
   title: string
@@ -51,6 +64,8 @@ export interface Track {
   plays: number
   favorite: boolean
   addedAt: string
+  /** Optional until the on-device analysis pipeline has completed. */
+  ai?: TrackAI
 }
 
 export type PlaylistKind = 'user' | 'system' | 'ai'

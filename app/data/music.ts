@@ -119,6 +119,25 @@ const seeds: TrackSeed[] = [
   ['tr-38', 'Architectural Echoes', 'a-sys', 'al-systema-echoes', 'g-electronic', 268, 2025, 61, 'dreamy', 'inst', 644, false],
 ]
 
+function makeLocalAI(seed: TrackSeed, index: number): Track['ai'] {
+  // A deterministic local representation of the future analysis payload.
+  // A small subset intentionally remains unanalyzed so AI sort paths handle
+  // incomplete on-device data without special casing in the UI.
+  const analyzed = index % 7 !== 0
+  const energy = Math.round((seed[7] / 100) * 100) / 100
+  const genre = genres.find(item => item.id === seed[4])?.name.toLowerCase() ?? 'electronic'
+  return {
+    analyzed,
+    mood: [seed[8], energy > 0.7 ? 'energetic' : energy < 0.42 ? 'calm' : 'focused'],
+    genres: [genre, energy > 0.7 ? 'electronic' : 'ambient'],
+    energy,
+    bpm: 86 + ((index * 11 + seed[5]) % 58),
+    language: seed[9] === 'inst' ? 'instrumental' : seed[9],
+    themes: index % 2 ? ['architecture', 'rhythm'] : ['night', 'motion'],
+    confidence: analyzed ? Math.round((0.78 + ((index * 3) % 20) / 100) * 100) / 100 : 0,
+  }
+}
+
 function buildTracks(): Track[] {
   const added = (i: number) => new Date(Date.UTC(2025, 4 + (i % 9), 1 + ((i * 3) % 27))).toISOString()
   return seeds.map((s, i) => ({
@@ -135,6 +154,7 @@ function buildTracks(): Track[] {
     plays: s[10],
     favorite: s[11],
     addedAt: added(i),
+    ai: makeLocalAI(s, i),
   }))
 }
 

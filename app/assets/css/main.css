@@ -226,6 +226,35 @@
 }
 
 /* ------------------------------------------------------------
+   3.6 LIBRARY LAYOUT TOKENS
+   The archive uses the music theme rather than a separate visual system.
+   ------------------------------------------------------------ */
+:root {
+  --library-max-width: 64rem;
+  --library-gutter: 1rem;
+  --library-gutter-wide: 1.5rem;
+  --library-gap: 0.5rem;
+  --library-gap-tight: 0.25rem;
+  --library-hero-emo-height: 7.5rem;
+  --library-control-pad: 1rem;
+  --library-tab-height: 2.75rem;
+  --library-row-height: 4.5rem;
+  --library-art-size: 2.75rem;
+  --library-menu-size: 2.75rem;
+  --library-number-column: 2rem;
+  --library-duration-column: 2.75rem;
+  --library-row-gap: 0.75rem;
+  --library-album-gap: 1rem;
+  --library-sheet-width: 32rem;
+  --library-sheet-radius: 1rem;
+  --library-motion: 220ms;
+  --library-line-width: 1px;
+  --library-indicator-height: 2px;
+  --library-icon-size: 1rem;
+  --library-skeleton-opacity: 0.55;
+}
+
+/* ------------------------------------------------------------
    4. NUXT UI VARIABLE MAPPING
    Primitives (command palette, drawers, modals, sliders…)
    follow SYSTEMA tokens per theme.
@@ -702,7 +731,9 @@
 html.mobile-search-is-open,
 html.mobile-search-is-open body,
 html.systema-player-open,
-html.systema-player-open body {
+html.systema-player-open body,
+html.library-sheet-open,
+html.library-sheet-open body {
   overflow: hidden;
   overscroll-behavior: none;
 }
