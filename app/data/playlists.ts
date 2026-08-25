@@ -1,0 +1,128 @@
+// ============================================================
+// SYSTEMA — Mock playlists
+// ============================================================
+import type { Playlist } from '~/types'
+
+export const playlists: Playlist[] = [
+  {
+    id: 'pl-functional',
+    title: 'FUNCTIONAL BEATS',
+    description: '18 tracks selected for focused work.',
+    cover: '/art/functional-beats.jpg',
+    kind: 'ai',
+    trackIds: [
+      'tr-01', 'tr-02', 'tr-03', 'tr-22', 'tr-23', 'tr-29', 'tr-06',
+      'tr-14', 'tr-17', 'tr-31', 'tr-10', 'tr-04', 'tr-35', 'tr-16',
+      'tr-08', 'tr-30', 'tr-32', 'tr-33',
+    ],
+    createdAt: '2025-08-18T08:00:00Z',
+    updatedAt: '2025-08-24T09:12:00Z',
+    aiMeta: { mood: 'FOCUSED', energy: 'HIGH', concept: 'focused work' },
+  },
+  {
+    id: 'pl-night-drive',
+    title: 'NIGHT DRIVE',
+    description: 'Dark synth for the open road.',
+    cover: '/art/outrun.jpg',
+    kind: 'system',
+    trackIds: ['tr-04', 'tr-05', 'tr-12', 'tr-13', 'tr-16', 'tr-17', 'tr-14', 'tr-35', 'tr-36', 'tr-18', 'tr-08', 'tr-11'],
+    createdAt: '2025-06-02T20:30:00Z',
+    updatedAt: '2025-08-20T22:04:00Z',
+  },
+  {
+    id: 'pl-deep-focus',
+    title: 'DEEP FOCUS',
+    description: 'Neoclassical and ambient concentration.',
+    cover: '/art/deep-focus.jpg',
+    kind: 'system',
+    trackIds: ['tr-20', 'tr-21', 'tr-33', 'tr-34', 'tr-07', 'tr-23', 'tr-29', 'tr-01', 'tr-02'],
+    createdAt: '2025-06-14T07:00:00Z',
+    updatedAt: '2025-08-18T13:40:00Z',
+  },
+  {
+    id: 'pl-late-night',
+    title: 'LATE NIGHT',
+    description: 'After midnight, city lights.',
+    cover: '/art/night-drive.jpg',
+    kind: 'system',
+    trackIds: ['tr-35', 'tr-13', 'tr-16', 'tr-36', 'tr-15', 'tr-12', 'tr-19', 'tr-18', 'tr-05', 'tr-11'],
+    createdAt: '2025-05-20T23:10:00Z',
+    updatedAt: '2025-08-16T01:22:00Z',
+  },
+  {
+    id: 'pl-persian-nights',
+    title: 'Persian Nights',
+    description: 'شبهای ایرانی — کلاسیکها',
+    cover: '/art/persian-nights.jpg',
+    kind: 'user',
+    trackIds: ['tr-24', 'tr-26', 'tr-28', 'tr-25', 'tr-27'],
+    createdAt: '2025-07-04T21:00:00Z',
+    updatedAt: '2025-08-21T19:33:00Z',
+  },
+  {
+    id: 'pl-morning-grid',
+    title: 'MORNING GRID',
+    description: 'Precise starts. 08:00 sharp.',
+    cover: '/art/art-default.jpg',
+    kind: 'user',
+    trackIds: ['tr-31', 'tr-08', 'tr-10', 'tr-03', 'tr-30', 'tr-32', 'tr-22', 'tr-28'],
+    createdAt: '2025-07-10T06:30:00Z',
+    updatedAt: '2025-08-19T07:58:00Z',
+  },
+  {
+    id: 'pl-gym-protocol',
+    title: 'GYM PROTOCOL',
+    description: 'High energy. No breaks.',
+    cover: '/art/dangerous-days.jpg',
+    kind: 'user',
+    trackIds: ['tr-14', 'tr-17', 'tr-06', 'tr-03', 'tr-15', 'tr-10', 'tr-16', 'tr-22', 'tr-31', 'tr-30', 'tr-32', 'tr-08', 'tr-02', 'tr-11'],
+    createdAt: '2025-06-28T17:00:00Z',
+    updatedAt: '2025-08-15T18:20:00Z',
+  },
+  {
+    id: 'pl-first-take',
+    title: 'FIRST TAKE',
+    description: 'Draft playlist — edit me.',
+    cover: '/art/blueprint-01.jpg',
+    kind: 'user',
+    trackIds: ['tr-01', 'tr-04', 'tr-24', 'tr-20', 'tr-08'],
+    createdAt: '2025-08-25T06:00:00Z',
+    updatedAt: '2025-08-25T06:00:00Z',
+  },
+]
+
+/** AI-generated recommendations (mock) — used across AI surfaces. */
+export const aiRecommendations = [
+  {
+    id: 'rec-functional',
+    title: 'FUNCTIONAL BEATS',
+    description: '18 tracks selected for focused work.',
+    trackCount: 18,
+    tags: ['FOCUS', 'HIGH ENERGY', 'INSTRUMENTAL'],
+    cover: '/art/functional-beats.jpg',
+  },
+  {
+    id: 'rec-night-drive',
+    title: 'NIGHT DRIVE',
+    description: 'Dark cinematic music for a night drive.',
+    trackCount: 12,
+    tags: ['DARK', 'CINEMATIC', 'SYNTH'],
+    cover: '/art/outrun.jpg',
+  },
+  {
+    id: 'rec-deep-focus',
+    title: 'DEEP FOCUS',
+    description: 'Minimal, repetitive, undistracting.',
+    trackCount: 9,
+    tags: ['CALM', 'NEOCLASSICAL', 'AMBIENT'],
+    cover: '/art/deep-focus.jpg',
+  },
+  {
+    id: 'rec-late-night',
+    title: 'LATE NIGHT',
+    description: 'After midnight, city lights.',
+    trackCount: 10,
+    tags: ['MELANCHOLIC', 'SLOW', 'NIGHT'],
+    cover: '/art/night-drive.jpg',
+  },
+] as const
