@@ -25,10 +25,8 @@ function submitSearch() {
 
 <template>
   <div class="mobile-dock-safe flex flex-col">
-    <!-- mini player remains above the floating controls -->
-    <div v-if="currentTrack" class="mx-3 mb-2 overflow-hidden rounded-[20px] mobile-liquid-surface">
-      <MiniPlayer />
-    </div>
+    <!-- swipeable now-playing cards remain above the floating controls -->
+    <MobilePlayerCarousel v-if="currentTrack" class="mb-2" />
 
     <!-- floating search pill — morphs to a full-width input -->
     <div

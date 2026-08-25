@@ -297,7 +297,7 @@
 /* mobile liquid-glass dock */
 :root {
   --sys-dock-base-h: calc(8.5rem + env(safe-area-inset-bottom));
-  --sys-dock-player-h: calc(12.75rem + env(safe-area-inset-bottom));
+  --sys-dock-player-h: calc(14.75rem + env(safe-area-inset-bottom));
 }
 
 .mobile-dock-safe {
@@ -318,8 +318,95 @@
     inset 0 -1px 0 color-mix(in srgb, var(--sys-foreground) 8%, transparent);
 }
 
-.mobile-dock-safe .bg-player {
-  background: transparent;
+.mobile-player-carousel {
+  width: 100%;
+  overflow: hidden;
+}
+
+.mobile-player-carousel__track {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 6px 12px 8px;
+  scroll-padding-inline: 12px;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mobile-player-card {
+  position: relative;
+  flex: 0 0 calc(100% - 24px);
+  min-width: 0;
+  min-height: 78px;
+  overflow: hidden;
+  padding: 11px 12px;
+  border-radius: 22px;
+  scroll-snap-align: center;
+  scroll-snap-stop: always;
+  opacity: 0.82;
+  transform: scale(0.985);
+  transition:
+    opacity 240ms var(--sys-ease),
+    transform 360ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 240ms var(--sys-ease);
+}
+
+.mobile-player-card--active {
+  border-color: color-mix(in srgb, var(--sys-primary) 28%, transparent);
+  opacity: 1;
+  transform: scale(1);
+}
+
+.mobile-player-card::after {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  content: '';
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--sys-surface) 76%, transparent),
+    color-mix(in srgb, var(--sys-surface) 58%, transparent) 58%,
+    color-mix(in srgb, var(--sys-surface) 72%, transparent)
+  );
+}
+
+.mobile-player-card__ambient {
+  position: absolute;
+  inset: -24%;
+  width: 148%;
+  height: 148%;
+  object-fit: cover;
+  opacity: 0.2;
+  filter: blur(24px) saturate(145%);
+  transform: scale(1.08);
+  pointer-events: none;
+}
+
+.mobile-player-card__play {
+  width: 42px;
+  height: 42px;
+  box-shadow:
+    0 8px 18px color-mix(in srgb, var(--sys-primary) 24%, transparent),
+    inset 0 1px 0 rgb(255 255 255 / 0.22);
+}
+
+.mobile-player-card__progress {
+  position: absolute;
+  right: 12px;
+  bottom: 0;
+  left: 12px;
+  z-index: 2;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sys-foreground) 11%, transparent);
+}
+
+.mobile-player-card__progress > span {
+  border-radius: inherit;
+  transition: width 500ms linear;
 }
 
 .mobile-liquid-nav {
