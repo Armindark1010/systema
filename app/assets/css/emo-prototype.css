@@ -24,12 +24,21 @@
   --emo-body-height: 5.25rem;
   --emo-neck-width: 1.5rem;
   --emo-neck-height: 0.75rem;
-  --emo-arm-width: 1.125rem;
-  --emo-arm-height: 3.25rem;
-  --emo-foot-width: 3.25rem;
-  --emo-foot-height: 0.75rem;
-  --emo-foot-gap: 1rem;
+  --emo-arm-width: 1.35rem;
+  --emo-arm-height: 3.5rem;
+  --emo-arm-radius: 0.9rem;
+  --emo-foot-width: 3.15rem;
+  --emo-foot-height: 0.9rem;
+  --emo-foot-radius: 0.65rem;
+  --emo-foot-gap: 1.1rem;
   --emo-chest-size: 3rem;
+
+  --emo-headphone-cup-width: 1.15rem;
+  --emo-headphone-cup-height: 2.85rem;
+  --emo-headphone-pad-width: 0.55rem;
+  --emo-headphone-band-height: 0.9rem;
+  --emo-headphone-band-inset: 12%;
+  --emo-headphone-band-radius: 1.2rem;
   --emo-status-min-height: 1.5rem;
   --emo-status-margin: 0.625rem;
   --emo-status-font-size: 0.6875rem;
@@ -182,22 +191,94 @@
 .emo-head::after {
   position: absolute;
   top: 50%;
-  width: var(--emo-arm-width);
+  width: calc(var(--emo-arm-width) * 0.85);
   height: var(--emo-neck-height);
   content: '';
   border: var(--emo-line-width) solid var(--emo-line);
   background: var(--emo-body-muted);
   transform: translateY(-50%);
+  z-index: 2;
 }
 
 .emo-head::before {
   right: 100%;
-  border-radius: var(--emo-detail-radius) 0 0 var(--emo-detail-radius);
+  border-radius: var(--emo-foot-radius) 0 0 var(--emo-foot-radius);
 }
 
 .emo-head::after {
   left: 100%;
-  border-radius: 0 var(--emo-detail-radius) var(--emo-detail-radius) 0;
+  border-radius: 0 var(--emo-foot-radius) var(--emo-foot-radius) 0;
+}
+
+/* Headphones — new isolated music companion detail */
+.emo-headphones {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.emo-headband {
+  position: absolute;
+  top: calc(var(--emo-headphone-band-height) * -0.55);
+  right: var(--emo-headphone-band-inset);
+  left: var(--emo-headphone-band-inset);
+  height: var(--emo-headphone-band-height);
+  border: var(--emo-line-width) solid var(--emo-line);
+  border-bottom: 0;
+  border-radius: var(--emo-headphone-band-radius) var(--emo-headphone-band-radius) 0 0;
+  background: linear-gradient(
+    to bottom,
+    var(--emo-body),
+    var(--emo-body-muted)
+  );
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5);
+}
+
+.emo-earcup {
+  position: absolute;
+  top: 50%;
+  display: grid;
+  width: var(--emo-headphone-cup-width);
+  height: var(--emo-headphone-cup-height);
+  place-items: center;
+  border: var(--emo-line-width) solid var(--emo-line);
+  border-radius: var(--emo-arm-radius);
+  background: var(--emo-body);
+  box-shadow: var(--sys-shadow-1);
+  transform: translateY(-50%);
+}
+
+.emo-earcup--left {
+  left: calc(var(--emo-headphone-cup-width) * -0.55);
+}
+
+.emo-earcup--right {
+  right: calc(var(--emo-headphone-cup-width) * -0.55);
+}
+
+.emo-earcup__pad {
+  width: var(--emo-headphone-pad-width);
+  height: 68%;
+  border: var(--emo-line-width) solid var(--emo-line);
+  border-radius: 999px;
+  background: var(--emo-body-muted);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
+  opacity: 0.95;
+}
+
+/* Slight headphone wobble when dancing/listening */
+.emo-character[data-motion='dancing'] .emo-headphones {
+  animation: emo-headphones-bob var(--emo-beat-duration) var(--sys-ease) infinite;
+}
+
+.emo-character[data-motion='listening'] .emo-headphones {
+  animation: emo-headphones-bob var(--emo-beat-duration-double) var(--sys-ease) infinite;
+}
+
+@keyframes emo-headphones-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(var(--emo-motion-xs-negative)); }
 }
 
 .emo-character[data-expression='curious'] .emo-head {
@@ -235,14 +316,17 @@
 .emo-body::before,
 .emo-body::after {
   position: absolute;
-  top: var(--emo-motion-md);
+  top: var(--emo-motion-sm);
   width: var(--emo-arm-width);
   height: var(--emo-arm-height);
   content: '';
   border: var(--emo-line-width) solid var(--emo-line);
-  border-radius: var(--emo-detail-radius);
+  border-radius: var(--emo-arm-radius);
   background: var(--emo-body-muted);
-  transition: transform var(--emo-transition-medium) var(--sys-ease);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
+  transition:
+    transform var(--emo-transition-medium) var(--sys-ease),
+    border-radius var(--emo-transition-medium) var(--sys-ease);
 }
 
 .emo-body::before {
@@ -307,8 +391,9 @@
   width: var(--emo-foot-width);
   height: var(--emo-foot-height);
   border: var(--emo-line-width) solid var(--emo-line);
-  border-radius: 0 0 var(--emo-detail-radius) var(--emo-detail-radius);
+  border-radius: 0 0 var(--emo-foot-radius) var(--emo-foot-radius);
   background: var(--emo-body-muted);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.35);
 }
 
 .emo-companion__status {
