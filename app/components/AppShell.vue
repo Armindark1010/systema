@@ -4,7 +4,7 @@
 // ============================================================
 // Desktop : fixed sidebar + main column + bottom player bar
 // Mobile  : sticky header + content + fixed dock
-//           (quick search → mini player → bottom navigation)
+//           (mini player → bottom navigation → quick search)
 // Global  : command palette, full player, queue drawer
 // ============================================================
 
@@ -46,7 +46,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
     <!-- desktop global mini player -->
     <MiniPlayer class="hidden lg:block fixed bottom-0 left-[248px] right-0 z-40 border-t border-line" />
 
-    <!-- mobile dock: quick search → mini player → bottom nav -->
+    <!-- mobile dock: mini player → bottom nav → quick search -->
     <div class="lg:hidden fixed inset-x-0 bottom-0 z-40">
       <MobileDock />
     </div>

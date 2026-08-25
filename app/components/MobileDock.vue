@@ -1,15 +1,21 @@
 <script setup lang="ts">
-// Mobile dock — stacked above the bottom navigation, per spec:
-//   QUICK SEARCH (top) → MINI PLAYER → BOTTOM NAVIGATION
+// Mobile dock — quick search sits BELOW the bottom navigation:
+//   MINI PLAYER → BOTTOM NAVIGATION → QUICK SEARCH (bottom)
 const { openPalette } = useQuickSearch()
 const { currentTrack } = usePlayer()
 </script>
 
 <template>
   <div class="flex flex-col">
-    <!-- quick search action -->
+    <!-- mini player -->
+    <MiniPlayer v-if="currentTrack" />
+
+    <!-- bottom navigation -->
+    <MobileBottomNavigation />
+
+    <!-- quick search action — below the bottom buttons -->
     <button
-      class="h-12 bg-base border-t border-line flex items-center gap-2.5 px-4 t-col pressable focus-ring"
+      class="h-12 pb-safe bg-base border-t border-line flex items-center gap-2.5 px-4 t-col pressable focus-ring"
       aria-label="Quick search"
       @click="openPalette()"
     >
@@ -19,11 +25,5 @@ const { currentTrack } = usePlayer()
       </span>
       <span class="label text-fg-faint hidden sm:inline">⌘K</span>
     </button>
-
-    <!-- mini player -->
-    <MiniPlayer v-if="currentTrack" />
-
-    <!-- bottom navigation -->
-    <MobileBottomNavigation />
   </div>
 </template>

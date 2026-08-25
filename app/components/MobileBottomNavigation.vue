@@ -20,7 +20,7 @@ function isActive(to: string): boolean {
 
 <template>
   <nav
-    class="bg-surface border-t border-line grid grid-cols-4 pb-safe"
+    class="bg-surface border-t border-line grid grid-cols-4"
     aria-label="Mobile navigation"
   >
     <NuxtLink

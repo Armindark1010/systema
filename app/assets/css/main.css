@@ -277,7 +277,7 @@
    6. STRUCTURE HELPERS
    ------------------------------------------------------------ */
 
-/* mobile dock: quick search + mini player + bottom navigation */
+/* mobile dock: mini player + bottom navigation + quick search */
 :root {
   --sys-dock-quicksearch: 3rem;
   --sys-dock-mini: 3.75rem;
