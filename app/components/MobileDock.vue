@@ -25,9 +25,6 @@ function submitSearch() {
 
 <template>
   <div class="mobile-dock-safe flex flex-col">
-    <!-- swipeable now-playing cards remain above the floating controls -->
-    <MobilePlayerCarousel v-if="currentTrack" class="mb-2" />
-
     <!-- floating search pill — morphs to a full-width input -->
     <div
       class="mobile-search-shell"
@@ -76,6 +73,9 @@ function submitSearch() {
         </template>
       </form>
     </div>
+
+    <!-- compact swipeable player sits between search and navigation -->
+    <MobilePlayerCarousel v-if="currentTrack" class="mb-2" />
 
     <MobileBottomNavigation />
   </div>

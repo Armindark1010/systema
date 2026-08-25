@@ -147,10 +147,10 @@ onBeforeUnmount(() => {
           aria-hidden="true"
         >
 
-        <div class="relative z-[1] flex items-center gap-3 min-w-0">
+        <div class="relative z-[1] flex items-center gap-2.5 min-w-0">
           <button
             type="button"
-            class="shrink-0 rounded-[14px] overflow-hidden focus-ring"
+            class="shrink-0 rounded-[12px] overflow-hidden focus-ring"
             :aria-label="`Open full player for ${item.track.title}`"
             @click="cardIndex === index ? openFullPlayer() : playTrack(item.track, item.context)"
           >
@@ -158,7 +158,7 @@ onBeforeUnmount(() => {
               :src="coverFor(item.track.albumId)"
               :alt="item.track.title"
               :seed="item.track.id"
-              class="w-[52px] h-[52px]"
+              class="w-[42px] h-[42px]"
               rounded
             />
           </button>
@@ -169,28 +169,14 @@ onBeforeUnmount(() => {
             :aria-label="`Open full player for ${item.track.title}`"
             @click="cardIndex === index ? openFullPlayer() : playTrack(item.track, item.context)"
           >
-            <span class="flex items-center gap-2 min-w-0">
-              <span
-                v-if="cardIndex === index"
-                class="text-[8px] leading-none font-bold tracking-[0.16em] text-primary shrink-0"
-              >
-                NOW PLAYING
-              </span>
-              <span v-else class="text-[8px] leading-none font-bold tracking-[0.16em] text-fg-faint shrink-0">
-                IN QUEUE
-              </span>
-              <span class="h-px bg-line/70 flex-1" aria-hidden="true" />
-            </span>
-            <span class="mt-0.5 block text-[13px] leading-5 font-semibold text-fg truncate">
+            <span class="block text-[12.5px] leading-4 font-semibold text-fg truncate">
               {{ item.track.title }}
             </span>
-            <span class="block text-[11px] leading-4 text-fg-muted truncate">
+            <span class="block text-[10.5px] leading-4 text-fg-muted truncate">
               {{ artistFor(item.track.artistId) }}
             </span>
-            <span class="mt-0.5 flex items-center gap-2 text-[9px] leading-none font-semibold tracking-[0.08em] text-fg-faint tnum">
-              <span>{{ elapsedFor(cardIndex) }} / {{ formatDuration(item.track.duration) }}</span>
-              <span aria-hidden="true">·</span>
-              <span>{{ String(cardIndex + 1).padStart(2, '0') }} / {{ String(queue.length).padStart(2, '0') }}</span>
+            <span class="block text-[8.5px] leading-3 font-semibold tracking-[0.06em] text-fg-faint tnum">
+              {{ elapsedFor(cardIndex) }} / {{ formatDuration(item.track.duration) }}
             </span>
           </button>
 
@@ -202,7 +188,7 @@ onBeforeUnmount(() => {
           >
             <UIcon
               :name="cardIndex === index && isPlaying ? 'lucide:pause' : 'lucide:play'"
-              class="w-4 h-4"
+              class="w-3.5 h-3.5"
             />
           </button>
         </div>
