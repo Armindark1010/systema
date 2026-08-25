@@ -46,8 +46,8 @@ function onDrop(e: DragEvent) {
 
 <template>
   <li
-    class="group relative grid items-center gap-3 h-12 px-2 t-col hover:bg-hover focus-within:bg-hover border-b border-line last:border-b-0"
-    :class="[isCurrent ? 'bg-primary-muted/60 hover:bg-primary-muted' : '', dragOver ? 'ring-1 ring-inset ring-primary' : '']"
+    class="group relative flex items-center gap-3 h-12 px-2 t-col hover:bg-hover focus-within:bg-hover border-b border-line last:border-b-0"
+    :class="[isCurrent ? 'bg-primary-muted/60 hover:bg-primary-muted' : 'bg-surface', dragOver ? 'ring-1 ring-inset ring-primary' : '']"
     :draggable="draggable"
     @dragstart="onDragStart"
     @dragover.prevent="draggable && (dragOver = true)"

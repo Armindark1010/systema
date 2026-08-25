@@ -8,6 +8,7 @@
 
 import type { Album, Playlist, QueueItem, RepeatMode, Track } from '~/types'
 import { tracks as catalog } from '~/data/music'
+import { recordPlayed } from '~/composables/usePlaybackHistory'
 
 const queue = ref<QueueItem[]>([])
 const index = ref(-1)
@@ -23,6 +24,7 @@ const favorites = ref<Set<string>>(new Set())
 
 // --- ticker: simulates playback time (no audio engine) ------------
 let ticker: ReturnType<typeof setInterval> | null = null
+let advanceQueue: (() => void) | null = null
 
 function startTicker() {
   if (ticker) return
@@ -34,7 +36,7 @@ function startTicker() {
       if (repeat.value === 'one') {
         progressMs.value = 0
       } else {
-        next()
+        advanceQueue?.()
       }
     }
   }, 1000)
@@ -59,6 +61,8 @@ export function usePlayer() {
     index.value = startIndex
     progressMs.value = 0
     isPlaying.value = true
+    const startedTrack = queue.value[index.value]?.track
+    if (startedTrack) recordPlayed(startedTrack.id)
     startTicker()
   }
 
@@ -72,6 +76,7 @@ export function usePlayer() {
     }
     progressMs.value = 0
     isPlaying.value = true
+    recordPlayed(track.id)
     startTicker()
   }
 
@@ -121,6 +126,8 @@ export function usePlayer() {
       return
     }
     progressMs.value = 0
+    const track = queue.value[index.value]?.track
+    if (track) recordPlayed(track.id)
   }
 
   function prev() {
@@ -133,8 +140,14 @@ export function usePlayer() {
     if (index.value > 0) {
       index.value -= 1
       progressMs.value = 0
+      const track = queue.value[index.value]?.track
+      if (track) recordPlayed(track.id)
     }
   }
+
+  // The module-level playback ticker must advance through the same
+  // queue operation exposed to controls, rather than a browser global.
+  advanceQueue = next
 
   function toggleFavorite() {
     const t = currentTrack.value

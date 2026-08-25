@@ -1,0 +1,580 @@
+/* ============================================================
+   EMO PROTOTYPE — isolated companion tokens and motion system
+   All character values are centralized here so the reusable
+   Vue components contain behavior and structure only.
+   ============================================================ */
+:root {
+  --emo-face: var(--ai-bg);
+  --emo-face-detail: var(--ai-surface-muted);
+  --emo-eye: var(--ai-cyan);
+  --emo-body: var(--sys-surface);
+  --emo-body-muted: var(--sys-surface-muted);
+  --emo-body-detail: var(--sys-primary);
+  --emo-line: var(--sys-border-strong);
+  --emo-stage: var(--sys-surface-muted);
+  --emo-stage-line: var(--sys-border);
+
+  --emo-stage-min-height: clamp(24rem, 68dvh, 32rem);
+  --emo-stage-line-offset: 2rem;
+  --emo-companion-width: 13rem;
+  --emo-head-width: 11rem;
+  --emo-head-height: 7.25rem;
+  --emo-face-inset: 0.625rem;
+  --emo-body-width: 8.5rem;
+  --emo-body-height: 5.25rem;
+  --emo-neck-width: 1.5rem;
+  --emo-neck-height: 0.75rem;
+  --emo-arm-width: 1.125rem;
+  --emo-arm-height: 3.25rem;
+  --emo-foot-width: 3.25rem;
+  --emo-foot-height: 0.75rem;
+  --emo-foot-gap: 1rem;
+  --emo-chest-size: 3rem;
+  --emo-status-min-height: 1.5rem;
+  --emo-status-margin: 0.625rem;
+  --emo-status-font-size: 0.6875rem;
+  --emo-status-tracking: 0.12em;
+
+  --emo-head-radius: 2.25rem;
+  --emo-face-radius: 1.75rem;
+  --emo-body-radius: 1.25rem;
+  --emo-detail-radius: 0.375rem;
+  --emo-eye-radius: 0.75rem;
+  --emo-eye-line-radius: 0.125rem;
+  --emo-line-width: 1px;
+  --emo-line-width-negative: -1px;
+
+  --emo-eye-width: 2rem;
+  --emo-eye-height: 1.625rem;
+  --emo-eye-gap: 2rem;
+  --emo-eye-happy-height: 0.75rem;
+  --emo-eye-excited-width: 2.25rem;
+  --emo-eye-excited-height: 2rem;
+  --emo-eye-focused-height: 0.625rem;
+  --emo-eye-sleepy-height: 0.25rem;
+  --emo-eye-surprised-width: 1.625rem;
+  --emo-eye-surprised-height: 2.25rem;
+  --emo-eye-confused-height: 1rem;
+  --emo-eye-shift: 0.5rem;
+  --emo-eye-shift-negative: -0.5rem;
+  --emo-eye-lift: 0.375rem;
+  --emo-eye-lift-negative: -0.375rem;
+  --emo-blink-scale: 0.06;
+  --emo-user-focus-scale: 1.04;
+  --emo-eye-rhythm-min: 0.9;
+  --emo-eye-rhythm-max: 1.08;
+  --emo-equalizer-min: 0.35;
+  --emo-equalizer-base-height: 38%;
+  --emo-curious-large: 1.16;
+  --emo-curious-small: 0.82;
+
+  --emo-mouth-width: 1.25rem;
+  --emo-mouth-wide: 2rem;
+  --emo-mouth-height: 0.1875rem;
+  --emo-mouth-open-size: 0.625rem;
+  --emo-mouth-offset: 0.875rem;
+
+  --emo-motion-xs: 0.125rem;
+  --emo-motion-xs-negative: -0.125rem;
+  --emo-motion-sm: 0.25rem;
+  --emo-motion-sm-negative: -0.25rem;
+  --emo-motion-md: 0.5rem;
+  --emo-motion-md-negative: -0.5rem;
+  --emo-angle-xs: 1deg;
+  --emo-angle-sm: 2deg;
+  --emo-angle-sm-negative: -2deg;
+  --emo-angle-md: 4deg;
+  --emo-angle-md-negative: -4deg;
+  --emo-angle-expression: 9deg;
+  --emo-angle-expression-negative: -9deg;
+  --emo-idle-duration: 4.8s;
+  --emo-thinking-duration: 2.2s;
+  --emo-scan-duration: 1.6s;
+  --emo-transition-fast: 120ms;
+  --emo-transition-medium: 220ms;
+  --emo-transition-slow: 420ms;
+  --emo-beat-duration: 0.6s;
+  --emo-beat-duration-double: 1.2s;
+  --emo-beat-delay-two: -0.2s;
+  --emo-beat-delay-three: -0.4s;
+  --emo-muted-opacity: 0.58;
+  --emo-active-opacity: 0.9;
+  --emo-scan-opacity: 0.72;
+}
+
+.emo-stage {
+  position: relative;
+  display: grid;
+  min-height: var(--emo-stage-min-height);
+  place-items: center;
+  overflow: hidden;
+  background: var(--emo-stage);
+}
+
+.emo-stage::after {
+  position: absolute;
+  right: 0;
+  bottom: var(--emo-stage-line-offset);
+  left: 0;
+  height: var(--emo-line-width);
+  content: '';
+  background: var(--emo-stage-line);
+}
+
+.emo-companion {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: min(100%, var(--emo-companion-width));
+  align-items: center;
+  flex-direction: column;
+  color: var(--sys-foreground);
+}
+
+.emo-character {
+  position: relative;
+  display: block;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.emo-character:focus-visible {
+  outline: var(--emo-line-width) solid var(--sys-primary);
+  outline-offset: var(--emo-motion-sm);
+  border-radius: var(--emo-head-radius);
+}
+
+.emo-character__machine {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  flex-direction: column;
+  transform-origin: center bottom;
+  animation: emo-breathe var(--emo-idle-duration) var(--sys-ease) infinite;
+}
+
+.emo-character[data-motion='listening'] .emo-character__machine {
+  animation: emo-listen var(--emo-beat-duration-double) var(--sys-ease) infinite;
+}
+
+.emo-character[data-motion='dancing'] .emo-character__machine {
+  animation: emo-dance var(--emo-beat-duration) var(--sys-ease) infinite;
+}
+
+.emo-head {
+  position: relative;
+  z-index: 3;
+  width: var(--emo-head-width);
+  height: var(--emo-head-height);
+  border: var(--emo-line-width) solid var(--emo-line);
+  border-radius: var(--emo-head-radius);
+  background: var(--emo-body);
+  box-shadow: var(--sys-shadow-2);
+  transition: transform var(--emo-transition-medium) var(--sys-ease);
+}
+
+.emo-head::before,
+.emo-head::after {
+  position: absolute;
+  top: 50%;
+  width: var(--emo-arm-width);
+  height: var(--emo-neck-height);
+  content: '';
+  border: var(--emo-line-width) solid var(--emo-line);
+  background: var(--emo-body-muted);
+  transform: translateY(-50%);
+}
+
+.emo-head::before {
+  right: 100%;
+  border-radius: var(--emo-detail-radius) 0 0 var(--emo-detail-radius);
+}
+
+.emo-head::after {
+  left: 100%;
+  border-radius: 0 var(--emo-detail-radius) var(--emo-detail-radius) 0;
+}
+
+.emo-character[data-expression='curious'] .emo-head {
+  transform: rotate(var(--emo-angle-md-negative)) translateY(var(--emo-motion-xs-negative));
+}
+
+.emo-character[data-expression='thinking'] .emo-head,
+.emo-character[data-expression='analyzing'] .emo-head {
+  animation: emo-think var(--emo-thinking-duration) var(--sys-ease) infinite;
+}
+
+.emo-neck {
+  position: relative;
+  z-index: 2;
+  width: var(--emo-neck-width);
+  height: var(--emo-neck-height);
+  border-right: var(--emo-line-width) solid var(--emo-line);
+  border-left: var(--emo-line-width) solid var(--emo-line);
+  background: var(--emo-body-muted);
+}
+
+.emo-body {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: var(--emo-body-width);
+  height: var(--emo-body-height);
+  place-items: center;
+  border: var(--emo-line-width) solid var(--emo-line);
+  border-radius: var(--emo-body-radius);
+  background: var(--emo-body);
+  box-shadow: var(--sys-shadow-1);
+}
+
+.emo-body::before,
+.emo-body::after {
+  position: absolute;
+  top: var(--emo-motion-md);
+  width: var(--emo-arm-width);
+  height: var(--emo-arm-height);
+  content: '';
+  border: var(--emo-line-width) solid var(--emo-line);
+  border-radius: var(--emo-detail-radius);
+  background: var(--emo-body-muted);
+  transition: transform var(--emo-transition-medium) var(--sys-ease);
+}
+
+.emo-body::before {
+  right: calc(100% - var(--emo-motion-xs));
+  transform-origin: top right;
+}
+
+.emo-body::after {
+  left: calc(100% - var(--emo-motion-xs));
+  transform-origin: top left;
+}
+
+.emo-character[data-motion='dancing'] .emo-body::before {
+  transform: rotate(var(--emo-angle-expression));
+}
+
+.emo-character[data-motion='dancing'] .emo-body::after {
+  transform: rotate(var(--emo-angle-expression-negative));
+}
+
+.emo-chest {
+  display: flex;
+  width: var(--emo-chest-size);
+  height: var(--emo-chest-size);
+  align-items: end;
+  justify-content: center;
+  gap: var(--emo-motion-xs);
+  padding: var(--emo-motion-sm);
+  border: var(--emo-line-width) solid var(--emo-line);
+  border-radius: var(--emo-detail-radius);
+  background: var(--emo-body-muted);
+}
+
+.emo-chest-bar {
+  width: var(--emo-motion-xs);
+  height: var(--emo-equalizer-base-height);
+  background: var(--emo-body-detail);
+  opacity: var(--emo-muted-opacity);
+  transform-origin: bottom;
+}
+
+.emo-character[data-playing='true'] .emo-chest-bar {
+  animation: emo-equalizer var(--emo-beat-duration) ease-in-out infinite alternate;
+  opacity: var(--emo-active-opacity);
+}
+
+.emo-character[data-playing='true'] .emo-chest-bar:nth-child(2) {
+  animation-delay: var(--emo-beat-delay-two);
+}
+
+.emo-character[data-playing='true'] .emo-chest-bar:nth-child(3) {
+  animation-delay: var(--emo-beat-delay-three);
+}
+
+.emo-feet {
+  display: flex;
+  gap: var(--emo-foot-gap);
+  transform: translateY(var(--emo-line-width-negative));
+}
+
+.emo-foot {
+  width: var(--emo-foot-width);
+  height: var(--emo-foot-height);
+  border: var(--emo-line-width) solid var(--emo-line);
+  border-radius: 0 0 var(--emo-detail-radius) var(--emo-detail-radius);
+  background: var(--emo-body-muted);
+}
+
+.emo-companion__status {
+  display: flex;
+  min-height: var(--emo-status-min-height);
+  margin-top: var(--emo-status-margin);
+  align-items: center;
+  color: var(--sys-foreground-muted);
+  font-size: var(--emo-status-font-size);
+  font-weight: 600;
+  letter-spacing: var(--emo-status-tracking);
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.emo-face {
+  position: absolute;
+  inset: var(--emo-face-inset);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: var(--emo-line-width) solid var(--ai-border);
+  border-radius: var(--emo-face-radius);
+  background: var(--emo-face);
+}
+
+.emo-eyes {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--emo-eye-gap);
+  transform: translate3d(0, 0, 0);
+  transition: transform var(--emo-transition-slow) var(--sys-ease);
+}
+
+.emo-eye {
+  position: relative;
+  display: block;
+  width: var(--emo-eye-width);
+  height: var(--emo-eye-height);
+  border-radius: var(--emo-eye-radius);
+  background: var(--emo-eye);
+  transform-origin: center;
+  transition:
+    width var(--emo-transition-medium) var(--sys-ease),
+    height var(--emo-transition-medium) var(--sys-ease),
+    border-radius var(--emo-transition-medium) var(--sys-ease),
+    transform var(--emo-transition-medium) var(--sys-ease),
+    opacity var(--emo-transition-fast) var(--sys-ease);
+}
+
+.emo-eye::after {
+  position: absolute;
+  top: var(--emo-motion-sm);
+  left: var(--emo-motion-sm);
+  width: var(--emo-motion-xs);
+  height: var(--emo-motion-sm);
+  content: '';
+  border-radius: var(--emo-eye-line-radius);
+  background: var(--sys-primary-foreground);
+  opacity: var(--emo-muted-opacity);
+}
+
+.emo-mouth {
+  position: absolute;
+  bottom: var(--emo-mouth-offset);
+  left: 50%;
+  width: var(--emo-mouth-width);
+  height: var(--emo-mouth-height);
+  border-radius: var(--emo-eye-line-radius);
+  background: var(--emo-eye);
+  opacity: var(--emo-muted-opacity);
+  transform: translateX(-50%);
+  transition:
+    width var(--emo-transition-medium) var(--sys-ease),
+    height var(--emo-transition-medium) var(--sys-ease),
+    border-radius var(--emo-transition-medium) var(--sys-ease),
+    opacity var(--emo-transition-fast) var(--sys-ease),
+    background-color var(--emo-transition-medium) var(--sys-ease);
+}
+
+.emo-face-scan {
+  position: absolute;
+  right: var(--emo-face-inset);
+  left: var(--emo-face-inset);
+  height: var(--emo-line-width);
+  background: var(--emo-eye);
+  opacity: 0;
+}
+
+.emo-face[data-gaze='left'] .emo-eyes {
+  transform: translate3d(var(--emo-eye-shift-negative), 0, 0);
+}
+
+.emo-face[data-gaze='right'] .emo-eyes {
+  transform: translate3d(var(--emo-eye-shift), 0, 0);
+}
+
+.emo-face[data-gaze='up'] .emo-eyes {
+  transform: translate3d(0, var(--emo-eye-lift-negative), 0);
+}
+
+.emo-face[data-gaze='down'] .emo-eyes {
+  transform: translate3d(0, var(--emo-eye-lift), 0);
+}
+
+.emo-face[data-gaze='user'] .emo-eyes {
+  transform: scale(var(--emo-user-focus-scale));
+}
+
+.emo-face.is-blinking .emo-eye {
+  transform: scaleY(var(--emo-blink-scale)) !important;
+}
+
+.emo-face[data-expression='happy'] .emo-eye,
+.emo-face[data-expression='dancing'] .emo-eye {
+  height: var(--emo-eye-happy-height);
+  border-radius: var(--emo-eye-line-radius) var(--emo-eye-line-radius) var(--emo-eye-radius) var(--emo-eye-radius);
+}
+
+.emo-face[data-expression='happy'] .emo-mouth,
+.emo-face[data-expression='dancing'] .emo-mouth {
+  width: var(--emo-mouth-wide);
+  height: var(--emo-mouth-open-size);
+  border: 0;
+  border-bottom: var(--emo-mouth-height) solid var(--emo-eye);
+  border-radius: 0 0 var(--emo-eye-radius) var(--emo-eye-radius);
+  background: transparent;
+  opacity: var(--emo-active-opacity);
+}
+
+.emo-face[data-expression='excited'] .emo-eye {
+  width: var(--emo-eye-excited-width);
+  height: var(--emo-eye-excited-height);
+}
+
+.emo-face[data-expression='curious'] .emo-eye:first-child {
+  transform: scale(var(--emo-curious-large)) translateY(var(--emo-motion-xs-negative));
+}
+
+.emo-face[data-expression='curious'] .emo-eye:last-child {
+  transform: scale(var(--emo-curious-small)) translateY(var(--emo-motion-xs));
+}
+
+.emo-face[data-expression='focused'] .emo-eye,
+.emo-face[data-expression='thinking'] .emo-eye,
+.emo-face[data-expression='analyzing'] .emo-eye {
+  height: var(--emo-eye-focused-height);
+  border-radius: var(--emo-eye-line-radius);
+}
+
+.emo-face[data-expression='thinking'] .emo-eyes,
+.emo-face[data-expression='analyzing'] .emo-eyes {
+  animation: emo-thinking-eyes var(--emo-thinking-duration) var(--sys-ease) infinite;
+}
+
+.emo-face[data-expression='analyzing'] .emo-face-scan {
+  animation: emo-face-scan var(--emo-scan-duration) linear infinite;
+  opacity: var(--emo-scan-opacity);
+}
+
+.emo-face[data-expression='sleepy'] .emo-eye {
+  height: var(--emo-eye-sleepy-height);
+  border-radius: var(--emo-eye-line-radius);
+  opacity: var(--emo-muted-opacity);
+}
+
+.emo-face[data-expression='surprised'] .emo-eye {
+  width: var(--emo-eye-surprised-width);
+  height: var(--emo-eye-surprised-height);
+}
+
+.emo-face[data-expression='surprised'] .emo-mouth {
+  width: var(--emo-mouth-open-size);
+  height: var(--emo-mouth-open-size);
+  border-radius: var(--emo-detail-radius);
+  opacity: var(--emo-active-opacity);
+}
+
+.emo-face[data-expression='confused'] .emo-eye {
+  height: var(--emo-eye-confused-height);
+  border-radius: var(--emo-eye-line-radius);
+}
+
+.emo-face[data-expression='confused'] .emo-eye:first-child {
+  transform: rotate(var(--emo-angle-expression-negative));
+}
+
+.emo-face[data-expression='confused'] .emo-eye:last-child {
+  transform: rotate(var(--emo-angle-expression));
+}
+
+.emo-face[data-expression='sad'] .emo-eye {
+  height: var(--emo-eye-happy-height);
+  border-radius: var(--emo-eye-radius) var(--emo-eye-radius) var(--emo-eye-line-radius) var(--emo-eye-line-radius);
+}
+
+.emo-face[data-expression='sad'] .emo-eye:first-child {
+  transform: rotate(var(--emo-angle-expression));
+}
+
+.emo-face[data-expression='sad'] .emo-eye:last-child {
+  transform: rotate(var(--emo-angle-expression-negative));
+}
+
+.emo-face[data-expression='sad'] .emo-mouth {
+  width: var(--emo-mouth-wide);
+  height: var(--emo-mouth-open-size);
+  border: 0;
+  border-top: var(--emo-mouth-height) solid var(--emo-eye);
+  border-radius: var(--emo-eye-radius) var(--emo-eye-radius) 0 0;
+  background: transparent;
+}
+
+.emo-face[data-expression='listening'] .emo-eye {
+  animation: emo-eye-rhythm var(--emo-beat-duration-double) var(--sys-ease) infinite;
+}
+
+.emo-face[data-expression='dancing'] .emo-eyes {
+  animation: emo-dance-eyes var(--emo-beat-duration) var(--sys-ease) infinite;
+}
+
+@keyframes emo-breathe {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(0); }
+  50% { transform: translate3d(0, var(--emo-motion-xs-negative), 0) rotate(var(--emo-angle-xs)); }
+}
+
+@keyframes emo-listen {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, var(--emo-motion-sm-negative), 0); }
+}
+
+@keyframes emo-dance {
+  0%, 100% { transform: translate3d(var(--emo-motion-xs-negative), 0, 0) rotate(var(--emo-angle-sm-negative)); }
+  25% { transform: translate3d(0, var(--emo-motion-sm-negative), 0) rotate(0); }
+  50% { transform: translate3d(var(--emo-motion-xs), 0, 0) rotate(var(--emo-angle-sm)); }
+  75% { transform: translate3d(0, var(--emo-motion-md-negative), 0) rotate(0); }
+}
+
+@keyframes emo-think {
+  0%, 100% { transform: rotate(var(--emo-angle-sm-negative)) translateY(0); }
+  50% { transform: rotate(var(--emo-angle-md)) translateY(var(--emo-motion-xs-negative)); }
+}
+
+@keyframes emo-thinking-eyes {
+  0%, 100% { transform: translate3d(var(--emo-eye-shift-negative), var(--emo-eye-lift-negative), 0); }
+  50% { transform: translate3d(var(--emo-eye-shift), var(--emo-eye-lift-negative), 0); }
+}
+
+@keyframes emo-face-scan {
+  0% { transform: translateY(var(--emo-eye-lift-negative)); }
+  100% { transform: translateY(var(--emo-head-height)); }
+}
+
+@keyframes emo-eye-rhythm {
+  0%, 100% { transform: scaleY(var(--emo-eye-rhythm-min)); }
+  50% { transform: scaleY(var(--emo-eye-rhythm-max)); }
+}
+
+@keyframes emo-dance-eyes {
+  0%, 100% { transform: translateX(var(--emo-motion-xs-negative)); }
+  50% { transform: translateX(var(--emo-motion-xs)); }
+}
+
+@keyframes emo-equalizer {
+  from { transform: scaleY(var(--emo-equalizer-min)); }
+  to { transform: scaleY(1); }
+}

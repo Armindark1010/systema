@@ -16,7 +16,6 @@ import {
   getGenre,
   continueListening,
   libraryStats,
-  recentlyPlayed,
 } from '~/data/music'
 
 const tracks = ref<Track[]>([...trackData])
@@ -30,6 +29,8 @@ const sortDesc = ref(false)
 const viewMode = ref<ViewMode>('list')
 
 export function useMusicLibrary() {
+  const { recentlyPlayed } = usePlaybackHistory()
+
   const sortedTracks = computed<Track[]>(() => {
     const q = query.value.trim().toLowerCase()
     let list = tracks.value.filter((t) => {

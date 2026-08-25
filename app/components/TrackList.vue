@@ -11,9 +11,11 @@ const props = withDefaults(defineProps<{
   showHeader?: boolean
   hideAlbum?: boolean
   draggable?: boolean
+  /** render a compact two-column list on desktop */
+  split?: boolean
   /** set when draggable — emits reorder(from, to) */
   playlistId?: string
-}>(), { showHeader: true, hideAlbum: false, draggable: false, playlistId: undefined })
+}>(), { showHeader: true, hideAlbum: false, draggable: false, split: false, playlistId: undefined })
 
 const emit = defineEmits<{ reorder: [from: number, to: number] }>()
 
@@ -44,7 +46,7 @@ function onFavorite(id: string) {
     <!-- column header -->
     <div
       v-if="showHeader"
-      class="hidden sm:grid grid items-center gap-3 h-8 px-2 bg-muted border-b border-line text-[10px] font-bold tracking-[0.14em] text-fg-faint uppercase"
+      class="hidden sm:flex items-center gap-3 h-8 px-2 bg-muted border-b border-line text-[10px] font-bold tracking-[0.14em] text-fg-faint uppercase"
       aria-hidden="true"
     >
       <span class="w-6 shrink-0 text-right">#</span>
@@ -55,7 +57,7 @@ function onFavorite(id: string) {
     </div>
 
     <template v-if="tracks.length">
-      <ul>
+      <ul :class="split ? 'track-list-split' : ''">
         <TrackRow
           v-for="(t, i) in tracks"
           :key="t.id"

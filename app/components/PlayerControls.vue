@@ -3,21 +3,10 @@
 // PlayerControls — transport + secondary actions
 // ============================================================
 
-const { isPlaying, togglePlay, next, prev, shuffle, repeat, cycleRepeat, toggleShuffle, toggleFavorite, favorites, setQueueOpen } = usePlayer()
+const { isPlaying, togglePlay, next, prev, shuffle, repeat, cycleRepeat, toggleShuffle } = usePlayer()
 
 const repeatIcon = computed(() => (repeat.value === 'one' ? 'lucide:repeat-1' : 'lucide:repeat'))
 const repeatLabel = computed(() => (repeat.value === 'off' ? 'Repeat off' : repeat.value === 'all' ? 'Repeat all' : 'Repeat one'))
-
-const moreItems = computed(() => [
-  { key: 'queue', label: 'Open queue', icon: 'lucide:list-music' },
-  { key: 'album', label: 'View album', icon: 'lucide:disc-3' },
-  { key: 'artist', label: 'View artist', icon: 'lucide:mic-vocal' },
-  { key: 'clear', label: 'Clear queue', icon: 'lucide:trash-2' },
-])
-
-function onMore(item: { key: string }) {
-  if (item.key === 'queue') setQueueOpen(true)
-}
 </script>
 
 <template>

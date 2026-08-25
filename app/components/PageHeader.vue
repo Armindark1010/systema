@@ -18,7 +18,7 @@ withDefaults(defineProps<{
       <span class="label-muted text-right hidden sm:block">{{ kicker }}</span>
     </div>
     <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-6 mt-6">
-      <h1 class="text-display font-bold tracking-tight text-fg text-balance max-w-[14ch]">
+      <h1 class="text-display font-semibold tracking-tight text-fg text-balance max-w-[14ch]">
         {{ title }}
       </h1>
       <div class="shrink-0 md:text-right max-w-[280px]">

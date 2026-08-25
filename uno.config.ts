@@ -181,8 +181,8 @@ export default defineConfig({
     't-fast': 'transition-all duration-120 ease-sys',
 
     // --- interaction ---
-    'focus-ring': 'focus-visible:(outline-none ring-2 ring-primary ring-offset-2 ring-offset-base)',
-    'focus-ring-ai': 'focus-visible:(outline-none ring-2 ring-ai-primary ring-offset-2 ring-offset-ai-base)',
+    'focus-ring': 'focus-visible:(outline-none ring-1 ring-primary ring-offset-2 ring-offset-base)',
+    'focus-ring-ai': 'focus-visible:(outline-none ring-1 ring-ai-primary ring-offset-2 ring-offset-ai-base)',
     'pressable': 'cursor-pointer select-none t-col focus-ring disabled:(opacity-40 pointer-events-none)',
 
     // --- buttons (music) ---

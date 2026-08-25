@@ -7,7 +7,8 @@ const props = withDefaults(defineProps<{
   rounded?: boolean
 }>(), { src: undefined, alt: '', seed: 'sys', rounded: false })
 
-const palette = ['#1d4ed8', '#c62828', '#0c1424', '#a16207', '#e3e7ed', '#1e7a46']
+// quiet material tones — graphite, steel, champagne (no loud hues)
+const palette = ['#1c2734', '#3d4a5c', '#8f9aa8', '#b6a26a', '#24446e', '#55606e']
 
 const fallback = computed(() => {
   const s = props.seed ?? 'sys'
@@ -23,7 +24,7 @@ const fallback = computed(() => {
 
 <template>
   <div
-    class="relative overflow-hidden bg-hover border border-line aspect-square w-full h-full"
+    class="relative overflow-hidden bg-hover border border-line aspect-square"
     :class="rounded ? 'rounded-1' : ''"
   >
     <img
