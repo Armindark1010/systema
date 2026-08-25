@@ -34,11 +34,11 @@ function playFromHistory(track: Track) {
           :aria-current="player.currentTrack.value?.id === track.id ? 'true' : undefined"
           @click="playFromHistory(track)"
         >
-          <span class="sys-col-1 label-faint tnum text-center" aria-hidden="true">
+          <span class="col-span-1 label-faint tnum text-center" aria-hidden="true">
             {{ String(trackIndex + 1).padStart(2, '0') }}
           </span>
 
-          <span class="sys-col-2 md:sys-col-1">
+          <span class="col-span-2 md:col-span-1">
             <Artwork
               :src="getAlbum(track.albumId)?.cover"
               :alt="track.title"
@@ -47,7 +47,7 @@ function playFromHistory(track: Track) {
             />
           </span>
 
-          <span class="sys-col-7 md:sys-col-5 min-w-0">
+          <span class="col-span-7 md:col-span-5 min-w-0">
             <span
               class="block text-small font-semibold truncate"
               :class="player.currentTrack.value?.id === track.id ? 'text-primary' : 'text-fg'"
@@ -59,11 +59,11 @@ function playFromHistory(track: Track) {
             </span>
           </span>
 
-          <span class="hidden md:block md:sys-col-4 min-w-0 text-micro text-fg-muted truncate">
+          <span class="hidden md:block md:col-span-4 min-w-0 text-micro text-fg-muted truncate">
             {{ getAlbum(track.albumId)?.title }}
           </span>
 
-          <span class="sys-col-2 md:sys-col-1 text-right text-micro text-fg-faint tnum">
+          <span class="col-span-2 md:col-span-1 text-right text-micro text-fg-faint tnum">
             {{ formatDuration(track.duration) }}
           </span>
         </button>
