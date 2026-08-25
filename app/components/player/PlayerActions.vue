@@ -23,6 +23,7 @@ const emit = defineEmits<{
   ai: []
   lyrics: []
   analyze: []
+  queue: []
   more: []
 }>()
 
@@ -108,6 +109,16 @@ const analysisLabel = computed(() => {
       <span v-if="analysisStatus === 'analyzing'" class="player-action-pulse" aria-hidden="true" />
     </button>
 
+    <!-- UP NEXT / QUEUE -->
+    <button
+      class="player-action-btn"
+      aria-label="Open up next queue"
+      @click="emit('queue')"
+    >
+      <UIcon name="lucide:list-music" class="player-action-icon" />
+      <span class="sr-only">Queue</span>
+    </button>
+
     <!-- MORE -->
     <button
       class="player-action-btn"
@@ -121,17 +132,16 @@ const analysisLabel = computed(() => {
 
 <style scoped>
 .player-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   align-items: center;
-  justify-content: space-between;
-  gap: 0.4rem;
   padding-inline: var(--player-content-padding);
-  flex-wrap: nowrap;
   flex-shrink: 0;
 }
 
 @media (min-width: 420px) {
   .player-actions {
+    display: flex;
     justify-content: center;
     gap: 0.5rem;
   }
@@ -141,8 +151,9 @@ const analysisLabel = computed(() => {
   position: relative;
   display: grid;
   place-items: center;
-  width: var(--player-action-size);
+  width: min(100%, var(--player-action-size));
   height: var(--player-action-size);
+  margin-inline: auto;
   border: 1px solid var(--player-line);
   background: transparent;
   color: var(--player-fg-muted);

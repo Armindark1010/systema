@@ -185,6 +185,32 @@ export function usePlayer() {
     repeat.value = repeat.value === 'off' ? 'all' : repeat.value === 'all' ? 'one' : 'off'
   }
 
+  /** Play a specific entry in the centralized playback queue. */
+  function playQueueItem(queueIndex: number) {
+    if (queueIndex < 0 || queueIndex >= queue.value.length) return
+    index.value = queueIndex
+    progressMs.value = 0
+    isPlaying.value = true
+    const track = queue.value[queueIndex]?.track
+    if (track) recordPlayed(track.id)
+    startTicker()
+  }
+
+  /** Reorders the actual playback queue; the player always reads this order. */
+  function reorderQueue(from: number, to: number) {
+    if (from === to || from < 0 || to < 0 || from >= queue.value.length || to >= queue.value.length) return
+    const nextQueue = [...queue.value]
+    const [moved] = nextQueue.splice(from, 1)
+    if (!moved) return
+    nextQueue.splice(to, 0, moved)
+    queue.value = nextQueue
+
+    // Keep the same playing item active when another item moves around it.
+    if (index.value === from) index.value = to
+    else if (from < index.value && to >= index.value) index.value -= 1
+    else if (from > index.value && to <= index.value) index.value += 1
+  }
+
   function removeFromQueue(i: number) {
     if (i < 0 || i >= queue.value.length) return
     queue.value.splice(i, 1)
@@ -263,6 +289,8 @@ export function usePlayer() {
     toggleShuffle: () => (shuffle.value = !shuffle.value),
     setVolume: (v: number) => (volume.value = Math.max(0, Math.min(1, v))),
     toggleMute: () => (muted.value = !muted.value),
+    playQueueItem,
+    reorderQueue,
     removeFromQueue,
     clearQueue,
     ensureFullPlayerNavigation,

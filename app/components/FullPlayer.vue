@@ -3,6 +3,7 @@
 // FullPlayer — immersive, gesture-aware SYSTEMA player
 // ============================================================
 
+import type { Track } from '~/types'
 import type { EmoExpression } from '~/types/emo'
 
 const player = usePlayer()
@@ -39,8 +40,10 @@ const isLiked = computed(() => currentTrack.value ? favorites.value.has(currentT
 const showSleepSheet = ref(false)
 const showAnalysisSheet = ref(false)
 const showMoreSheet = ref(false)
+const showQueueSheet = ref(false)
 const showPlaylistPicker = ref(false)
 const showCustomSleepInput = ref(false)
+const playlistTrackToAdd = ref<Track | null>(null)
 const addedToPlaylist = ref<string | null>(null)
 const sleepEnded = ref(false)
 
@@ -76,6 +79,8 @@ onBeforeUnmount(() => {
 
 function closeFullPlayer() {
   setFullPlayerOpen(false)
+  showQueueSheet.value = false
+  playlistTrackToAdd.value = null
   ai.closeAI()
   lyrics.setLyricsMode(false)
 }
@@ -126,6 +131,15 @@ function onLyricsToggle() {
   lyrics.toggleLyricsMode()
 }
 
+function onQueueToggle() {
+  showQueueSheet.value = true
+}
+
+function onQueueAddToPlaylist(track: Track) {
+  playlistTrackToAdd.value = track
+  showPlaylistPicker.value = true
+}
+
 function onAnalyzeConfirm(force: boolean) {
   if (!currentTrack.value) return
   analysis.analyzeTrack(currentTrack.value.id, force).catch(() => {})
@@ -135,6 +149,7 @@ function onMoreAction(action: string) {
   showMoreSheet.value = false
   switch (action) {
     case 'playlist':
+      playlistTrackToAdd.value = currentTrack.value
       showPlaylistPicker.value = true
       break
     case 'queue':
@@ -161,21 +176,25 @@ function onMoreAction(action: string) {
 }
 
 function onPlaylistSelect(id: string) {
-  if (!currentTrack.value) return
-  addTracks(id, [currentTrack.value.id])
+  const track = playlistTrackToAdd.value ?? currentTrack.value
+  if (!track) return
+  addTracks(id, [track.id])
   addedToPlaylist.value = playlists.value.find(playlist => playlist.id === id)?.title ?? 'PLAYLIST'
   setTimeout(() => {
     addedToPlaylist.value = null
+    playlistTrackToAdd.value = null
     showPlaylistPicker.value = false
   }, 1200)
 }
 
 function onCreatePlaylist() {
   const playlist = createPlaylist(`FOCUS ${new Date().toLocaleDateString()}`, 'Created from player')
-  if (currentTrack.value) addTracks(playlist.id, [currentTrack.value.id])
+  const track = playlistTrackToAdd.value ?? currentTrack.value
+  if (track) addTracks(playlist.id, [track.id])
   addedToPlaylist.value = playlist.title
   setTimeout(() => {
     addedToPlaylist.value = null
+    playlistTrackToAdd.value = null
     showPlaylistPicker.value = false
   }, 1200)
 }
@@ -313,11 +332,13 @@ function onPlayerPointerEnd(event: PointerEvent) {
 
 function onKeydown(event: KeyboardEvent) {
   if (event.key !== 'Escape') return
-  if (showSleepSheet.value || showAnalysisSheet.value || showMoreSheet.value || showPlaylistPicker.value) {
+  if (showSleepSheet.value || showAnalysisSheet.value || showMoreSheet.value || showQueueSheet.value || showPlaylistPicker.value) {
     showSleepSheet.value = false
     showAnalysisSheet.value = false
     showMoreSheet.value = false
+    showQueueSheet.value = false
     showPlaylistPicker.value = false
+    playlistTrackToAdd.value = null
     showCustomSleepInput.value = false
   } else if (ai.isAIMode.value || lyrics.isLyricsMode.value) {
     closeActiveSession()
@@ -498,6 +519,7 @@ if (import.meta.client) {
                 @ai="onAiToggle"
                 @lyrics="onLyricsToggle"
                 @analyze="showAnalysisSheet = true"
+                @queue="onQueueToggle"
                 @more="showMoreSheet = true"
               />
 
@@ -517,6 +539,12 @@ if (import.meta.client) {
             </section>
           </main>
         </section>
+
+        <PlayerQueue
+          :open="showQueueSheet"
+          @close="showQueueSheet = false"
+          @add-to-playlist="onQueueAddToPlaylist"
+        />
 
         <PlayerSleepTimer
           :open="showSleepSheet"
@@ -545,9 +573,9 @@ if (import.meta.client) {
         <PlayerPlaylistPicker
           :open="showPlaylistPicker"
           :playlists="playlistOptions"
-          :track-title="currentTrack.title"
+          :track-title="playlistTrackToAdd?.title ?? currentTrack.title"
           :added-to="addedToPlaylist"
-          @close="showPlaylistPicker = false"
+          @close="showPlaylistPicker = false; playlistTrackToAdd = null"
           @select="onPlaylistSelect"
           @create="onCreatePlaylist"
         />
