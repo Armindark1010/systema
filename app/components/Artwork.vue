@@ -24,7 +24,7 @@ const fallback = computed(() => {
 
 <template>
   <div
-    class="relative overflow-hidden bg-hover border border-line aspect-square w-full h-full"
+    class="relative overflow-hidden bg-hover border border-line aspect-square"
     :class="rounded ? 'rounded-1' : ''"
   >
     <img
