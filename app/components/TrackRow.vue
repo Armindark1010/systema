@@ -29,6 +29,21 @@ const artistName = computed(() => getArtist(props.track.artistId)?.name ?? '')
 
 const dragOver = ref(false)
 
+// A row has a strict column template at every breakpoint. Without this,
+// CSS Grid creates one implicit column per child, which lets the artwork
+// expand to the width of the list and overlap the following recent tracks.
+const rowGridClass = computed(() => {
+  const mobile = props.draggable
+    ? 'grid-cols-[24px_minmax(0,1fr)_28px_14px] sm:grid-cols-[24px_minmax(0,1fr)_40px_28px_14px]'
+    : 'grid-cols-[24px_minmax(0,1fr)_28px] sm:grid-cols-[24px_minmax(0,1fr)_40px_28px]'
+
+  if (props.hideAlbum) return mobile
+
+  return props.draggable
+    ? `${mobile} lg:grid-cols-[24px_minmax(0,1fr)_160px_40px_28px_14px] 2xl:grid-cols-[24px_minmax(0,1fr)_224px_40px_28px_14px]`
+    : `${mobile} lg:grid-cols-[24px_minmax(0,1fr)_160px_40px_28px] 2xl:grid-cols-[24px_minmax(0,1fr)_224px_40px_28px]`
+})
+
 function onDragStart(e: DragEvent) {
   if (!props.draggable) return
   e.dataTransfer?.setData('text/plain', String(props.index ?? 0))
@@ -47,7 +62,7 @@ function onDrop(e: DragEvent) {
 <template>
   <li
     class="group relative grid items-center gap-3 h-12 px-2 t-col hover:bg-hover focus-within:bg-hover border-b border-line last:border-b-0"
-    :class="[isCurrent ? 'bg-primary-muted/60 hover:bg-primary-muted' : '', dragOver ? 'ring-1 ring-inset ring-primary' : '']"
+    :class="[rowGridClass, isCurrent ? 'bg-primary-muted/60 hover:bg-primary-muted' : '', dragOver ? 'ring-1 ring-inset ring-primary' : '']"
     :draggable="draggable"
     @dragstart="onDragStart"
     @dragover.prevent="draggable && (dragOver = true)"

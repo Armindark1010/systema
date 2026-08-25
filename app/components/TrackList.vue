@@ -17,6 +17,20 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{ reorder: [from: number, to: number] }>()
 
+// Keep the column labels aligned with TrackRow's breakpoint-specific grid.
+// The explicit template also prevents CSS Grid from creating implicit rows.
+const listGridClass = computed(() => {
+  const mobile = props.draggable
+    ? 'grid-cols-[24px_minmax(0,1fr)_28px_14px] sm:grid-cols-[24px_minmax(0,1fr)_40px_28px_14px]'
+    : 'grid-cols-[24px_minmax(0,1fr)_28px] sm:grid-cols-[24px_minmax(0,1fr)_40px_28px]'
+
+  if (props.hideAlbum) return mobile
+
+  return props.draggable
+    ? `${mobile} lg:grid-cols-[24px_minmax(0,1fr)_160px_40px_28px_14px] 2xl:grid-cols-[24px_minmax(0,1fr)_224px_40px_28px_14px]`
+    : `${mobile} lg:grid-cols-[24px_minmax(0,1fr)_160px_40px_28px] 2xl:grid-cols-[24px_minmax(0,1fr)_224px_40px_28px]`
+})
+
 const player = usePlayer()
 const { toggleFavorite: toggleLibraryFavorite } = useMusicLibrary()
 
@@ -44,7 +58,8 @@ function onFavorite(id: string) {
     <!-- column header -->
     <div
       v-if="showHeader"
-      class="hidden sm:grid grid items-center gap-3 h-8 px-2 bg-muted border-b border-line text-[10px] font-bold tracking-[0.14em] text-fg-faint uppercase"
+      class="hidden sm:grid items-center gap-3 h-8 px-2 bg-muted border-b border-line text-[10px] font-bold tracking-[0.14em] text-fg-faint uppercase"
+      :class="listGridClass"
       aria-hidden="true"
     >
       <span class="w-6 shrink-0 text-right">#</span>
