@@ -6,23 +6,23 @@ const themes = [
   {
     id: 'default' as const,
     name: 'DEFAULT',
-    tag: 'WHITE / BLUE',
-    desc: 'THE MAIN SYSTEMA MUSIC IDENTITY — ARCHITECTURAL BLUE ON WHITE.',
-    swatch: ['#ffffff', '#1d4ed8', '#0c1424', '#e3e7ed'],
+    tag: 'WHITE / STEEL',
+    desc: 'A WHITE DIAL — QUIET GENEVA STEEL BLUE ON PURE WHITE.',
+    swatch: ['#ffffff', '#1e3a66', '#10141c', '#e6e9ee'],
   },
   {
     id: 'premium' as const,
     name: 'PREMIUM',
-    tag: 'WHITE / GOLD',
-    desc: 'RESTRAINED GOLD ON IVORY — MINIMAL LUXURY, NO EXCESS.',
-    swatch: ['#fffdf7', '#9c7d28', '#17140c', '#e9e4d3'],
+    tag: 'IVORY / GOLD',
+    desc: 'DEEP CHAMPAGNE GOLD ON IVORY ENAMEL — MINIMAL LUXURY, NO EXCESS.',
+    swatch: ['#fcfbf7', '#8a6d2c', '#181510', '#e8e3d3'],
   },
   {
     id: 'dark' as const,
     name: 'DARK',
-    tag: 'DARK / MONOCHROME',
-    desc: 'NEAR-BLACK ARCHITECTURAL MONOCHROME — HIGH CONTRAST.',
-    swatch: ['#0a0c10', '#86aefb', '#eef1f5', '#212833'],
+    tag: 'ONYX / SILVER',
+    desc: 'AN ONYX DIAL — APPLIED SILVER INDICES, NOTHING ELSE.',
+    swatch: ['#0a0b0e', '#dde3ea', '#edf0f4', '#22262e'],
   },
 ]
 </script>

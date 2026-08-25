@@ -22,25 +22,24 @@ watch(fullPlayerOpen, (v) => {
   else document.removeEventListener('keydown', onKeydown)
 })
 
-const moreItems = [
-  { key: 'album', label: 'View album', icon: 'lucide:disc-3' },
-  { key: 'artist', label: 'View artist', icon: 'lucide:mic-vocal' },
-  { key: 'clear', label: 'Clear queue', icon: 'lucide:trash-2' },
-]
-
-function onMore(item: { key: string }) {
+function goAlbum() {
   const t = currentTrack.value
   if (!t) return
-  if (item.key === 'album') {
-    setFullPlayerOpen(false)
-    navigateTo(`/library/albums?album=${t.albumId}`)
-  }
-  if (item.key === 'artist') {
-    setFullPlayerOpen(false)
-    navigateTo(`/library/artists?artist=${t.artistId}`)
-  }
-  if (item.key === 'clear') clearQueue()
+  setFullPlayerOpen(false)
+  navigateTo(`/library/albums?album=${t.albumId}`)
 }
+function goArtist() {
+  const t = currentTrack.value
+  if (!t) return
+  setFullPlayerOpen(false)
+  navigateTo(`/library/artists?artist=${t.artistId}`)
+}
+
+const moreItems = [
+  { label: 'View album', icon: 'lucide:disc-3', onSelect: goAlbum },
+  { label: 'View artist', icon: 'lucide:mic-vocal', onSelect: goArtist },
+  { label: 'Clear queue', icon: 'lucide:trash-2', onSelect: () => clearQueue() },
+]
 </script>
 
 <template>

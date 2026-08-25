@@ -41,7 +41,7 @@ const progress = { 'al-outrun': 62, 'al-blueprint': 38, 'al-hg': 74, 'al-ram': 1
       <div class="mt-6 flex flex-col md:flex-row md:items-end md:justify-between gap-6">
         <div>
           <p class="label-muted">GOOD MORNING</p>
-          <h1 class="mt-2 text-display-xl font-bold tracking-tight text-fg">YOUR MUSIC SYSTEM</h1>
+          <h1 class="mt-2 text-display-xl font-semibold tracking-tight text-fg">YOUR MUSIC SYSTEM</h1>
           <p class="mt-3 text-lead text-fg-muted max-w-[52ch]">
             {{ s.tracks }} tracks · {{ s.albums }} albums · {{ s.artists }} artists — one precise archive, indexed and ready.
           </p>

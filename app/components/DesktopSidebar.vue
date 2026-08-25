@@ -34,9 +34,9 @@ const groups = [
 ]
 
 const THEME_LABEL: Record<string, string> = {
-  default: 'WHITE / BLUE',
-  premium: 'WHITE / GOLD',
-  dark: 'DARK / MONO',
+  default: 'WHITE / STEEL',
+  premium: 'IVORY / GOLD',
+  dark: 'ONYX / SILVER',
 }
 
 function isActive(to: string): boolean {

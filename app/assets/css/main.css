@@ -30,110 +30,112 @@
 
 /* ------------------------------------------------------------
    2. MUSIC THEMES
-   THEME 1 — DEFAULT  ·  WHITE / BLUE
-   THEME 2 — PREMIUM  ·  WHITE / GOLD
-   THEME 3 — DARK     ·  DARK / MONOCHROME
+   Inspired by Swiss horology: quiet materials, hairlines,
+   one restrained accent per dial — never more.
+   THEME 1 — DEFAULT  ·  WHITE / STEEL BLUE
+   THEME 2 — PREMIUM  ·  IVORY / CHAMPAGNE GOLD
+   THEME 3 — DARK     ·  ONYX / SILVER
    ------------------------------------------------------------ */
 :root,
 [data-theme='default'] {
-  /* surfaces */
+  /* surfaces — a white dial */
   --sys-bg: #ffffff;
   --sys-surface: #ffffff;
-  --sys-surface-muted: #f4f6f8;
-  --sys-surface-hover: #ebeff4;
-  --sys-secondary: #eef1f5;
+  --sys-surface-muted: #f5f6f8;
+  --sys-surface-hover: #eef0f3;
+  --sys-secondary: #f1f3f5;
   --sys-player-bg: #ffffff;
 
   /* ink */
-  --sys-foreground: #0c1424;
-  --sys-foreground-muted: #5b6472;
-  --sys-foreground-faint: #9aa3b0;
+  --sys-foreground: #10141c;
+  --sys-foreground-muted: #5c6470;
+  --sys-foreground-faint: #9aa2ae;
 
-  /* brand — deep architectural blue */
-  --sys-primary: #1d4ed8;
-  --sys-primary-strong: #153da8;
+  /* brand — quiet Geneva steel blue */
+  --sys-primary: #1e3a66;
+  --sys-primary-strong: #172f54;
   --sys-primary-foreground: #ffffff;
-  --sys-primary-muted: #e9eefc;
-  --sys-accent: #0f2e78;
+  --sys-primary-muted: #eaeff6;
+  --sys-accent: #6f87a8;
 
-  /* structure */
-  --sys-border: #e3e7ed;
-  --sys-border-strong: #c6ced9;
+  /* structure — hairlines */
+  --sys-border: #e6e9ee;
+  --sys-border-strong: #cfd6df;
 
   /* states */
-  --sys-danger: #c62828;
+  --sys-danger: #b3261e;
   --sys-success: #1e7a46;
   --sys-warning: #a16207;
 
-  /* shadows — restrained */
-  --sys-shadow-1: 0 1px 2px rgb(12 20 36 / 0.06);
-  --sys-shadow-2: 0 12px 32px -8px rgb(12 20 36 / 0.14);
+  /* shadows — barely there */
+  --sys-shadow-1: 0 1px 2px rgb(16 20 28 / 0.05);
+  --sys-shadow-2: 0 8px 28px -14px rgb(16 20 28 / 0.16);
 }
 
 [data-theme='premium'] {
-  /* surfaces — warm ivory */
-  --sys-bg: #fffdf7;
-  --sys-surface: #fffdf7;
-  --sys-surface-muted: #f6f3ea;
-  --sys-surface-hover: #efeadd;
-  --sys-secondary: #f1ede1;
-  --sys-player-bg: #fffdf7;
+  /* surfaces — ivory enamel */
+  --sys-bg: #fcfbf7;
+  --sys-surface: #fcfbf7;
+  --sys-surface-muted: #f5f2ea;
+  --sys-surface-hover: #edeadd;
+  --sys-secondary: #f2efe5;
+  --sys-player-bg: #fcfbf7;
 
   /* ink — warm charcoal */
-  --sys-foreground: #17140c;
-  --sys-foreground-muted: #6f6a5d;
-  --sys-foreground-faint: #aaa493;
+  --sys-foreground: #181510;
+  --sys-foreground-muted: #6e6858;
+  --sys-foreground-faint: #a8a290;
 
-  /* brand — restrained gold */
-  --sys-primary: #9c7d28;
-  --sys-primary-strong: #7f641f;
-  --sys-primary-foreground: #fffdf7;
-  --sys-primary-muted: #f5efdb;
-  --sys-accent: #6e5a1e;
+  /* brand — deep champagne gold */
+  --sys-primary: #8a6d2c;
+  --sys-primary-strong: #725a24;
+  --sys-primary-foreground: #fcfbf7;
+  --sys-primary-muted: #f1ebd9;
+  --sys-accent: #a68d55;
 
   /* structure */
-  --sys-border: #e9e4d3;
-  --sys-border-strong: #d2c8ab;
+  --sys-border: #e8e3d3;
+  --sys-border-strong: #d0c6a8;
 
   --sys-danger: #a33a2e;
   --sys-success: #347a45;
   --sys-warning: #9c6b1c;
 
-  --sys-shadow-1: 0 1px 2px rgb(23 20 12 / 0.05);
-  --sys-shadow-2: 0 12px 32px -8px rgb(23 20 12 / 0.12);
+  --sys-shadow-1: 0 1px 2px rgb(24 21 16 / 0.04);
+  --sys-shadow-2: 0 8px 28px -14px rgb(24 21 16 / 0.14);
 }
 
 [data-theme='dark'] {
-  /* surfaces — near black, architectural */
-  --sys-bg: #0a0c10;
-  --sys-surface: #101319;
-  --sys-surface-muted: #151a21;
-  --sys-surface-hover: #1b222c;
-  --sys-secondary: #1c2129;
-  --sys-player-bg: #0e1116;
+  /* surfaces — onyx dial */
+  --sys-bg: #0a0b0e;
+  --sys-surface: #101216;
+  --sys-surface-muted: #14171c;
+  --sys-surface-hover: #1a1e24;
+  --sys-secondary: #1c2026;
+  --sys-player-bg: #0d0f13;
 
   /* ink */
-  --sys-foreground: #eef1f5;
-  --sys-foreground-muted: #98a1ad;
-  --sys-foreground-faint: #5f6875;
+  --sys-foreground: #edf0f4;
+  --sys-foreground-muted: #98a0ac;
+  --sys-foreground-faint: #5e6673;
 
-  /* brand — minimal ice-blue accent */
-  --sys-primary: #86aefb;
-  --sys-primary-strong: #a8c5ff;
-  --sys-primary-foreground: #0a0c10;
-  --sys-primary-muted: #1c2534;
-  --sys-accent: #c9d8f5;
+  /* brand — applied silver indices */
+  --sys-primary: #dde3ea;
+  --sys-primary-strong: #f2f5f8;
+  --sys-primary-foreground: #0a0b0e;
+  --sys-primary-muted: #1d232c;
+  --sys-accent: #9fb0c2;
 
   /* structure */
-  --sys-border: #212833;
-  --sys-border-strong: #343d4c;
+  --sys-border: #22262e;
+  --sys-border-strong: #363c47;
 
   --sys-danger: #ff6b5e;
   --sys-success: #4ecb8d;
   --sys-warning: #e0a458;
 
-  --sys-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
-  --sys-shadow-2: 0 12px 32px -8px rgb(0 0 0 / 0.6);
+  --sys-shadow-1: 0 1px 2px rgb(0 0 0 / 0.35);
+  --sys-shadow-2: 0 8px 28px -14px rgb(0 0 0 / 0.55);
 }
 
 /* ------------------------------------------------------------
@@ -157,11 +159,11 @@
   --ai-border: #262040;
   --ai-border-strong: #3b3263;
 
-  --ai-glow: rgb(139 92 246 / 0.35);
-  --ai-glow-soft: rgb(139 92 246 / 0.16);
+  --ai-glow: rgb(139 92 246 / 0.2);
+  --ai-glow-soft: rgb(139 92 246 / 0.1);
 
   --ai-shadow-1: 0 1px 2px rgb(0 0 0 / 0.5);
-  --ai-shadow-2: 0 16px 48px -12px rgb(76 29 149 / 0.4);
+  --ai-shadow-2: 0 16px 48px -20px rgb(76 29 149 / 0.35);
 }
 
 /* ------------------------------------------------------------
@@ -277,7 +279,7 @@
    6. STRUCTURE HELPERS
    ------------------------------------------------------------ */
 
-/* mobile dock: quick search + mini player + bottom navigation */
+/* mobile dock: mini player + bottom navigation + quick search */
 :root {
   --sys-dock-quicksearch: 3rem;
   --sys-dock-mini: 3.75rem;
@@ -297,14 +299,14 @@
 /* subtle glow field for AI backgrounds */
 .ai-aurora {
   background:
-    radial-gradient(52rem 30rem at 85% -10%, rgb(139 92 246 / 0.16), transparent 60%),
-    radial-gradient(40rem 26rem at -10% 110%, rgb(232 121 249 / 0.08), transparent 60%),
+    radial-gradient(52rem 30rem at 85% -10%, rgb(139 92 246 / 0.1), transparent 60%),
+    radial-gradient(40rem 26rem at -10% 110%, rgb(232 121 249 / 0.05), transparent 60%),
     var(--ai-bg);
 }
 .ai-grid-fade {
   background-image:
-    linear-gradient(to right, rgb(139 92 246 / 0.05) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(139 92 246 / 0.05) 1px, transparent 1px);
+    linear-gradient(to right, rgb(139 92 246 / 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(139 92 246 / 0.035) 1px, transparent 1px);
   background-size: 4rem 4rem;
   mask-image: radial-gradient(60rem 30rem at 50% 0%, black 30%, transparent 75%);
 }
