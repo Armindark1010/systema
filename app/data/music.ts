@@ -65,8 +65,8 @@ export const albums: Album[] = [
   { id: 'al-sh', title: 'Shab-e Hojoom', artistId: 'a-ebi', year: 1996, genreId: 'g-persian', cover: '/art/shab-e-hojom.jpg' },
   { id: 'al-tee', title: 'Trans-Europe Express', artistId: 'a-kraftwerk', year: 1977, genreId: 'g-electronic', cover: '/art/trans-europe-express.jpg' },
   { id: 'al-pcl', title: 'Power, Corruption & Lies', artistId: 'a-neworder', year: 1983, genreId: 'g-electronic', cover: '/art/power-corruption-lies.jpg' },
-  { id: 'al-boc', title: 'Music Has the Right to Children', artistId: 'a-boc', year: 1998, genreId: 'g-ambient', cover: '/art/art-default.jpg' },
-  { id: 'al-lorn', title: 'Ask the Dust', artistId: 'a-lorn', year: 2012, genreId: 'g-darksynth', cover: '/art/art-default.jpg' },
+  { id: 'al-boc', title: 'Music Has the Right to Children', artistId: 'a-boc', year: 1998, genreId: 'g-ambient', cover: '/art/boc-children.jpg' },
+  { id: 'al-lorn', title: 'Ask the Dust', artistId: 'a-lorn', year: 2012, genreId: 'g-darksynth', cover: '/art/ask-the-dust.jpg' },
   { id: 'al-pole', title: 'Pole', artistId: 'a-googoosh', year: 1977, genreId: 'g-persian', cover: '/art/persian-nights.jpg' },
 ]
 

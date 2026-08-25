@@ -63,7 +63,7 @@ export const playlists: Playlist[] = [
     id: 'pl-morning-grid',
     title: 'MORNING GRID',
     description: 'Precise starts. 08:00 sharp.',
-    cover: '/art/art-default.jpg',
+    cover: '/art/morning-grid.jpg',
     kind: 'user',
     trackIds: ['tr-31', 'tr-08', 'tr-10', 'tr-03', 'tr-30', 'tr-32', 'tr-22', 'tr-28'],
     createdAt: '2025-07-10T06:30:00Z',

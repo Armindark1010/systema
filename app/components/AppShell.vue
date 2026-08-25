@@ -11,6 +11,13 @@
 const { isPlaying, togglePlay } = usePlayer()
 const { openPalette } = useQuickSearch()
 
+// real audio engine — drives the generative synth from player state
+const engine = useAudioEngine()
+const { currentTrack, volume, muted } = usePlayer()
+watch(currentTrack, (t) => (t ? engine.start(t) : engine.stop()))
+watch(isPlaying, (p) => engine.setPaused(!p), { immediate: true })
+watch([volume, muted], ([v, m]) => engine.setLevel(m ? 0 : v), { immediate: true })
+
 // global keyboard: ⌘K / Ctrl+K → palette, Space → play/pause
 function onKeydown(e: KeyboardEvent) {
   const target = e.target as HTMLElement

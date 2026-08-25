@@ -22,6 +22,13 @@ export default defineNuxtConfig({
   // ---- global styles -------------------------------------------------
   css: ['~/assets/css/main.css'],
 
+  // ---- static assets ---------------------------------------------------
+  // SYSTEMA keeps its public assets inside the app/ directory (Nuxt 4
+  // source dir); point the static server at them.
+  dir: {
+    public: 'app/public',
+  },
+
   // ---- app shell -----------------------------------------------------
   app: {
     head: {
