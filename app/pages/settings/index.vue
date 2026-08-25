@@ -38,7 +38,7 @@ useHead({ title: 'Settings' })
   width: 2.25rem;
   height: 2.25rem;
   flex: 0 0 2.25rem;
-  @apply place-items-center;
+  place-items: center;
   border: 1px solid var(--sys-border);
   color: var(--sys-foreground-muted);
   background: var(--sys-surface-muted);
