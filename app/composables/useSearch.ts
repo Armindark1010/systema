@@ -1,81 +1,64 @@
 // ============================================================
-// useSearch — search architecture (normal + AI semantic)
+// useSearch — Facade over Centralized Search Store (Pinia)
 // ============================================================
-// Normal search matches the catalog; AI semantic search is
-// represented by mock states that a future inference engine
-// will fill in.
+// Single source of truth is useSearchStore().
+// Decouples all UI entry points (Home QuickSearch, Mobile Dock,
+// Library Search, Search Page) and maps them to one shared experience.
 // ============================================================
 
-import type { Album, Artist, Playlist, SearchResult, Track } from '~/types'
-import { isSemanticQuery } from '~/data/search'
-import { useMusicLibrary } from './useMusicLibrary'
-import { usePlaylists } from './usePlaylists'
-
-const query = ref('')
+import { storeToRefs } from 'pinia'
+import { useSearchStore } from '~/stores/search'
 
 export function useSearch() {
-  const { tracks, albums, artists, getAlbum, getArtist } = useMusicLibrary()
-  const { playlists } = usePlaylists()
+  const store = useSearchStore()
+  const refs = storeToRefs(store)
 
-  const semantic = computed(() => isSemanticQuery(query.value))
+  // Backwards-compatible aliases
+  const semantic = computed(() => store.isSemantic)
 
-  const trackResults = computed<Track[]>(() => {
-    const q = query.value.trim().toLowerCase()
-    if (!q || semantic.value) return []
-    return tracks.value
-      .filter((t) => t.title.toLowerCase().includes(q) || (getArtist(t.artistId)?.name.toLowerCase() ?? '').includes(q))
-      .slice(0, 8)
-  })
-
-  const albumResults = computed<Album[]>(() => {
-    const q = query.value.trim().toLowerCase()
-    if (!q || semantic.value) return []
-    return albums.value.filter((a) => a.title.toLowerCase().includes(q)).slice(0, 4)
-  })
-
-  const artistResults = computed<Artist[]>(() => {
-    const q = query.value.trim().toLowerCase()
-    if (!q || semantic.value) return []
-    return artists.value.filter((a) => a.name.toLowerCase().includes(q)).slice(0, 4)
-  })
-
-  const playlistResults = computed<Playlist[]>(() => {
-    const q = query.value.trim().toLowerCase()
-    if (!q || semantic.value) return []
-    return playlists.value.filter((p) => p.title.toLowerCase().includes(q)).slice(0, 3)
-  })
-
-  /** grouped results for the results page */
   const grouped = computed(() => ({
-    tracks: trackResults.value,
-    albums: albumResults.value,
-    artists: artistResults.value,
-    playlists: playlistResults.value,
-    semantic: semantic.value,
+    tracks: store.results.tracks.map(r => r.item),
+    albums: store.results.albums.map(r => r.item),
+    artists: store.results.artists.map(r => r.item),
+    playlists: store.results.playlists.map(r => r.item),
+    semantic: store.isSemantic,
   }))
 
-  /** flat results for the command palette */
-  const paletteResults = computed<SearchResult[]>(() => {
-    const out: SearchResult[] = []
-    trackResults.value.slice(0, 5).forEach((t) =>
-      out.push({ id: t.id, type: 'track', title: t.title, subtitle: getArtist(t.artistId)?.name ?? '' }),
+  const paletteResults = computed(() => {
+    const out: any[] = []
+    store.results.tracks.slice(0, 5).forEach((t) =>
+      out.push({ id: t.item.id, type: 'track', title: t.item.title, subtitle: (t.item as any).artist ?? '' }),
     )
-    artistResults.value.slice(0, 3).forEach((a) =>
-      out.push({ id: a.id, type: 'artist', title: a.name, subtitle: a.origin }),
+    store.results.artists.slice(0, 3).forEach((a) =>
+      out.push({ id: a.item.id, type: 'artist', title: a.item.name, subtitle: a.item.origin }),
     )
-    albumResults.value.slice(0, 3).forEach((al) =>
-      out.push({ id: al.id, type: 'album', title: al.title, subtitle: getArtist(al.artistId)?.name ?? '' }),
+    store.results.albums.slice(0, 3).forEach((al) =>
+      out.push({ id: al.item.id, type: 'album', title: al.item.title, subtitle: (al.item as any).artist ?? '' }),
     )
-    playlistResults.value.slice(0, 3).forEach((p) =>
-      out.push({ id: p.id, type: 'playlist', title: p.title, subtitle: p.description ?? '' }),
+    store.results.playlists.slice(0, 3).forEach((p) =>
+      out.push({ id: p.item.id, type: 'playlist', title: p.item.title, subtitle: p.item.description ?? '' }),
     )
     return out
   })
 
   function submit(q?: string) {
-    if (q !== undefined) query.value = q
-    navigateTo(semantic.value ? `/ai/search?q=${encodeURIComponent(query.value.trim())}` : `/search?q=${encodeURIComponent(query.value.trim())}`)
+    store.submitSearch(q)
   }
 
-  return { query, semantic, grouped, paletteResults, submit }
+  return {
+    ...refs,
+    store,
+    semantic,
+    grouped,
+    paletteResults,
+    submit,
+    setQuery: store.setQuery,
+    executeSearch: store.executeSearch,
+    clearQuery: store.clearQuery,
+    addRecentSearch: store.addRecentSearch,
+    removeRecentSearch: store.removeRecentSearch,
+    clearRecentSearches: store.clearRecentSearches,
+    setFilter: store.setFilter,
+    setSearchMode: store.setSearchMode,
+  }
 }

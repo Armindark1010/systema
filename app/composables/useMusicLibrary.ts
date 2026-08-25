@@ -6,6 +6,7 @@
 // ============================================================
 
 import type { Album, Artist, Genre, LibrarySort, Track, ViewMode } from '~/types'
+import { normalizeText } from '~/services/search/normalization'
 import {
   albums as albumData,
   artists as artistData,
@@ -32,16 +33,18 @@ export function useMusicLibrary() {
   const { recentlyPlayed } = usePlaybackHistory()
 
   const sortedTracks = computed<Track[]>(() => {
-    const q = query.value.trim().toLowerCase()
+    const q = normalizeText(query.value)
     let list = tracks.value.filter((t) => {
       if (!q) return true
-      const artist = getArtist(t.artistId)?.name.toLowerCase() ?? ''
-      const album = getAlbum(t.albumId)?.title.toLowerCase() ?? ''
+      const artist = normalizeText(getArtist(t.artistId)?.name ?? '')
+      const album = normalizeText(getAlbum(t.albumId)?.title ?? '')
+      const genre = normalizeText(getGenre(t.genreId)?.name ?? '')
+      const title = normalizeText(t.title)
       return (
-        t.title.toLowerCase().includes(q) ||
+        title.includes(q) ||
         artist.includes(q) ||
         album.includes(q) ||
-        getGenre(t.genreId)?.name.toLowerCase().includes(q)
+        genre.includes(q)
       )
     })
     const dir = sortDesc.value ? -1 : 1

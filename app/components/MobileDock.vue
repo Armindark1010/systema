@@ -22,8 +22,13 @@ function collapseSearch() {
 }
 
 function openSearchWorkspace() {
+  const q = query.value.trim()
   searchExpanded.value = false
-  open.value = true
+  if (q) {
+    navigateTo(`/search?q=${encodeURIComponent(q)}`)
+  } else {
+    navigateTo('/search')
+  }
 }
 
 watch(open, (isOpen) => {
