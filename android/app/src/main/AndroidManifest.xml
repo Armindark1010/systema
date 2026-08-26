@@ -38,4 +38,18 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      Local music library access.
+
+      API 33+ uses the granular READ_MEDIA_AUDIO permission. Older
+      releases fall back to READ_EXTERNAL_STORAGE, which is explicitly
+      capped at API 32 so modern devices never see the legacy prompt.
+      No write or "all files" permission is requested: MediaStore gives
+      us everything the library needs under scoped storage.
+    -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
 </manifest>

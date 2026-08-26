@@ -27,6 +27,18 @@ export function useLibrary() {
     albums,
     artists,
     playlists,
+    // Native device library (all inert on the web).
+    isNativeLibrary,
+    permissionStatus,
+    scanState,
+    scanProgress,
+    libraryError,
+    hasMoreTracks,
+    isLoadingMore,
+    isScanning,
+    needsPermission,
+    scanPercent,
+    scanLabel,
   } = storeToRefs(libraryStore)
 
   const { favorites } = storeToRefs(playerStore)
@@ -74,6 +86,19 @@ export function useLibrary() {
     playlists,
     favorites,
 
+    // native library state
+    isNativeLibrary,
+    permissionStatus,
+    scanState,
+    scanProgress,
+    libraryError,
+    hasMoreTracks,
+    isLoadingMore,
+    isScanning,
+    needsPermission,
+    scanPercent,
+    scanLabel,
+
     // methods from library store
     getAlbum: libraryStore.getAlbum,
     getArtist: libraryStore.getArtist,
@@ -91,5 +116,14 @@ export function useLibrary() {
     shuffleLibrary,
     addTrackToQueue,
     setSection,
+
+    // native library actions — no-ops in the browser
+    initNativeLibrary: libraryStore.initNativeLibrary,
+    disposeNativeLibrary: libraryStore.disposeNativeLibrary,
+    requestLibraryPermission: libraryStore.requestLibraryPermission,
+    scanLibrary: libraryStore.scanLibrary,
+    cancelLibraryScan: libraryStore.cancelLibraryScan,
+    loadMoreTracks: libraryStore.loadMoreTracks,
+    clearLibraryError: libraryStore.clearLibraryError,
   }
 }

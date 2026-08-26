@@ -11,6 +11,21 @@ import { tracks as catalogTracks, albums as catalogAlbums, artists as catalogArt
 import { usePlaybackHistory } from '~/composables/usePlaybackHistory'
 import { usePlaylists } from '~/composables/usePlaylists'
 import { useSettingsStore } from '~/stores/settings'
+import {
+  addScanListeners,
+  cancelScan as nativeCancelScan,
+  getLibraryCount as nativeGetLibraryCount,
+  getScanStatus as nativeGetScanStatus,
+  getTracksPage,
+  hasPermission as nativeHasPermission,
+  isNativeLibraryAvailable,
+  requestPermission as nativeRequestPermission,
+  startScan as nativeStartScan,
+  toLibraryError,
+  type LibraryError,
+  type ScanProgress,
+  type TrackSortKey as NativeSortKey,
+} from '~/services/native/musicLibraryService'
 
 export type LibrarySection = 'tracks' | 'albums' | 'artists' | 'playlists'
 export type LibrarySortKey =
@@ -63,10 +78,32 @@ export const useLibraryStore = defineStore('library', () => {
   }
 
   const sortBy = ref<LibrarySortKey>(defaultSortFromSettings())
+
+  // On the web these stay seeded with the mock catalog. On Android the
+  // first successful scan/load replaces them with real device tracks.
   const tracks = ref<Track[]>(catalogTracks)
   const albums = ref<Album[]>(catalogAlbums)
   const artists = ref<Artist[]>(catalogArtists)
   const isLoading = ref(false)
+
+  // ---- Native library state ----------------------------------
+  // Deliberately platform-agnostic: no Android or Capacitor concept
+  // appears here, only "is a device library available and what is it
+  // doing". The service layer owns every platform detail.
+  const isNativeLibrary = ref(false)
+  const permissionStatus = ref<'unknown' | 'granted' | 'denied' | 'prompt' | 'prompt-with-rationale'>('unknown')
+  const scanState = ref<ScanProgress['state']>('IDLE')
+  const scanProgress = ref<ScanProgress | null>(null)
+  const libraryError = ref<LibraryError | null>(null)
+
+  // Pagination cursor over the native index.
+  const pageSize = ref(100)
+  const loadedOffset = ref(0)
+  const nativeTotal = ref(0)
+  const hasMoreTracks = ref(false)
+  const isLoadingMore = ref(false)
+
+  let disposeScanListeners: (() => void) | null = null
 
   const history = usePlaybackHistory()
   const playlistsStore = usePlaylists()
@@ -75,7 +112,36 @@ export const useLibraryStore = defineStore('library', () => {
   const playlists = computed<Playlist[]>(() => playlistsStore.playlists.value)
 
   // ---- Getters -----------------------------------------------
-  const totalTracks = computed(() => tracks.value.length)
+  // On a native library the authoritative count comes from the
+  // database, not from however many rows we have paged in so far.
+  const totalTracks = computed(() =>
+    isNativeLibrary.value ? nativeTotal.value : tracks.value.length,
+  )
+
+  const isScanning = computed(() => scanState.value === 'SCANNING')
+
+  const needsPermission = computed(
+    () => isNativeLibrary.value && permissionStatus.value !== 'granted',
+  )
+
+  /** 0-100, or null while the scan total is unknown (indeterminate). */
+  const scanPercent = computed<number | null>(() => {
+    const progress = scanProgress.value
+    if (!progress || !progress.total) return null
+    return Math.min(100, Math.round((progress.processed / progress.total) * 100))
+  })
+
+  /** "128 / 642" style label for the Settings scan row. */
+  const scanLabel = computed(() => {
+    const progress = scanProgress.value
+    if (!progress) return ''
+    if (progress.state === 'ERROR') return progress.errorMessage ?? 'SCAN FAILED'
+    if (progress.state === 'COMPLETED') return `${progress.discovered} TRACKS INDEXED`
+    if (progress.state !== 'SCANNING') return ''
+    return progress.total
+      ? `${progress.processed} / ${progress.total}`
+      : `${progress.processed} FOUND`
+  })
 
   const activeSectionIndex = computed(() =>
     librarySections.findIndex(s => s.id === activeSection.value),
@@ -195,6 +261,214 @@ export const useLibraryStore = defineStore('library', () => {
     return `${m}:${s.toString().padStart(2, '0')}`
   }
 
+  // ---- Native library actions --------------------------------
+
+  /** Maps the UI sort key onto one the native index can serve. */
+  function nativeSortKey(): NativeSortKey {
+    switch (sortBy.value) {
+      case 'title': return 'title'
+      case 'artist': return 'artist'
+      case 'album': return 'album'
+      case 'duration': return 'duration'
+      default: return 'dateAdded'
+    }
+  }
+
+  function mergeUnique<T extends { id: string }>(current: T[], incoming: T[]): T[] {
+    if (incoming.length === 0) return current
+    const seen = new Set(current.map(item => item.id))
+    const merged = [...current]
+    for (const item of incoming) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id)
+        merged.push(item)
+      }
+    }
+    return merged
+  }
+
+  /**
+   * Boots the device library. Safe to call anywhere: on the web it
+   * returns immediately and the mock catalog stays untouched.
+   */
+  async function initNativeLibrary(): Promise<void> {
+    if (!isNativeLibraryAvailable()) {
+      isNativeLibrary.value = false
+      return
+    }
+    isNativeLibrary.value = true
+
+    await attachScanListeners()
+
+    try {
+      const permission = await nativeHasPermission()
+      permissionStatus.value = permission.status
+
+      const status = await nativeGetScanStatus()
+      if (status) {
+        scanState.value = status.state
+        scanProgress.value = status
+      }
+
+      if (permission.granted) {
+        const count = await nativeGetLibraryCount()
+        // A fresh install has an empty index — scan once so the user
+        // sees their music without having to find the Settings action.
+        if (count === 0) await scanLibrary()
+        else await loadFirstPage()
+      }
+    } catch (error) {
+      libraryError.value = toLibraryError(error)
+    }
+  }
+
+  async function attachScanListeners(): Promise<void> {
+    if (disposeScanListeners) return
+    disposeScanListeners = await addScanListeners({
+      onStarted: (progress) => {
+        scanState.value = progress.state
+        scanProgress.value = progress
+        libraryError.value = null
+      },
+      onProgress: (progress) => {
+        scanState.value = progress.state
+        scanProgress.value = progress
+      },
+      onCompleted: (progress) => {
+        scanState.value = 'COMPLETED'
+        scanProgress.value = progress
+        // Re-read page one so the UI reflects the new index.
+        void loadFirstPage()
+      },
+      onError: (progress) => {
+        scanState.value = 'ERROR'
+        scanProgress.value = progress
+        libraryError.value = {
+          code: progress.errorCode ?? 'UNKNOWN',
+          message: progress.errorMessage ?? 'The library scan failed.',
+        }
+      },
+    })
+  }
+
+  function disposeNativeLibrary(): void {
+    disposeScanListeners?.()
+    disposeScanListeners = null
+  }
+
+  /** Prompts for audio access. A denial is a state, never a crash. */
+  async function requestLibraryPermission(): Promise<boolean> {
+    if (!isNativeLibrary.value) return false
+    scanState.value = 'REQUESTING_PERMISSION'
+    try {
+      const result = await nativeRequestPermission()
+      permissionStatus.value = result.status
+      scanState.value = 'IDLE'
+      if (!result.granted) {
+        libraryError.value = {
+          code: 'PERMISSION_DENIED',
+          message: 'SYSTEMA needs access to your audio files to build the library.',
+        }
+      }
+      return result.granted
+    } catch (error) {
+      scanState.value = 'IDLE'
+      libraryError.value = toLibraryError(error)
+      return false
+    }
+  }
+
+  /** Real rescan. Incremental: added / changed / removed only. */
+  async function scanLibrary(): Promise<void> {
+    if (!isNativeLibrary.value || isScanning.value) return
+
+    if (permissionStatus.value !== 'granted') {
+      const granted = await requestLibraryPermission()
+      if (!granted) return
+    }
+
+    libraryError.value = null
+    try {
+      await nativeStartScan()
+      scanState.value = 'SCANNING'
+    } catch (error) {
+      const failure = toLibraryError(error)
+      // An already-running scan is not an error worth surfacing.
+      if (failure.code === 'SCAN_IN_PROGRESS') return
+      scanState.value = 'ERROR'
+      libraryError.value = failure
+    }
+  }
+
+  async function cancelLibraryScan(): Promise<void> {
+    if (!isNativeLibrary.value) return
+    try {
+      await nativeCancelScan()
+      scanState.value = 'IDLE'
+    } catch (error) {
+      libraryError.value = toLibraryError(error)
+    }
+  }
+
+  /** Replaces the catalog with the first page of device tracks. */
+  async function loadFirstPage(): Promise<void> {
+    if (!isNativeLibrary.value) return
+    isLoading.value = true
+    try {
+      const page = await getTracksPage({
+        offset: 0,
+        limit: pageSize.value,
+        sort: nativeSortKey(),
+        order: sortBy.value === 'title' || sortBy.value === 'artist' || sortBy.value === 'album'
+          ? 'asc'
+          : 'desc',
+      })
+
+      tracks.value = page.tracks
+      albums.value = page.albums
+      artists.value = page.artists
+      nativeTotal.value = page.total
+      loadedOffset.value = page.tracks.length
+      hasMoreTracks.value = page.hasMore
+      libraryError.value = null
+    } catch (error) {
+      libraryError.value = toLibraryError(error)
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  /** Appends the next page. The full library never ships at once. */
+  async function loadMoreTracks(): Promise<void> {
+    if (!isNativeLibrary.value || !hasMoreTracks.value || isLoadingMore.value) return
+    isLoadingMore.value = true
+    try {
+      const page = await getTracksPage({
+        offset: loadedOffset.value,
+        limit: pageSize.value,
+        sort: nativeSortKey(),
+        order: sortBy.value === 'title' || sortBy.value === 'artist' || sortBy.value === 'album'
+          ? 'asc'
+          : 'desc',
+      })
+
+      tracks.value = mergeUnique(tracks.value, page.tracks)
+      albums.value = mergeUnique(albums.value, page.albums)
+      artists.value = mergeUnique(artists.value, page.artists)
+      nativeTotal.value = page.total
+      loadedOffset.value += page.tracks.length
+      hasMoreTracks.value = page.hasMore
+    } catch (error) {
+      libraryError.value = toLibraryError(error)
+    } finally {
+      isLoadingMore.value = false
+    }
+  }
+
+  function clearLibraryError(): void {
+    libraryError.value = null
+  }
+
   return {
     // state
     activeSection,
@@ -205,11 +479,27 @@ export const useLibraryStore = defineStore('library', () => {
     playlists,
     isLoading,
 
+    // native library state
+    isNativeLibrary,
+    permissionStatus,
+    scanState,
+    scanProgress,
+    libraryError,
+    pageSize,
+    loadedOffset,
+    nativeTotal,
+    hasMoreTracks,
+    isLoadingMore,
+
     // getters
     totalTracks,
     activeSectionIndex,
     selectedSortLabel,
     sortedTracks,
+    isScanning,
+    needsPermission,
+    scanPercent,
+    scanLabel,
 
     // actions
     setSection,
@@ -224,5 +514,15 @@ export const useLibraryStore = defineStore('library', () => {
     tracksForArtist,
     tracksForPlaylist,
     formatDuration,
+
+    // native library actions
+    initNativeLibrary,
+    disposeNativeLibrary,
+    requestLibraryPermission,
+    scanLibrary,
+    cancelLibraryScan,
+    loadFirstPage,
+    loadMoreTracks,
+    clearLibraryError,
   }
 })

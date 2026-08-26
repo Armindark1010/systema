@@ -1,4 +1,7 @@
 apply plugin: 'com.android.application'
+// SYSTEMA native music library (Phase 1): Kotlin sources + Room codegen.
+apply plugin: 'org.jetbrains.kotlin.android'
+apply plugin: 'com.google.devtools.ksp'
 
 android {
     namespace = "com.systema.music"
@@ -22,6 +25,18 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+
+    // Matches the Java level Capacitor generates in capacitor.build.gradle.
+    kotlinOptions {
+        jvmTarget = '21'
+    }
+}
+
+// Room schema export. Keeping the generated JSON under version control
+// makes future migrations verifiable instead of guesswork.
+ksp {
+    arg('room.schemaLocation', "$projectDir/schemas")
+    arg('room.incremental', 'true')
 }
 
 repositories {
@@ -33,6 +48,12 @@ repositories {
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+
+    // ---- SYSTEMA native music library (Phase 1) ----
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:$coroutinesVersion"
+    implementation "androidx.room:room-runtime:$roomVersion"
+    implementation "androidx.room:room-ktx:$roomVersion"
+    ksp "androidx.room:room-compiler:$roomVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')

@@ -20,6 +20,35 @@ const artworkOptions = [
   { value: 'placeholder' as ArtworkPreference, label: 'PLACEHOLDER' },
 ]
 
+// ---- Native library scan (Android only) --------------------
+// On the web every one of these stays inert and the row keeps its
+// existing "not available in this build" presentation.
+const isNativeLibrary = computed(() => library.isNativeLibrary)
+const isScanning = computed(() => library.isScanning)
+const scanState = computed(() => library.scanState)
+const scanLabel = computed(() => library.scanLabel)
+const scanPercent = computed(() => library.scanPercent)
+const libraryError = computed(() => library.libraryError)
+
+const scanButtonLabel = computed(() => {
+  if (!isNativeLibrary.value) return 'SCAN'
+  if (isScanning.value) return 'CANCEL'
+  if (scanState.value === 'REQUESTING_PERMISSION') return 'WAITING'
+  return 'SCAN'
+})
+
+const scanStatusText = computed(() => {
+  if (!isNativeLibrary.value) return 'NOT AVAILABLE IN THIS BUILD'
+  if (libraryError.value) return libraryError.value.message
+  return scanLabel.value || undefined
+})
+
+function onScanClick() {
+  if (!isNativeLibrary.value) return
+  if (isScanning.value) void library.cancelLibraryScan()
+  else void library.scanLibrary()
+}
+
 watch(() => settings.library.defaultSort, (value) => {
   const map: Record<LibraryDefaultSort, typeof library.sortBy.value> = {
     'recently-added': 'recently-added',
@@ -164,16 +193,39 @@ watch(() => settings.library.defaultSort, (value) => {
           id="scan-library"
           icon="lucide:scan-search"
           label="SCAN MUSIC LIBRARY"
-          description="A full device scan requires the Android MediaStore adapter."
-          coming-soon="NOT AVAILABLE IN THIS BUILD"
+          :description="isNativeLibrary
+            ? 'Indexes audio on this device through Android MediaStore. Incremental — only new, changed and removed files are written.'
+            : 'A full device scan requires the Android MediaStore adapter.'"
+          :coming-soon="scanStatusText"
         >
-          <button class="sys-btn-outline !h-8" disabled>
-            SCAN
+          <button
+            class="sys-btn-outline !h-8"
+            :disabled="!isNativeLibrary || scanState === 'REQUESTING_PERMISSION'"
+            @click="onScanClick"
+          >
+            {{ scanButtonLabel }}
           </button>
         </SettingRow>
+        <div
+          v-if="isNativeLibrary && isScanning"
+          class="h-0.5 w-full bg-surface-muted overflow-hidden"
+          role="progressbar"
+          :aria-valuenow="scanPercent ?? undefined"
+          aria-valuemin="0"
+          aria-valuemax="100"
+        >
+          <!-- Determinate only when MediaStore reported a real total. -->
+          <div
+            class="h-full bg-fg transition-[width] duration-300"
+            :class="scanPercent === null ? 'w-1/3 animate-pulse' : ''"
+            :style="scanPercent === null ? undefined : { width: `${scanPercent}%` }"
+          />
+        </div>
       </div>
       <SettingsNote>
-        NO MOCK SCANNER. WHEN THE NATIVE INDEX EXISTS, THIS BUTTON WILL SHOW REAL PROGRESS — FOR EXAMPLE 128 / 642.
+        {{ isNativeLibrary
+          ? 'REAL PROGRESS FROM THE NATIVE INDEX. COUNTS REFLECT ACTUAL MEDIASTORE ROWS PROCESSED.'
+          : 'NO MOCK SCANNER. WHEN THE NATIVE INDEX EXISTS, THIS BUTTON WILL SHOW REAL PROGRESS — FOR EXAMPLE 128 / 642.' }}
       </SettingsNote>
     </SettingsSection>
   </div>
