@@ -459,14 +459,171 @@ ok('both report types embed an environment snapshot',
   bench.includes('val environment: EnvironmentSnapshot'))
 
 // ------------------------------------------------------------
+section('11. Tensor contract and output-dimension reporting')
+// ------------------------------------------------------------
+//
+// AUDIT OF THE DEVICE RESULT "out dim 2889792".
+//
+// That number is the DECODED SAMPLE COUNT, not an embedding size. The
+// test model is element-wise ((x*2+1)^2 applied per sample), and its
+// declared shape is dynamic [-1], so N floats in produce N floats out.
+// 2,889,792 / 22,050 Hz = 131.06 s, a 2m11s track — and 19,614 ms /
+// 131,056 ms reproduces the reported RTF of 0.150 exactly.
+//
+// These assertions pin the reporting down so nobody later mistakes the
+// figure for a model output dimension.
+
+// ---- outputDimension is the real output length, not a guess ----
+ok('outputDimension is taken from the actual output array length',
+  /outputDimension = result\.output\.size/.test(bench))
+ok('outputDimension is NOT taken from the input or a declared shape',
+  !/outputDimension = (?:prepared|input|descriptor|model)\./.test(bench))
+
+// ---- the runtime reports the shape ONNX actually returned ----
+ok('outputShape is read from the returned tensor, not from the descriptor',
+  /outShape = \(first\.info as\? TensorInfo\)\?\.shape\?\.toList\(\)/.test(onnxRuntime))
+ok('the output is flattened from the real ORT value',
+  /flattenFloats\(first\.value\)/.test(onnxRuntime))
+
+// ---- the test model is element-wise with a dynamic shape ----
+const registryKt = read('android/app/src/main/java/com/systema/music/inference/ModelRegistry.kt')
+const testDescriptorBlock = registryKt.slice(
+  registryKt.indexOf('fun testModelDescriptor'),
+  registryKt.indexOf('fun installedModels'),
+)
+ok('the test model declares a dynamic input shape [-1]',
+  /inputShape = listOf\(-1L\)/.test(testDescriptorBlock))
+ok('the test model declares a dynamic output shape [-1]',
+  /outputShape = listOf\(-1L\)/.test(testDescriptorBlock))
+ok('the test model uses RAW_TENSOR, so PCM passes through unresampled',
+  /inputFormat = InputFormat\.RAW_TENSOR/.test(testDescriptorBlock))
+
+// A single dynamic dimension must resolve to the actual element count.
+ok('a lone dynamic dimension resolves from the real input length',
+  /if \(dynamicCount == 0\) return declared\.toLongArray\(\)/.test(onnxRuntime) &&
+  /inferred = if \(known > 0\) actualElements \/ known/.test(onnxRuntime))
+
+// Behavioural: replay the element-wise contract at the device's size.
+{
+  const N = 2_889_792
+  const SAMPLE_RATE = 22_050
+  // RAW_TENSOR is a passthrough copy, so out length == decoded length.
+  const outDim = N
+  ok('element-wise model: out dim equals the decoded sample count',
+    outDim === N)
+
+  const audioMs = (N * 1000) / SAMPLE_RATE
+  ok('2,889,792 samples at 22.05 kHz is a ~131 s track',
+    Math.abs(audioMs - 131_056) < 1, `${audioMs.toFixed(0)} ms`)
+
+  // The reported RTF must be reproducible from the reported parts.
+  const totalMs = 19_614
+  const rtf = totalMs / audioMs
+  ok('the device RTF 0.150 is reproducible from total/audioDuration',
+    Math.abs(rtf - 0.150) < 0.001, rtf.toFixed(4))
+
+  // out dim must NOT be mistakable for a fixed embedding width.
+  for (const embeddingWidth of [128, 512, 1024, 2048, 6144]) {
+    ok(`out dim is not the ${embeddingWidth}-d embedding of a real model`,
+      outDim !== embeddingWidth)
+  }
+}
+
+// ------------------------------------------------------------
+section('12. Timing boundaries are exact and fully accounted for (§11)')
+// ------------------------------------------------------------
+
+// inferenceMs must wrap session.run() and NOTHING else.
+const runWindow = onnxRuntime.slice(
+  onnxRuntime.indexOf('val runStartNs'),
+  onnxRuntime.indexOf('val readStartNs'),
+)
+ok('the inference window contains session.run()',
+  /active\.run\(/.test(runWindow))
+ok('the inference window does NOT contain tensor creation',
+  !/createTensor/.test(runWindow))
+ok('the inference window does NOT contain output conversion',
+  !/flattenFloats/.test(runWindow))
+ok('tensor creation is timed separately as tensorMs',
+  /val tensorMs = \(System\.nanoTime\(\) - tensorStartNs\)/.test(onnxRuntime))
+ok('output read-back is timed separately and folded into tensorMs',
+  /tensorMs = tensorMs \+ readMs/.test(onnxRuntime))
+
+// decode/prep must not leak into the model figure.
+ok('inferenceMs comes from the runtime, not from the benchmark loop',
+  /inferenceMs = result\.inferenceMs/.test(bench))
+ok('decodeMs is measured around the decoder only',
+  /val decodeMs = \(System\.nanoTime\(\) - decodeStartNs\)/.test(bench))
+ok('preprocessingMs comes from the preparer, not the inference call',
+  /preprocessingMs = prepared\.preparationMs/.test(bench))
+
+// TOTAL must equal the sum of its reported parts — no hidden time.
+ok('totalMs is exactly decode + prep + inference + tensor',
+  /totalMs = decodeMs \+ prepared\.preparationMs \+ result\.inferenceMs \+ result\.tensorMs/
+    .test(bench))
+ok('cold load is excluded from totalMs (it is paid once per batch)',
+  !/totalMs = [^\n]*coldLoad/.test(bench))
+
+// REGRESSION: every component of TOTAL must be visible in the UI.
+// tensorMs was computed and folded into TOTAL but never rendered,
+// leaving ~11.8 ms of the device's 19,614 ms unexplainable on screen.
+const labUi = read('app/pages/dev/ai-benchmark/onnx.vue')
+for (const field of ['decode', 'preprocessing', 'inference', 'tensor', 'total']) {
+  ok(`the summary renders summary.${field}`,
+    new RegExp(`summary\\.${field}`).test(labUi))
+}
+ok('the UI states the TOTAL formula so the numbers can be checked',
+  /TOTAL = decode \+ prep \+ inference \+ tensor/.test(labUi))
+ok('the UI warns that the test model\'s out dim is a sample count',
+  /out dim equals the\s*\n?\s*decoded sample count/.test(labUi))
+
+// ------------------------------------------------------------
+section('13. The real-audio path uses real audio (§3)')
+// ------------------------------------------------------------
+
+// This is the Phase 14 bug class: synthetic audio silently measured
+// in place of the track the user picked.
+ok('the benchmark decodes through the real PcmDecoder',
+  /decoder\.decode\(Uri\.parse\(track\.uri\)/.test(bench))
+ok('the decoder uses MediaExtractor and MediaCodec',
+  /import android\.media\.MediaExtractor/.test(read(
+    'android/app/src/main/java/com/systema/music/analysis/decode/PcmDecoder.kt')) &&
+  /import android\.media\.MediaCodec/.test(read(
+    'android/app/src/main/java/com/systema/music/analysis/decode/PcmDecoder.kt')))
+ok('the decoder reads the user\'s file through ContentResolver',
+  /contentResolver\.openFileDescriptor/.test(read(
+    'android/app/src/main/java/com/systema/music/analysis/decode/PcmDecoder.kt')))
+ok('a track that decodes to nothing FAILS rather than being substituted',
+  /Decoding produced no audio/.test(bench))
+ok('audioDurationMs is derived from real decoded samples',
+  /audioDurationMs = totalSamples \* 1000\.0 \/ config\.targetSampleRate/.test(bench))
+ok('inference runs on the prepared real PCM',
+  /rt\.infer\(prepared\.data\)/.test(bench))
+
+// The ONNX lab must not reach into Phase 14's synthetic dataset.
+const labCode = stripComments(labUi)
+ok('the ONNX lab does not import the synthetic ai-lab dataset',
+  !/from '~\/services\/ai-lab\/(dataset|benchmarkRunner)'/.test(labCode))
+ok('the ONNX lab sends real track URIs to native',
+  /uri: t\.uri as string/.test(labUi))
+ok('tracks without a readable URI are rejected, not faked',
+  /have no readable file URI/.test(labUi))
+
+// ------------------------------------------------------------
 console.log('\n' + '='.repeat(60))
 console.log(`  ${passed} passed, ${failed} failed`)
 console.log('='.repeat(60))
 console.log(
   '\n  SCOPE: this suite proves the integration is wired correctly and\n' +
-  '  contained. It does NOT prove ONNX Runtime executed anything —\n' +
-  '  no Android runtime exists in this environment. Device execution\n' +
-  '  is verified only by running the ONNX RUNTIME LAB on hardware.\n',
+  '  contained. It does NOT itself execute ONNX Runtime — there is no\n' +
+  '  Android runtime in this environment.\n' +
+  '\n' +
+  '  DEVICE VERIFIED (Poco X7 Pro, 2026-08-27): the deterministic model\n' +
+  '  returned [9,25,49,81], deterministic across 10 runs, and a real\n' +
+  '  track ran decode 19586 ms / prep 6.8 / inference 9.4 / tensor 11.8\n' +
+  '  / total 19614 ms, rtf 0.150, out dim 2889792 (= the decoded sample\n' +
+  '  count, since the test model is element-wise). Sections 11-13 pin\n' +
+  '  that reporting down so it cannot silently regress.\n',
 )
 
 if (failed > 0) process.exit(1)

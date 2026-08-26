@@ -552,16 +552,36 @@ function titleFor(trackId: string): string {
             </p>
           </div>
 
-          <div class="px-5 py-4">
+          <div class="px-5 py-4 space-y-2">
             <p class="text-small text-fg-muted">
               Cold model load: <span class="tnum text-fg">{{ fmt(audioResult.coldLoadMs) }} ms</span>,
               paid once for the whole batch. Per-track figures below are warm inference.
+            </p>
+            <p class="text-micro text-fg-faint leading-relaxed">
+              <strong class="text-fg-muted">TOTAL = decode + prep + inference + tensor.</strong>
+              <span class="block">
+                <strong class="text-fg-muted">inference</strong> times
+                <code>session.run()</code> alone — it excludes decoding,
+                preprocessing, tensor allocation, output conversion and UI
+                rendering. <strong class="text-fg-muted">tensor</strong> is
+                the allocation and read-back around it. Cold load is not in
+                TOTAL, because it is paid once rather than per track.
+              </span>
+            </p>
+            <p
+              v-if="selectedModel?.kind === 'test'"
+              class="text-micro text-warning leading-relaxed"
+            >
+              This is the arithmetic test model, which is element-wise: it
+              emits one float per input sample, so <strong>out dim equals the
+                decoded sample count, not an embedding size</strong>. It measures
+              the pipeline, not audio understanding.
             </p>
           </div>
 
           <dl
             v-if="summary"
-            class="grid grid-cols-2 md:grid-cols-5 gap-px bg-line border-y border-line"
+            class="grid grid-cols-2 md:grid-cols-6 gap-px bg-line border-y border-line"
           >
             <div class="bg-surface px-4 py-3">
               <dt class="label text-fg-muted">
@@ -585,6 +605,14 @@ function titleFor(trackId: string): string {
               </dt>
               <dd class="mt-1 tnum text-[15px] font-bold text-fg">
                 {{ fmt(summary.inference, 1) }} ms
+              </dd>
+            </div>
+            <div class="bg-surface px-4 py-3">
+              <dt class="label text-fg-muted">
+                MEDIAN TENSOR
+              </dt>
+              <dd class="mt-1 tnum text-[15px] font-bold text-fg">
+                {{ fmt(summary.tensor, 1) }} ms
               </dd>
             </div>
             <div class="bg-surface px-4 py-3">
