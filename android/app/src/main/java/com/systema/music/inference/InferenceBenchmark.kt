@@ -90,6 +90,137 @@ class InferenceBenchmark(
      * runtime, producing an output that is checked against a value
      * known before the run.
      */
+    /**
+     * Native memory across repeated load → infer → unload cycles.
+     *
+     * WHY REPEATED CYCLES AND NOT ONE
+     * -------------------------------
+     * A single cycle cannot distinguish a leak from PSS noise: the OS
+     * samples proportional set size coarsely, pages are reclaimed
+     * lazily, and a few MB of drift is normal. Only a TREND across
+     * cycles carries information. So this runs N full cycles and
+     * reports whether post-unload memory returns to baseline each
+     * time or climbs monotonically.
+     *
+     * It still cannot prove the absence of a leak — no test can — so
+     * the strongest verdict it emits is STABLE, never "no leak".
+     *
+     * The model is genuinely re-loaded and re-unloaded every cycle.
+     * That is the opposite of the benchmark path (which loads once on
+     * purpose), because here the load/unload boundary IS the subject.
+     */
+    suspend fun runMemoryLifecycle(
+        runtimeId: String,
+        modelId: String,
+        iterations: Int,
+        inferencesPerCycle: Int,
+    ): MemoryLifecycleReport = mutex.withLock {
+        val rt = runtime(runtimeId)
+        if (!rt.isAvailable()) {
+            throw InferenceException(
+                InferenceErrorCode.RUNTIME_UNAVAILABLE,
+                "${rt.label} is not available on this device.",
+            )
+        }
+
+        val descriptor = registry.resolve(modelId)
+        val env = EnvironmentSnapshot.capture(context)
+        val cycles = iterations.coerceIn(1, 50)
+        val perCycle = inferencesPerCycle.coerceIn(1, 100)
+
+        // The test input must not itself dominate memory, or the
+        // measurement would be about the buffer rather than the model.
+        val probeInput = FloatArray(16_000) { (it % 100) / 100f }
+
+        MemorySample.settle()
+        val baseline = MemorySample.capture(context)
+
+        val rows = ArrayList<MemoryCycle>(cycles)
+        var peakKb = baseline.totalPssKb
+
+        try {
+            repeat(cycles) { i ->
+                val loaded = rt.loadModel(descriptor)
+                val afterLoad = MemorySample.capture(context)
+
+                var lastInferenceMs = 0.0
+                repeat(perCycle) {
+                    lastInferenceMs = rt.infer(probeInput).inferenceMs
+                }
+                val afterInference = MemorySample.capture(context)
+
+                rt.unloadModel()
+                MemorySample.settle()
+                val afterUnload = MemorySample.capture(context)
+
+                peakKb = maxOf(peakKb, afterLoad.totalPssKb, afterInference.totalPssKb)
+
+                rows.add(
+                    MemoryCycle(
+                        iteration = i + 1,
+                        afterLoadKb = afterLoad.totalPssKb,
+                        afterInferenceKb = afterInference.totalPssKb,
+                        afterUnloadKb = afterUnload.totalPssKb,
+                        loadMs = loaded.loadMs,
+                        inferenceMs = lastInferenceMs,
+                    ),
+                )
+            }
+        } finally {
+            // Even a mid-run failure must not leave a session resident.
+            runCatching { rt.unloadModel() }
+        }
+
+        MemorySample.settle()
+        val finalSample = MemorySample.capture(context)
+
+        val trend = classifyTrend(baseline, rows)
+
+        MemoryLifecycleReport(
+            runtimeId = rt.runtimeId,
+            modelId = descriptor.modelId,
+            modelSizeBytes = descriptor.sizeBytes,
+            iterations = cycles,
+            baseline = baseline,
+            cycles = rows,
+            finalSample = finalSample,
+            peakDeltaKb = peakKb - baseline.totalPssKb,
+            netDeltaKb = finalSample.totalPssKb - baseline.totalPssKb,
+            trend = trend,
+            environment = env,
+            caveat = "PSS is an OS estimate that includes shared and lazily reclaimed " +
+                "pages, so a few MB of drift is normal. STABLE means post-unload memory " +
+                "did not trend upward across $cycles cycles - it is evidence, not proof " +
+                "that no leak exists.",
+        )
+    }
+
+    /**
+     * Classifies the post-unload series.
+     *
+     * Deliberately conservative. It only reports GROWING when memory
+     * rises in the clear majority of steps AND the total climb exceeds
+     * a noise floor, because calling normal PSS jitter a leak would
+     * send someone hunting a bug that is not there.
+     */
+    private fun classifyTrend(baseline: MemorySample, cycles: List<MemoryCycle>): MemoryTrend {
+        if (cycles.size < 3) return MemoryTrend.INCONCLUSIVE
+        if (baseline.totalPssKb <= 0) return MemoryTrend.INCONCLUSIVE
+        if (cycles.any { it.afterUnloadKb <= 0 }) return MemoryTrend.INCONCLUSIVE
+
+        val series = cycles.map { it.afterUnloadKb }
+        val rises = series.zipWithNext().count { (a, b) -> b > a }
+        val climbKb = series.last() - series.first()
+
+        // 8 MB across the whole run, and rising in most steps.
+        val NOISE_FLOOR_KB = 8 * 1024
+        return if (rises >= (series.size - 1) * 2 / 3 && climbKb > NOISE_FLOOR_KB) {
+            MemoryTrend.GROWING
+        } else {
+            MemoryTrend.STABLE
+        }
+    }
+
     suspend fun runTestModel(
         runtimeId: String,
         input: FloatArray,
@@ -139,6 +270,7 @@ class InferenceBenchmark(
                 coldLoadMs = loaded.loadMs,
                 firstInferenceMs = first.inferenceMs,
                 warmInferenceMs = if (warmTimes.isEmpty()) null else warmTimes.average(),
+                warmStats = LatencyStats.of(warmTimes),
                 iterations = safeIterations,
                 input = input,
                 output = first.output,
@@ -326,6 +458,8 @@ data class TestModelReport(
     val coldLoadMs: Double,
     val firstInferenceMs: Double,
     val warmInferenceMs: Double?,
+    /** Distribution of the warm runs. A mean alone hides the tail. */
+    val warmStats: LatencyStats?,
     val iterations: Int,
     val input: FloatArray,
     val output: FloatArray,
@@ -341,6 +475,7 @@ data class TestModelReport(
         put("coldLoadMs", coldLoadMs)
         put("firstInferenceMs", firstInferenceMs)
         if (warmInferenceMs != null) put("warmInferenceMs", warmInferenceMs)
+        warmStats?.let { put("warmStats", it.toJs()) }
         put("iterations", iterations)
         put("input", JSArray().apply { input.forEach { put(it.toDouble()) } })
         put("output", JSArray().apply { output.forEach { put(it.toDouble()) } })
@@ -444,5 +579,60 @@ data class TrackMeasurement(
         result = 31 * result + (outputPreview?.contentHashCode() ?: 0)
         result = 31 * result + (errorCode?.hashCode() ?: 0)
         return result
+    }
+}
+
+/**
+ * Distribution of a set of latency samples.
+ *
+ * WHY NOT JUST A MEAN (task 6)
+ * ----------------------------
+ * A mean hides exactly what matters on a phone. One thermal stall or
+ * one scheduler preemption inflates the average while leaving the
+ * typical case untouched; conversely a lucky single run understates
+ * the cost a user will actually feel. The median says what usually
+ * happens, p95 says what the bad case looks like, and min/max bound
+ * the run.
+ *
+ * p95 uses nearest-rank on the sorted samples. With few samples that
+ * is coarse - with 10 runs p95 IS the maximum - so [count] is
+ * reported alongside and the UI must not present a p95 from a handful
+ * of runs as a stable figure.
+ */
+data class LatencyStats(
+    val count: Int,
+    val minMs: Double,
+    val medianMs: Double,
+    val p95Ms: Double,
+    val maxMs: Double,
+    val meanMs: Double,
+) {
+    fun toJs(): JSObject = JSObject().apply {
+        put("count", count)
+        put("minMs", minMs)
+        put("medianMs", medianMs)
+        put("p95Ms", p95Ms)
+        put("maxMs", maxMs)
+        put("meanMs", meanMs)
+    }
+
+    companion object {
+        fun of(samples: List<Double>): LatencyStats? {
+            if (samples.isEmpty()) return null
+            val s = samples.sorted()
+            val mid = s.size / 2
+            val median = if (s.size % 2 == 1) s[mid] else (s[mid - 1] + s[mid]) / 2.0
+            // Nearest-rank: the smallest value at or above the 95th
+            // percentile position, clamped into range.
+            val rank = kotlin.math.ceil(0.95 * s.size).toInt().coerceIn(1, s.size)
+            return LatencyStats(
+                count = s.size,
+                minMs = s.first(),
+                medianMs = median,
+                p95Ms = s[rank - 1],
+                maxMs = s.last(),
+                meanMs = s.average(),
+            )
+        }
     }
 }

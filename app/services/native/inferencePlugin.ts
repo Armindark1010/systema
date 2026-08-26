@@ -124,6 +124,8 @@ export interface TestModelResult {
   firstInferenceMs: number
   /** Mean of runs after the first. Null when only one run happened. */
   warmInferenceMs?: number
+  /** Distribution of the warm runs. A mean alone hides the tail. */
+  warmStats?: LatencyStats
   iterations: number
   input: number[]
   output: number[]
@@ -131,6 +133,110 @@ export interface TestModelResult {
   /** True when repeated identical input produced identical output. */
   deterministic: boolean
   environment: InferenceEnvironment
+}
+
+/**
+ * Spread of a set of latency samples.
+ *
+ * Reported instead of a bare mean because on a phone the mean is the
+ * least informative number available: one thermal stall skews it, and
+ * a lucky run flatters it. p95 is nearest-rank, so with few samples it
+ * is coarse - `count` is included so nobody quotes a p95 taken from
+ * five runs as if it were stable.
+ */
+export interface LatencyStats {
+  count: number
+  minMs: number
+  medianMs: number
+  p95Ms: number
+  maxMs: number
+  meanMs: number
+}
+
+/** One load -> infer -> unload cycle of the memory lifecycle test. */
+export interface MemoryCycle {
+  iteration: number
+  /** -1 anywhere means UNKNOWN, never zero. */
+  afterLoadKb: number
+  afterInferenceKb: number
+  afterUnloadKb: number
+  loadMs: number
+  inferenceMs: number
+}
+
+/**
+ * Verdict on the post-unload memory series.
+ *
+ * There is deliberately no NO_LEAK value. A test can show memory
+ * returning to baseline across the cycles it ran; it cannot prove the
+ * absence of a leak. STABLE is the strongest honest claim.
+ */
+export type MemoryTrend = 'STABLE' | 'GROWING' | 'INCONCLUSIVE'
+
+/** Result of the native memory lifecycle test (§8). */
+export interface MemoryLifecycleReport {
+  runtimeId: RuntimeId
+  modelId: string
+  modelSizeBytes: number
+  iterations: number
+  baseline: MemorySample
+  cycles: MemoryCycle[]
+  finalSample: MemorySample
+  /** Highest observed PSS above baseline: the true resident cost. */
+  peakDeltaKb: number
+  /** Where PSS settled relative to baseline once everything unloaded. */
+  netDeltaKb: number
+  trend: MemoryTrend
+  environment: InferenceEnvironment
+  caveat: string
+}
+
+export interface MemorySample {
+  /**
+   * Total proportional set size. The headline figure, because ONNX
+   * Runtime allocates natively - the Java heap would show almost
+   * nothing while a large model was resident.
+   */
+  totalPssKb: number
+  nativeHeapKb: number
+  javaHeapKb: number
+  javaUsedKb: number
+  timestamp: number
+}
+
+/**
+ * A candidate model's PUBLISHED specification.
+ *
+ * Not a measurement. Every value comes from the model's paper or
+ * repository; the timing and memory fields are null because no
+ * candidate has been executed on the device.
+ */
+export interface CandidateSpec {
+  candidateId: string
+  displayName: string
+  architecture: string
+  embeddingDimension: number | null
+  license: string
+  commercialUse: 'PERMITTED' | 'RESTRICTED' | 'UNKNOWN'
+  inputSampleRate: number
+  inputChannels: number
+  inputRepresentation: string
+  melBands: number | null
+  status: 'RUNNABLE' | 'BLOCKED_LICENSE' | 'BLOCKED_PREPROCESSING' | 'BLOCKED_NO_ONNX'
+  statusReason: string
+  approximateSizeMb: number | null
+  officialOnnxExport: 'AVAILABLE' | 'COMMUNITY_ONLY' | 'REQUIRES_CONVERSION' | 'UNKNOWN'
+  coldLoadMs: number | null
+  warmInferenceMs: number | null
+  peakMemoryKb: number | null
+  deviceVerified: boolean
+}
+
+export interface CandidateMatrix {
+  candidates: CandidateSpec[]
+  /** Always false until a candidate actually runs on hardware. */
+  measured: boolean
+  note: string
 }
 
 /** Per-track timings from a real-audio run (§11). */
@@ -185,6 +291,18 @@ export interface InferencePlugin {
     modelId: string
     tracks: Array<{ trackId: string, uri: string }>
   }): Promise<RealAudioResult>
+  /**
+   * Repeated load -> infer -> unload cycles with memory sampled at
+   * each boundary. Manual only: it is never triggered by startup,
+   * navigation or any automatic path (§13).
+   */
+  runMemoryLifecycle(options: {
+    runtimeId: RuntimeId
+    modelId: string
+    iterations?: number
+    inferencesPerCycle?: number
+  }): Promise<MemoryLifecycleReport>
+  getCandidates(): Promise<CandidateMatrix>
   getEnvironment(): Promise<InferenceEnvironment>
 }
 

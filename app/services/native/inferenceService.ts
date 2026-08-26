@@ -18,6 +18,8 @@ import {
   type InferenceCapabilities,
   type InferenceEnvironment,
   type InferenceErrorCode,
+  type CandidateMatrix,
+  type MemoryLifecycleReport,
   type RealAudioResult,
   type RuntimeId,
   type TestModelResult,
@@ -123,6 +125,86 @@ export async function runRealAudio(options: {
     return await InferenceNative.runRealAudio(options)
   } catch (e) {
     throw toServiceError(e)
+  }
+}
+
+/** Bounds on the memory test, duplicated from Kotlin for early feedback. */
+export const MAX_MEMORY_CYCLES = 50
+
+/**
+ * Runs the native memory lifecycle test (§8).
+ *
+ * This is the measurement Phase 15 could not make. ONNX Runtime holds
+ * its session and weights in native memory, so "unloadModel releases
+ * everything" was code-verified only. Here the model is genuinely
+ * loaded and unloaded repeatedly with PSS sampled at each boundary.
+ *
+ * It is manual and explicit. Nothing calls it automatically.
+ */
+export async function runMemoryLifecycle(options: {
+  runtimeId: RuntimeId
+  modelId: string
+  iterations?: number
+  inferencesPerCycle?: number
+}): Promise<MemoryLifecycleReport> {
+  requirePlugin()
+
+  const iterations = options.iterations ?? 5
+  if (iterations < 3) {
+    throw new InferenceServiceError(
+      'INPUT_SHAPE_MISMATCH',
+      'Run at least 3 cycles. One or two cycles cannot distinguish a leak from ' +
+        'normal PSS jitter, and reporting a trend from them would be misleading.',
+    )
+  }
+  if (iterations > MAX_MEMORY_CYCLES) {
+    throw new InferenceServiceError(
+      'INPUT_SHAPE_MISMATCH',
+      `At most ${MAX_MEMORY_CYCLES} cycles.`,
+    )
+  }
+
+  try {
+    return await InferenceNative.runMemoryLifecycle(options)
+  } catch (e) {
+    throw toServiceError(e)
+  }
+}
+
+/**
+ * The researched candidate matrix.
+ *
+ * Published specifications only. Callers must not present these as
+ * measurements: `measured` is false and the timing fields are null
+ * because no candidate model has run on the device.
+ */
+export async function getCandidates(): Promise<CandidateMatrix> {
+  requirePlugin()
+  try {
+    return await InferenceNative.getCandidates()
+  } catch (e) {
+    throw toServiceError(e)
+  }
+}
+
+/**
+ * Renders a memory verdict as text, without overstating it.
+ *
+ * Note what STABLE is NOT allowed to say: "no leak". The test observed
+ * N cycles; it did not prove a negative.
+ */
+export function describeMemoryTrend(report: MemoryLifecycleReport): string {
+  const mb = (kb: number) => (kb / 1024).toFixed(1)
+  switch (report.trend) {
+    case 'STABLE':
+      return `Memory returned to near baseline across ${report.iterations} cycles ` +
+        `(net ${mb(report.netDeltaKb)} MB). Consistent with unload releasing native ` +
+        'memory — not proof that no leak exists.'
+    case 'GROWING':
+      return `Post-unload memory rose across ${report.iterations} cycles ` +
+        `(net ${mb(report.netDeltaKb)} MB). Investigate before trusting unload.`
+    default:
+      return 'Not enough clean samples to judge a trend. Treat as UNKNOWN.'
   }
 }
 

@@ -230,6 +230,95 @@ class InferencePlugin : Plugin() {
         }
     }
 
+    /**
+     * Native memory across repeated load/unload cycles.
+     *
+     * The outstanding Phase 15 verification item: ONNX Runtime keeps
+     * its session and weights in NATIVE memory, so "unload releases
+     * resources" was previously only code-verified. This makes it
+     * measurable on the physical device.
+     */
+    @PluginMethod
+    fun runMemoryLifecycle(call: PluginCall) {
+        val runtimeId = call.getString("runtimeId") ?: RuntimeIds.ONNX
+        val modelId = call.getString("modelId")
+        if (modelId.isNullOrBlank()) {
+            call.reject(
+                "A modelId is required.",
+                InferenceErrorCode.MODEL_NOT_FOUND.name,
+            )
+            return
+        }
+        val iterations = call.getInt("iterations") ?: 5
+        val inferencesPerCycle = call.getInt("inferencesPerCycle") ?: 3
+
+        scope.launch {
+            try {
+                call.resolve(
+                    benchmark.runMemoryLifecycle(
+                        runtimeId, modelId, iterations, inferencesPerCycle,
+                    ).toJs(),
+                )
+            } catch (e: InferenceException) {
+                call.reject(e.message ?: "The memory test failed.", e.code.name)
+            } catch (e: Throwable) {
+                call.reject(
+                    e.message ?: "The memory test failed.",
+                    InferenceErrorCode.MODEL_INFERENCE_FAILED.name,
+                )
+            }
+        }
+    }
+
+    /**
+     * The researched candidate matrix.
+     *
+     * Documentation, not measurement. Every figure here is quoted from
+     * the models' published papers and repositories; none was measured
+     * by SYSTEMA and none of these models has run on this device. The
+     * UI states that alongside the table.
+     */
+    @PluginMethod
+    fun getCandidates(call: PluginCall) {
+        val list = JSArray()
+        CandidateRegistry.ALL.forEach { c ->
+            list.put(
+                JSObject().apply {
+                    put("candidateId", c.candidateId)
+                    put("displayName", c.displayName)
+                    put("architecture", c.architecture)
+                    put("embeddingDimension", c.embeddingDimension)
+                    put("license", c.license)
+                    put("commercialUse", c.commercialUse.name)
+                    put("inputSampleRate", c.inputSampleRate)
+                    put("inputChannels", c.inputChannels)
+                    put("inputRepresentation", c.inputRepresentation.name)
+                    put("melBands", c.melBands)
+                    put("status", c.status.name)
+                    put("statusReason", c.statusReason)
+                    put("approximateSizeMb", c.approximateSizeMb)
+                    put("officialOnnxExport", c.officialOnnxExport.name)
+                    // Nothing below has ever been measured.
+                    put("coldLoadMs", null)
+                    put("warmInferenceMs", null)
+                    put("peakMemoryKb", null)
+                    put("deviceVerified", false)
+                },
+            )
+        }
+        call.resolve(
+            JSObject().apply {
+                put("candidates", list)
+                put("measured", false)
+                put(
+                    "note",
+                    "Published specifications only. No candidate model has been " +
+                        "downloaded, executed or verified on this device.",
+                )
+            },
+        )
+    }
+
     /** Current device conditions, for labelling a measurement (§1). */
     @PluginMethod
     fun getEnvironment(call: PluginCall) {

@@ -173,6 +173,30 @@ const sustainedIterations = ref(20)
         </div>
       </section>
 
+      <!-- ---- Candidate evaluation (Phase 16) ------------ -->
+      <section class="border border-line bg-surface">
+        <div class="border-b border-line px-5 py-3">
+          <p class="label text-fg-muted">
+            EMBEDDING CANDIDATES
+          </p>
+        </div>
+        <div class="px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+          <p class="text-small text-fg-muted max-w-[64ch] leading-relaxed">
+            Researched specifications for YAMNet, VGGish, OpenL3, PANNs and CLAP —
+            published figures, not measurements, with every performance cell left
+            UNKNOWN. Also hosts the native memory lifecycle test. No candidate
+            model has been downloaded or executed.
+          </p>
+          <button
+            type="button"
+            class="sys-btn-outline shrink-0"
+            @click="router.push('/dev/ai-benchmark/candidates')"
+          >
+            CANDIDATE LAB →
+          </button>
+        </div>
+      </section>
+
       <!-- ---- Environment -------------------------------- -->
       <LabBanner
         v-if="lab.environmentWarning"
