@@ -5,7 +5,7 @@
 // Must remain compact, not overpower player.
 // ============================================================
 
-import type { AnalysisStatus } from '~/composables/useTrackAnalysis'
+import type { AudioAnalysisState } from '~/composables/useAudioAnalysis'
 
 const props = defineProps<{
   isLiked: boolean
@@ -13,8 +13,8 @@ const props = defineProps<{
   sleepLabel: string | null
   isAiMode: boolean
   isLyricsMode: boolean
-  analysisStatus: AnalysisStatus
-  isAnalyzing: boolean
+  /** Real DSP state for the current track, from the native analyser. */
+  analysisState: AudioAnalysisState
 }>()
 
 const emit = defineEmits<{
@@ -27,21 +27,24 @@ const emit = defineEmits<{
   more: []
 }>()
 
+const isAnalyzing = computed(() => props.analysisState === 'analyzing')
+
 const analysisIcon = computed(() => {
-  switch (props.analysisStatus) {
+  switch (props.analysisState) {
     case 'analyzed': return 'lucide:check'
     case 'analyzing': return 'lucide:loader-2'
-    case 'error': return 'lucide:alert-circle'
-    default: return 'lucide:scan'
+    case 'failed': return 'lucide:alert-circle'
+    default: return 'lucide:activity'
   }
 })
 
 const analysisLabel = computed(() => {
-  switch (props.analysisStatus) {
-    case 'analyzed': return 'Analyzed'
-    case 'analyzing': return 'Analyzing'
-    case 'error': return 'Error'
-    default: return 'Analyze'
+  switch (props.analysisState) {
+    case 'analyzed': return 'Analysed — open measurements'
+    case 'analyzing': return 'Analysing'
+    case 'failed': return 'Analysis failed'
+    case 'unavailable': return 'Analysis unavailable on this platform'
+    default: return 'Analyse audio'
   }
 })
 </script>
@@ -98,15 +101,16 @@ const analysisLabel = computed(() => {
     <button
       class="player-action-btn player-action-btn--analyze"
       :class="{
-        'is-analyzed': analysisStatus === 'analyzed',
-        'is-analyzing': analysisStatus === 'analyzing',
-        'is-error': analysisStatus === 'error',
+        'is-analyzed': analysisState === 'analyzed',
+        'is-analyzing': analysisState === 'analyzing',
+        'is-error': analysisState === 'failed',
       }"
       :aria-label="analysisLabel"
+      :title="analysisLabel"
       @click="emit('analyze')"
     >
       <UIcon :name="analysisIcon" class="player-action-icon" :class="{ 'animate-spin': isAnalyzing }" />
-      <span v-if="analysisStatus === 'analyzing'" class="player-action-pulse" aria-hidden="true" />
+      <span v-if="isAnalyzing" class="player-action-pulse" aria-hidden="true" />
     </button>
 
     <!-- UP NEXT / QUEUE -->

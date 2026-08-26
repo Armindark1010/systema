@@ -31,7 +31,11 @@ const {
 const { playlists, addTracks, createPlaylist } = usePlaylists()
 const sleepTimer = useSleepTimer()
 const lyrics = useLyrics()
+// Mock companion metadata (mood / genre themes) — still what EMO reads.
 const analysis = useTrackAnalysis()
+// The REAL on-device DSP. Kept separate from the mock above on
+// purpose: one is invented for the prototype, the other is measured.
+const audioAnalysis = useAudioAnalysis()
 const ai = usePlayerAI()
 
 // Canonical projection of the globally current track. These are
@@ -160,10 +164,38 @@ function onQueueAddToPlaylist(track: Track) {
   showPlaylistPicker.value = true
 }
 
+/**
+ * Runs the real analyser for the track on screen.
+ *
+ * Fire-and-forget: the composable owns the state the sheet renders and
+ * raises its own toast on completion or failure, so nothing here has
+ * to await the result or interpret it.
+ */
 function onAnalyzeConfirm(force: boolean) {
-  if (!currentTrack.value) return
-  analysis.analyzeTrack(currentTrack.value.id, force).catch(() => {})
+  const track = currentTrack.value
+  if (!track) return
+  void audioAnalysis.analyze(track.id, { force, title: track.title })
 }
+
+/** Live DSP state for whatever is playing right now. */
+const audioAnalysisState = computed(() => audioAnalysis.stateFor(currentTrack.value?.id))
+const audioAnalysisResult = computed(() => audioAnalysis.resultFor(currentTrack.value?.id))
+const audioAnalysisFailure = computed(() => audioAnalysis.failureFor(currentTrack.value?.id))
+
+// Read any stored analysis for the current track, so the sheet can
+// open straight into a previous result instead of offering to redo
+// work the device has already done. Also re-run on track change, which
+// is why this is a watcher rather than a one-shot in onMounted.
+watch(currentTrack, (track) => {
+  if (track) void audioAnalysis.hydrate(track.id)
+}, { immediate: true })
+
+// Opening the sheet re-checks the database: a background WorkManager
+// batch may have analysed this track since the last look.
+watch(showAnalysisSheet, (open) => {
+  const track = currentTrack.value
+  if (open && track) void audioAnalysis.hydrate(track.id, /* force */ true)
+})
 
 function onMoreAction(action: string) {
   showMoreSheet.value = false
@@ -533,8 +565,7 @@ if (import.meta.client) {
                 :sleep-label="sleepTimer.displayLabel.value"
                 :is-ai-mode="false"
                 :is-lyrics-mode="lyrics.isLyricsMode.value"
-                :analysis-status="analysis.status.value"
-                :is-analyzing="analysis.isAnalyzing.value"
+                :analysis-state="audioAnalysisState"
                 @like="onLike"
                 @sleep="showSleepSheet = true"
                 @ai="onAiToggle"
@@ -583,12 +614,12 @@ if (import.meta.client) {
         />
         <PlayerAnalysis
           :open="showAnalysisSheet"
-          :status="analysis.status.value"
-          :analysis="analysis.currentAnalysis.value"
+          :state="audioAnalysisState"
+          :analysis="audioAnalysisResult"
+          :failure="audioAnalysisFailure"
           :track-title="currentTrack.title"
-          :is-analyzing="analysis.isAnalyzing.value"
           @close="showAnalysisSheet = false"
-          @confirm="onAnalyzeConfirm"
+          @analyze="onAnalyzeConfirm"
         />
         <PlayerMoreMenu :open="showMoreSheet" :track-title="currentTrack.title" @close="showMoreSheet = false" @action="onMoreAction" />
         <PlayerPlaylistPicker

@@ -162,6 +162,9 @@ function onEmoTap() {
           @menu="onMenu"
         />
 
+        <!-- ON-DEVICE DSP — the one real-measurement panel here -->
+        <AICompanionAnalysis />
+
         <!-- CURRENT TRACK AI -->
         <AICompanionTrack
           v-if="player.currentTrack && ai.currentTrackInsight"
