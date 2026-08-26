@@ -89,9 +89,10 @@ class AudioAnalysisWorker(
             )
         }
 
-        var analyzed = 0
-        var failed = 0
-        var skipped = 0
+        // The per-track decision table lives in AnalysisBatchPolicy so
+        // it can be unit tested on a desktop JVM. This loop owns the
+        // I/O and the coroutine plumbing; the policy owns the rules.
+        var counters = AnalysisBatchPolicy.Counters()
 
         for (trackId in trackIds) {
             // Stop promptly when WorkManager withdraws the job.
@@ -102,7 +103,7 @@ class AudioAnalysisWorker(
                 break
             }
 
-            try {
+            val decision = try {
                 repository.analyzeTrack(
                     trackId = trackId,
                     force = force,
@@ -110,34 +111,13 @@ class AudioAnalysisWorker(
                     // does not delay cancellation.
                     shouldCancel = { isStopped },
                 )
-                analyzed++
+                AnalysisBatchPolicy.Decision.COUNT_ANALYZED
             } catch (e: AudioAnalysisException) {
-                when (e.code) {
-                    AudioAnalysisException.Code.CANCELLED -> {
-                        // Not a failure: the job was withdrawn.
-                        return partialSuccess(analyzed, failed, skipped)
-                    }
-
-                    AudioAnalysisException.Code.OUT_OF_MEMORY -> {
-                        // Back off rather than thrash: retrying later
-                        // under less pressure is the right move.
+                AnalysisBatchPolicy.decide(e.code).also {
+                    if (it == AnalysisBatchPolicy.Decision.RETRY_LATER) {
                         Log.w(TAG, "Out of memory analysing $trackId; backing off")
-                        return Result.retry()
-                    }
-
-                    AudioAnalysisException.Code.UNSUPPORTED_FORMAT,
-                    AudioAnalysisException.Code.INVALID_URI,
-                    AudioAnalysisException.Code.EMPTY_AUDIO,
-                    AudioAnalysisException.Code.NOT_FOUND,
-                    -> {
-                        // Permanent for this file. Already recorded by
-                        // the repository, so it will not be retried.
-                        skipped++
-                    }
-
-                    else -> {
+                    } else if (it == AnalysisBatchPolicy.Decision.FAIL) {
                         Log.w(TAG, "Analysis failed for $trackId: ${e.codeName}")
-                        failed++
                     }
                 }
             } catch (e: CancellationException) {
@@ -145,12 +125,27 @@ class AudioAnalysisWorker(
             } catch (e: Exception) {
                 // Anything unanticipated fails one track, not the app.
                 Log.e(TAG, "Unexpected error analysing $trackId", e)
-                failed++
+                AnalysisBatchPolicy.Decision.FAIL
+            }
+
+            counters = counters.apply(decision)
+
+            if (AnalysisBatchPolicy.isTerminal(decision)) {
+                return when (decision) {
+                    // Memory pressure: let WorkManager bring us back
+                    // later rather than grinding through the rest now.
+                    AnalysisBatchPolicy.Decision.RETRY_LATER -> Result.retry()
+                    // Cancelled: report what actually got done.
+                    else -> partialSuccess(counters)
+                }
             }
         }
 
-        return partialSuccess(analyzed, failed, skipped)
+        return partialSuccess(counters)
     }
+
+    private fun partialSuccess(counters: AnalysisBatchPolicy.Counters): Result =
+        partialSuccess(counters.analyzed, counters.failed, counters.skipped)
 
     private fun partialSuccess(analyzed: Int, failed: Int, skipped: Int): Result =
         Result.success(

@@ -53,14 +53,23 @@ echo "Compiling Phase 13 DSP suites..."
 
 mkdir -p "$OUT"
 
-# The DSP core plus the three suites. No Android classes are referenced
-# by any of these files, which is exactly the property being relied on.
+# The DSP core plus the suites. No Android classes are referenced by
+# any of these files, which is exactly the property being relied on.
+#
+# AudioAnalysisException and AnalysisBatchPolicy are included because
+# the batch-policy suite tests the REAL worker decision table; the
+# policy object is deliberately free of Android and WorkManager imports
+# so it can be compiled and executed here.
 if ! "$KOTLINC" \
   "$SRC"/dsp/*.kt \
   "$SRC"/model/*.kt \
+  "$SRC"/AudioAnalysisException.kt \
+  "$SRC"/work/AnalysisBatchPolicy.kt \
   "$TEST"/DspTest.kt \
   "$TEST"/ResampleTest.kt \
   "$TEST"/PipelineIntegrationTest.kt \
+  "$TEST"/NumericalSafetyTest.kt \
+  "$TEST"/BatchPolicyTest.kt \
   -include-runtime -d "$OUT/dsp-tests.jar" 2>"$OUT/compile.log"; then
   echo "  DSP compilation FAILED:"
   grep -v "^warning:" "$OUT/compile.log" | grep -iv "^WARNING" | head -30
@@ -75,7 +84,7 @@ if grep -q "^.*error:" "$OUT/compile.log" 2>/dev/null; then
 fi
 
 status=0
-for suite in DspTest ResampleTest PipelineIntegrationTest; do
+for suite in DspTest ResampleTest PipelineIntegrationTest NumericalSafetyTest BatchPolicyTest; do
   if ! "$JAVA_BIN" -cp "$OUT/dsp-tests.jar" "com.systema.music.analysis.$suite"; then
     status=1
   fi

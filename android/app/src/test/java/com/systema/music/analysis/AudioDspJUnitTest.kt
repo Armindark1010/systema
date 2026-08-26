@@ -31,4 +31,24 @@ class AudioDspJUnitTest {
     fun pcmToAnalysisResultPipelineWorks() {
         PipelineIntegrationTest.main(emptyArray())
     }
+
+    /**
+     * Degenerate input must never produce NaN, Infinity, or an
+     * impossible value — silence, single samples, DC, empty spectra,
+     * extreme amplitudes, invalid configuration.
+     */
+    @Test
+    fun degenerateAudioNeverProducesNaNOrInfinity() {
+        NumericalSafetyTest.main(emptyArray())
+    }
+
+    /**
+     * The batch worker's decision table: one bad file must not abort
+     * the queue, cancellation is a partial success rather than a
+     * failure, and the counters add up.
+     */
+    @Test
+    fun batchPolicyIsolatesFailuresAndHonoursCancellation() {
+        BatchPolicyTest.main(emptyArray())
+    }
 }
