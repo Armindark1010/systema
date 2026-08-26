@@ -54,6 +54,14 @@ dependencies {
     implementation "androidx.room:room-runtime:$roomVersion"
     implementation "androidx.room:room-ktx:$roomVersion"
     ksp "androidx.room:room-compiler:$roomVersion"
+    // ---- SYSTEMA native audio engine (Phase 2) ----
+    // exoplayer + the default extractors/renderers it needs for local
+    // audio. No DASH/HLS/IMA: nothing here streams from the network.
+    implementation "androidx.media3:media3-exoplayer:$media3Version"
+    // Kept explicit — the session artifact is what a future
+    // MediaSessionService phase will build on.
+    implementation "androidx.media3:media3-common:$media3Version"
+
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')

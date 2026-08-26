@@ -17,6 +17,7 @@
 
 import { usePlayerStore } from '~/stores/player'
 import { useAudioEngine } from '~/composables/useAudioEngine'
+import { useNativePlayer } from '~/composables/useNativePlayer'
 
 let engineInitialized = false
 let playbackTimer: ReturnType<typeof setInterval> | null = null
@@ -66,11 +67,22 @@ export function usePlayerEngine() {
     lastClockTime = 0
   }
 
-  function init() {
+  /**
+   * Connects the store to whichever engine this platform has.
+   *
+   * On Android the Media3 engine takes over completely: the generative
+   * WebAudio synth is never started and the local clock below is not
+   * used, because the native engine owns both audio and position.
+   * Everywhere else the existing browser behaviour is untouched.
+   */
+  async function init() {
     if (!import.meta.client || engineInitialized) return
     engineInitialized = true
 
     player.isPlayerReady = true
+
+    const nativeReady = await useNativePlayer().init()
+    if (nativeReady) return
 
     // Synchronize track changes with audio synth
     watch(

@@ -72,6 +72,14 @@ export interface Track {
   artist?: string
   album?: string
   artwork?: string
+  /**
+   * Playable content:// URI, present only for tracks that came from
+   * the device MediaStore. Mock catalog tracks have none, which is
+   * exactly how the player tells real audio from the demo catalog.
+   */
+  uri?: string
+  /** Raw content:// artwork URI, for native player metadata. */
+  artworkUri?: string
 }
 
 export type PlaylistKind = 'user' | 'system' | 'ai'

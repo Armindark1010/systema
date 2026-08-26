@@ -20,6 +20,8 @@ const {
   next,
   prev,
   seek,
+  seekForward,
+  seekBackward,
   favorites,
   toggleFavorite,
   queue,
@@ -95,8 +97,18 @@ function onSeek(ms: number) {
   seek(ms)
 }
 
+/**
+ * ±15s hold controls.
+ *
+ * Routed through the relative seek actions rather than an absolute
+ * `seek(position + delta)`: on Android that becomes a native seekBy,
+ * which clamps against the decoder's real duration instead of the
+ * MediaStore metadata copy. Behaviour in the browser is identical.
+ */
 function onSeekStep(milliseconds: number) {
-  seek(progressMs.value + milliseconds)
+  const seconds = Math.abs(milliseconds) / 1000
+  if (milliseconds >= 0) seekForward(seconds)
+  else seekBackward(seconds)
 }
 
 function onLike() {

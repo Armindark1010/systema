@@ -42,6 +42,21 @@ export const usePlayerStore = defineStore('player', () => {
   const isPlayerReady = ref(true)
   const isLoading = ref(false)
 
+  // ---- Native playback mirror ---------------------------------
+  // On Android the Media3 engine is the source of truth. These
+  // fields mirror it for the UI; they are inert in the browser.
+  /** True once the native engine has taken over playback. */
+  const isNativePlayback = ref(false)
+  /** Native buffering state, distinct from our own loading flag. */
+  const buffering = ref(false)
+  /** Last structured playback failure, or null. */
+  const playerError = ref<{ code: string; message: string; trackId: string | null } | null>(null)
+  /**
+   * Index of the current track within the native queue. -1 when the
+   * native queue is empty or playback is running in the browser.
+   */
+  const currentIndex = ref(-1)
+
   // UI modal / sheet state
   const fullPlayerOpen = ref(false)
   const queueOpen = ref(false)
@@ -329,6 +344,14 @@ export const usePlayerStore = defineStore('player', () => {
 
   function toggleShuffle() {
     isShuffle.value = !isShuffle.value
+
+    // On Android the Media3 engine owns shuffle: it keeps the queue in
+    // its original order and applies a stable shuffle order on top, so
+    // the current track keeps playing and previous/next stay coherent.
+    // Destructively reshuffling our copy here would desynchronise the
+    // two and lose the original order for good.
+    if (isNativePlayback.value) return
+
     if (isShuffle.value && queue.value.length > 1) {
       shuffleQueue()
     }
@@ -442,6 +465,10 @@ export const usePlayerStore = defineStore('player', () => {
     sleepTimer,
     isPlayerReady,
     isLoading,
+    isNativePlayback,
+    buffering,
+    playerError,
+    currentIndex,
     fullPlayerOpen,
     queueOpen,
     favorites,

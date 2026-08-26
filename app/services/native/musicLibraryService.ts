@@ -168,6 +168,10 @@ export function toUiTrack(track: MusicTrack): Track {
     artist: artistName,
     album: albumName,
     artwork: toArtworkSrc(track.artworkUri),
+    // Handed to Media3 verbatim in Phase 2. The WebView-safe form
+    // above is for <img>; the player needs the raw content:// URI.
+    uri: track.uri,
+    artworkUri: track.artworkUri ?? undefined,
   }
 }
 

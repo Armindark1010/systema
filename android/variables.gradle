@@ -19,4 +19,9 @@ ext {
     kspVersion = '2.1.0-1.0.29'
     roomVersion = '2.7.1'
     coroutinesVersion = '1.9.0'
+
+    // ---- SYSTEMA native audio engine (Phase 2) ----
+    // 1.10.1 is the newest stable line built against Kotlin 2.1.x.
+    // 1.11.0 moved to Kotlin 2.2.0 and would force a toolchain bump.
+    media3Version = '1.10.1'
 }

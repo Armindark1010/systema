@@ -16,7 +16,9 @@ const showMobileHeader = computed(() => route.meta.hideMobileHeader !== true)
 // Connect audio engine to centralized Pinia store
 const playerEngine = usePlayerEngine()
 onMounted(() => {
-  playerEngine.init()
+  // Async: on Android this negotiates with the native Media3 engine
+  // and adopts any playback already in progress.
+  void playerEngine.init()
 })
 
 // global keyboard: ⌘K / Ctrl+K → palette, Space → play/pause

@@ -5,6 +5,7 @@ import android.util.Log;
 
 import com.getcapacitor.BridgeActivity;
 import com.systema.music.library.MusicLibraryPlugin;
+import com.systema.music.player.PlayerPlugin;
 
 public class MainActivity extends BridgeActivity {
 
@@ -28,11 +29,20 @@ public class MainActivity extends BridgeActivity {
             Log.e(TAG, "Failed to register MusicLibraryPlugin", t);
         }
 
+        Log.i(TAG, "Registering PlayerPlugin");
+        try {
+            registerPlugin(PlayerPlugin.class);
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to register PlayerPlugin", t);
+        }
+
         super.onCreate(savedInstanceState);
 
         if (getBridge() != null) {
             boolean present = getBridge().getPlugin("MusicLibrary") != null;
             Log.i(TAG, "MusicLibrary plugin registered with bridge: " + present);
+            Log.i(TAG, "Player plugin registered with bridge: "
+                + (getBridge().getPlugin("Player") != null));
             if (!present) {
                 Log.e(
                     TAG,
