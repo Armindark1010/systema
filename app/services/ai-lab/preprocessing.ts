@@ -62,7 +62,18 @@ export function synthesiseAudio(
 ): Float32Array {
   const total = Math.max(1, Math.round(config.sampleRate * sample.durationSec))
   const out = new Float32Array(total)
-  const rand = seededRandom(hashString(sample.sampleId))
+
+  // Seeded from the CHARACTERISTICS, not the sample id.
+  //
+  // This is what makes the near-duplicate pair a usable control: two
+  // samples with the same acoustic profile must produce genuinely
+  // similar audio, or the nearest-neighbour sanity check is measuring
+  // noise. Seeding from the id gave the two "identical" samples
+  // uncorrelated noise beds, and for percussive profiles — where
+  // transients dominate — they ended up no more alike than unrelated
+  // signals. Distinct profiles still differ, because the profile is
+  // exactly what the seed encodes.
+  const rand = seededRandom(hashString([...sample.characteristics].sort().join('|')))
   const rate = config.sampleRate
   const tags = sample.characteristics
 
@@ -74,8 +85,29 @@ export function synthesiseAudio(
 
   // Layered construction so different tags genuinely produce
   // different spectra rather than the same signal relabelled.
-  const fundamental = has('bass-heavy') ? 55 : has('bright') ? 880 : 220
-  const harmonics = has('dense') ? 8 : has('sparse') ? 2 : 4
+  //
+  // The genre-flavoured tags are not decoration: without them
+  // `sparse,calm,acoustic-like` and `calm,sparse,classical-like`
+  // would collide on every parameter and generate IDENTICAL audio.
+  // An audit caught exactly that, so each contributes a distinct
+  // fundamental and harmonic count.
+  const fundamental = has('bass-heavy')
+    ? 55
+    : has('bright')
+      ? 880
+      : has('classical-like')
+        ? 330
+        : has('acoustic-like')
+          ? 165
+          : has('rock-like')
+            ? 110
+            : has('electronic-like') ? 73 : 220
+
+  const harmonics = has('dense')
+    ? 8
+    : has('sparse')
+      ? (has('classical-like') ? 3 : 2)
+      : 4
   const noiseLevel = has('noisy') ? 0.35 : has('percussive') ? 0.2 : 0.02
   const bpm = has('energetic') ? 150 : has('calm') ? 70 : 110
   const samplesPerBeat = Math.max(1, Math.round((60 / bpm) * rate))

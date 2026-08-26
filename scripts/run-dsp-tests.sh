@@ -42,9 +42,26 @@ fi
 
 if [ -z "$KOTLINC" ] || [ -z "$JAVA_BIN" ]; then
   echo ""
-  echo "  SKIP: Kotlin/JDK toolchain not found — DSP suites not run here."
-  echo "        They run in CI via ./gradlew testDebugUnitTest."
+  echo "  ============================================================"
+  echo "  !! KOTLIN SUITES NOT RUN — NOT VERIFIED IN THIS ENVIRONMENT"
+  echo "  ============================================================"
+  echo "  No Kotlin/JDK toolchain found, so these 412 assertions were"
+  echo "  NEITHER RUN NOR PASSED here:"
+  echo "      DspTest, ResampleTest, PipelineIntegrationTest,"
+  echo "      NumericalSafetyTest, BatchPolicyTest"
   echo ""
+  echo "  A green 'npm test' therefore covers the TypeScript suites"
+  echo "  ONLY. Do not report the DSP layer as verified from this run."
+  echo "  They execute in CI via ./gradlew testDebugUnitTest."
+  echo ""
+  echo "  Set SYSTEMA_REQUIRE_DSP=1 to make a missing toolchain a hard"
+  echo "  failure instead of a skip (recommended in CI)."
+  echo "  ============================================================"
+  echo ""
+  if [ "${SYSTEMA_REQUIRE_DSP:-0}" = "1" ]; then
+    echo "  SYSTEMA_REQUIRE_DSP=1 is set — failing." >&2
+    exit 1
+  fi
   exit 0
 fi
 

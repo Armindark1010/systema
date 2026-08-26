@@ -289,6 +289,77 @@ try {
 }
 ok('the ONNX stub never returns a fabricated embedding', inferThrew)
 
+// ---- Embedding discrimination (regression guards) ---------------
+// These pin two bugs found by auditing the reference runtime's actual
+// output rather than trusting that it "looked reasonable":
+//
+//   1. A time-domain band-RMS embedding produced a nearly FLAT vector
+//      for stationary signals, so unrelated inputs scored cosine
+//      1.0000 against one another. Fixed by embedding the frequency
+//      domain (Goertzel per log-spaced band) and mean-centring.
+//   2. Log-compressing an all-zero spectrum yielded a UNIFORM vector,
+//      so digital silence scored ~0.99 against everything. Fixed by
+//      returning the zero vector for a silent frame.
+//
+// Both would have silently invalidated every quality metric, so they
+// are asserted numerically here.
+
+const allEmbeddings = new Map<string, Float32Array>()
+for (const s of datasets.fullSyntheticDataset().samples) {
+  const perFrame: Float32Array[] = []
+  for (const f of preprocessing.frameAudio(preprocessing.synthesiseAudio(s, config), config)) {
+    perFrame.push(await reference.infer(loaded, f))
+  }
+  allEmbeddings.set(s.sampleId, runtimes.aggregateEmbeddings(perFrame, config.aggregation))
+}
+
+const allIds = [...allEmbeddings.keys()]
+const allPairs: Array<[string, string, number]> = []
+for (let i = 0; i < allIds.length; i++) {
+  for (let j = i + 1; j < allIds.length; j++) {
+    allPairs.push([allIds[i]!, allIds[j]!, runtimes.cosineSimilarity(
+      allEmbeddings.get(allIds[i]!)!, allEmbeddings.get(allIds[j]!)!)])
+  }
+}
+
+const twinPair = allPairs.find(p =>
+  p[0].startsWith('syn-dense-energetic') && p[1].startsWith('syn-dense-energetic'))!
+const nonTwin = allPairs.filter(p => p !== twinPair)
+
+ok('no two unrelated samples collide at cosine > 0.999',
+  nonTwin.every(p => p[2] <= 0.999),
+  `worst: ${nonTwin.filter(p => p[2] > 0.999).map(p => `${p[0]}~${p[1]}`).join(', ')}`)
+
+ok('the intended near-duplicate pair embeds as the most similar pair',
+  nonTwin.every(p => p[2] < twinPair[2]),
+  `twin ${twinPair[2].toFixed(4)} vs best other ${Math.max(...nonTwin.map(p => p[2])).toFixed(4)}`)
+
+ok('mean pairwise similarity shows real separation (< 0.5)',
+  allPairs.reduce((a, p) => a + p[2], 0) / allPairs.length < 0.5)
+
+ok('digital silence embeds to the zero vector, not a uniform one',
+  runtimes.computeEmbeddingStats(allEmbeddings.get('syn-silence')!).l2Norm === 0)
+
+ok('silence is not reported as similar to any other sample',
+  allPairs.filter(p => p[0].includes('silence') || p[1].includes('silence'))
+    .every(p => p[2] === 0))
+
+// The embedding must respond to spectral content, which is the whole
+// point of using the frequency domain.
+const bassEmb = allEmbeddings.get('syn-bass-heavy')!
+const brightEmb = allEmbeddings.get('syn-bright')!
+ok('a 55 Hz-fundamental signal and an 880 Hz one are clearly distinct',
+  runtimes.cosineSimilarity(bassEmb, brightEmb) < 0.5,
+  `similarity ${runtimes.cosineSimilarity(bassEmb, brightEmb).toFixed(4)}`)
+
+// Samples whose profiles differ only by a genre tag must still differ.
+ok('sparse+acoustic and sparse+classical do not generate identical audio',
+  !preprocessing.synthesiseAudio(
+    datasets.fullSyntheticDataset().samples.find(s => s.sampleId === 'syn-sparse-calm')!, config)
+    .every((v, i) => v === preprocessing.synthesiseAudio(
+      datasets.fullSyntheticDataset().samples.find(s => s.sampleId === 'syn-tonal-sustained')!,
+      config)[i]))
+
 // ---- Embedding maths --------------------------------------------
 ok('cosine similarity of a vector with itself is 1',
   near(runtimes.cosineSimilarity(emb1, emb1), 1, 1e-6))

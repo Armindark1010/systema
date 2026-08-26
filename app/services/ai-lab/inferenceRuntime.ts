@@ -86,6 +86,86 @@ export interface InferenceRuntime {
 
 // ---- Embedding statistics --------------------------------------
 
+/**
+ * Energy at one frequency, via the Goertzel algorithm.
+ *
+ * A single-bin DFT: it answers "how much of this exact frequency is
+ * present" in one O(n) pass with two state variables, which is far
+ * cheaper than a full FFT when only `dim` bands are wanted and avoids
+ * needing a power-of-two frame length.
+ */
+function goertzelPower(windowed: Float32Array, hz: number, sampleRate: number): number {
+  const n = windowed.length
+  if (n === 0 || hz <= 0 || hz >= sampleRate / 2) return 0
+
+  const coeff = 2 * Math.cos((2 * Math.PI * hz) / sampleRate)
+  let s1 = 0
+  let s2 = 0
+
+  // The input is pre-windowed by the caller: the Hann coefficients
+  // depend only on the frame length, so computing them once per frame
+  // instead of once per band removes `dim` redundant cos() passes
+  // over the whole signal.
+  for (let i = 0; i < n; i++) {
+    const s0 = windowed[i]! + coeff * s1 - s2
+    s2 = s1
+    s1 = s0
+  }
+
+  const power = s1 * s1 + s2 * s2 - coeff * s1 * s2
+  // Numerical error can push this marginally negative; clamp so a
+  // later sqrt or log never sees a negative.
+  return power > 0 ? power / n : 0
+}
+
+/**
+ * Applies a Hann window once, for reuse across every band.
+ *
+ * Hann suppresses spectral leakage so a pure tone lands in one band
+ * rather than smearing across neighbours.
+ */
+function hannWindow(frame: Float32Array): Float32Array {
+  const n = frame.length
+  const out = new Float32Array(n)
+  const denom = n - 1 || 1
+  for (let i = 0; i < n; i++) {
+    out[i] = frame[i]! * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / denom))
+  }
+  return out
+}
+
+/**
+ * Decimates a frame to a target length by block averaging.
+ *
+ * The reference embedding only needs frequencies up to ~10 kHz, so
+ * analysing a 480,000-sample frame at full rate is wasted work — an
+ * order of magnitude of it. Averaging blocks acts as a crude
+ * anti-aliasing low-pass before the rate reduction, which is
+ * appropriate here because the bands of interest sit far below the
+ * new Nyquist limit.
+ */
+function decimate(frame: Float32Array, targetLength: number): {
+  data: Float32Array
+  rate: number
+  factor: number
+} {
+  const n = frame.length
+  if (n <= targetLength) return { data: frame, rate: 1, factor: 1 }
+
+  const factor = Math.ceil(n / targetLength)
+  const outLength = Math.ceil(n / factor)
+  const out = new Float32Array(outLength)
+
+  for (let i = 0; i < outLength; i++) {
+    const start = i * factor
+    const end = Math.min(n, start + factor)
+    let sum = 0
+    for (let j = start; j < end; j++) sum += frame[j]!
+    out[i] = sum / Math.max(1, end - start)
+  }
+  return { data: out, rate: 1 / factor, factor }
+}
+
 /** Cheap sanity summary. Never stores the vector itself. */
 export function computeEmbeddingStats(embedding: Float32Array): EmbeddingStats {
   let sum = 0
@@ -202,35 +282,71 @@ export class ReferenceRuntime implements InferenceRuntime {
     const out = new Float32Array(dim)
     if (frame.length === 0) return out
 
-    // Split the frame into `dim` contiguous bands and summarise each
-    // by RMS. Deterministic, O(n), and genuinely input-dependent.
-    const bandSize = Math.max(1, Math.floor(frame.length / dim))
+    // ---- Why this is a SPECTRAL embedding ----------------------
+    // An earlier version summarised `dim` contiguous TIME slices by
+    // RMS. That was wrong, and measurably so: for any stationary
+    // signal every slice has near-identical energy, so the vector
+    // came out flat and unrelated inputs scored cosine 1.0000
+    // against each other. An embedding that cannot separate a
+    // 55 Hz drone from an 880 Hz tone is useless as a harness
+    // reference, because it would mask exactly the failure the
+    // quality checks exist to detect.
+    //
+    // The fix is to describe the frame in the FREQUENCY domain,
+    // which is what every real candidate model does. A Goertzel
+    // filter per band gives log-spaced band energies for O(dim * n)
+    // work with no FFT dependency and no power-of-two constraint.
+    const declaredRate = 22_050 // reference model's declared input rate
+    const minHz = 40
+    const maxHz = 10_000
 
+    // Decimate first: the top band is 10 kHz, so a 20 kHz effective
+    // rate is ample and keeps a 10 s frame from costing `dim` full
+    // passes over half a million samples.
+    const targetLength = 48_000
+    const { data, factor } = decimate(frame, targetLength)
+    const effectiveRate = declaredRate / factor
+    const windowed = hannWindow(data)
+    const nyquist = effectiveRate / 2
+
+    // Log spacing: pitch perception is logarithmic, and it stops all
+    // the resolution being spent on the top octave.
+    const logMin = Math.log(minHz)
+    const logMax = Math.log(Math.min(maxHz, nyquist * 0.95))
+
+    let maxEnergy = 0
     for (let b = 0; b < dim; b++) {
-      const start = b * bandSize
-      const end = Math.min(frame.length, start + bandSize)
-      let sumSquares = 0
-      let crossings = 0
-      let previous = 0
-
-      for (let i = start; i < end; i++) {
-        const v = frame[i]!
-        sumSquares += v * v
-        if ((v < 0) !== (previous < 0)) crossings++
-        previous = v
-      }
-
-      const count = Math.max(1, end - start)
-      const rms = Math.sqrt(sumSquares / count)
-      const zcr = crossings / count
-
-      // Combine energy and a spectral proxy so the embedding
-      // distinguishes timbre, not just loudness.
-      out[b] = rms * (1 + zcr)
+      const hz = Math.exp(logMin + ((logMax - logMin) * b) / Math.max(1, dim - 1))
+      const energy = goertzelPower(windowed, hz, effectiveRate)
+      out[b] = energy
+      if (energy > maxEnergy) maxEnergy = energy
     }
 
-    // L2-normalise: makes cosine similarity meaningful and keeps
-    // magnitudes comparable across samples.
+    // Silence must produce the zero vector, not a uniform one.
+    //
+    // An audit caught this too: log-compressing an all-zero spectrum
+    // yielded a constant vector, which then scored ~0.99 cosine
+    // against every other sample — silence looked "similar to
+    // everything". Returning zeros makes cosineSimilarity report 0,
+    // which is the honest answer for a signal with no content.
+    if (maxEnergy <= 0) return out
+
+    // Log-compress, mirroring the log-mel front end these models use.
+    for (let b = 0; b < dim; b++) {
+      out[b] = Math.log10(1 + (out[b]! / maxEnergy) * 1e4)
+    }
+
+    // Mean-centre so the embedding encodes spectral SHAPE rather than
+    // the large common offset log compression introduces. Without
+    // this every dense signal correlates highly with every other.
+    let sum = 0
+    for (let i = 0; i < dim; i++) sum += out[i]!
+    const meanValue = sum / dim
+    for (let i = 0; i < dim; i++) out[i] = out[i]! - meanValue
+
+    // L2-normalise so cosine similarity is meaningful and loudness
+    // does not dominate. Silence stays all-zero rather than becoming
+    // NaN, which the numerical-safety assertions pin.
     let norm = 0
     for (let i = 0; i < dim; i++) norm += out[i]! * out[i]!
     norm = Math.sqrt(norm)

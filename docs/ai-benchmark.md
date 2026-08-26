@@ -113,10 +113,24 @@ What exists instead is the **`InferenceRuntime` abstraction** plus two
 implementations:
 
 - **`ReferenceRuntime`** — real, deterministic, weight-free. It computes a
-  genuine band-energy + zero-crossing embedding, L2-normalised. This is not a
-  mock: it lets the harness prove that timing, memory tracking, warm-up
+  genuine **spectral** embedding: a Hann-windowed Goertzel filter per
+  log-spaced frequency band (40 Hz – 10 kHz), log-compressed, mean-centred and
+  L2-normalised — the same shape of front end the real candidates use. This is
+  not a mock: it lets the harness prove that timing, memory tracking, warm-up
   discipline, aggregation, determinism checks and failure isolation all work
   correctly, on any machine, in CI.
+
+  > **Two bugs an audit caught here, worth recording.** The first version
+  > summarised contiguous *time* slices by RMS. For any stationary signal every
+  > slice has near-identical energy, so the vector came out flat and unrelated
+  > inputs scored cosine **1.0000** against each other. Separately,
+  > log-compressing an all-zero spectrum produced a *uniform* vector, so digital
+  > silence scored ~0.99 against everything. Either would have silently
+  > invalidated every quality metric while looking perfectly healthy. Both are
+  > now pinned by numeric regression assertions that were confirmed to fail when
+  > the fixes are removed. Frames are decimated to ~48k samples before analysis,
+  > which made inference **46× faster** (669 ms → 14 ms) with identical output
+  > quality.
 - **`OnnxRuntimeStub`** — declares the contract and **fails loudly**. It throws
   `RUNTIME_UNAVAILABLE` with a specific explanation. It never fabricates a
   latency, never returns a plausible embedding, never pretends a model loaded.
@@ -138,6 +152,14 @@ Two kinds, both explicit, both capped at **20 samples** (`MAX_DATASET_SAMPLES`).
 Twelve deterministic generated signals spanning dense/sparse, bass-heavy/bright,
 percussive/tonal, noisy/quiet, plus three edge cases: digital silence, an
 ultra-short 0.4 s clip, and a 30 s multi-window excerpt.
+
+Signals are seeded from their **characteristics**, not their sample id. That is
+deliberate: the near-duplicate control pair must generate genuinely similar
+audio or the nearest-neighbour check measures nothing. (Seeding from the id gave
+the two "identical" samples uncorrelated noise beds — for percussive profiles,
+where transients dominate, they ended up no more alike than unrelated signals.)
+Each genre-flavoured tag also contributes a distinct fundamental, so profiles
+that differ only by tag cannot collide into byte-identical audio.
 
 These are **not music and are not described as such**. They are controlled
 inputs with known, deliberately different properties. Their value:
@@ -363,10 +385,11 @@ installs a real runtime and weights.
 
 | Level | What |
 |---|---|
-| **TEST VERIFIED** | Registry, preprocessing determinism, framing, reference runtime, statistics, warm-up/repeat discipline, failure isolation, partial success, load-failure handling, comparison compatibility, targets, recommendations, persistence round-trip, export shape, sustained cap, all safety guarantees — **469 assertions** (187 harness + 282 safety) |
-| **DESKTOP VERIFIED** | `npm test` exit 0; `npm run build` exit 0; `npx cap sync android` exit 0; all three routes render HTTP 200 in a live dev server; lab page confirmed free of app chrome; Phase 13 routes still 200 |
+| **TEST VERIFIED** | Registry, preprocessing determinism, framing, reference runtime, embedding discrimination, statistics, warm-up/repeat discipline, failure isolation, partial success, load-failure handling, comparison compatibility, targets, recommendations, persistence round-trip, export shape, sustained cap, all safety guarantees — **476 assertions** (194 harness + 282 safety) |
+| **DESKTOP VERIFIED** | `npm test` exit 0; `npm run build` exit 0; `npx cap sync android` exit 0; all three routes render HTTP 200 in a live dev server; lab page confirmed free of app chrome; Phase 13 routes still 200; 0 TypeScript errors in Phase 14 files |
 | **CODE VERIFIED** | ONNX stub contract, device detection on Android, native memory/CPU reporting |
 | **NOT VERIFIED** | **Anything on real hardware.** No Android device, emulator or SDK in this environment. No real model has been executed — zero weights installed. Device latency, memory, thermal behaviour and NNAPI availability are all **unmeasured**. |
+| **NOT VERIFIED (this session)** | **The Kotlin/DSP suites did not run here** — no JDK is obtainable in this sandbox (Adoptium, Oracle and GitHub release CDNs are all network-blocked; no root for apt). Phase 13's 412 assertions were neither run nor passed in this session. `run-dsp-tests.sh` now says so loudly instead of skipping quietly, and `SYSTEMA_REQUIRE_DSP=1` turns a missing toolchain into a hard failure. They execute in CI via `./gradlew testDebugUnitTest`. |
 
 **No number in this phase came from a phone.** The harness is proven correct;
 the models are unmeasured.
