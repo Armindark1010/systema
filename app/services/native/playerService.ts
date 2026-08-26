@@ -24,6 +24,7 @@ import {
   type QueueChangedEvent,
   type BufferingEvent,
   type DurationEvent,
+  type NotificationPermissionState,
 } from './playerPlugin'
 
 export type {
@@ -32,6 +33,7 @@ export type {
   PlayerErrorCode,
   NativePlaybackState,
   QueueChangedEvent,
+  NotificationPermissionState,
 } from './playerPlugin'
 
 /** Structured playback failure, shaped like LibraryError. */
@@ -107,6 +109,29 @@ async function guarded<T>(fn: () => Promise<T>, label: string): Promise<T | null
   }
 }
 
+/**
+ * Media-notification permission (Phase 3, Android 13+).
+ *
+ * Returns a granted-looking result on web and on older Android, where
+ * no runtime grant exists. Playback NEVER depends on this: a denial
+ * only hides the notification, so callers must not gate audio on it.
+ */
+export async function getNotificationPermissionNative(): Promise<NotificationPermissionState> {
+  const result = await guarded(
+    () => NativePlayer.getNotificationPermission(),
+    'getNotificationPermission',
+  )
+  return result ?? { granted: true, required: false }
+}
+
+export async function requestNotificationPermissionNative(): Promise<NotificationPermissionState> {
+  const result = await guarded(
+    () => NativePlayer.requestNotificationPermission(),
+    'requestNotificationPermission',
+  )
+  return result ?? { granted: true, required: false }
+}
+
 export function playTrackNative(track: Track) {
   const native = toNativeTrack(track)
   if (!native) return Promise.resolve(null)
@@ -173,6 +198,10 @@ export const getPositionNative = () =>
 
 export const getStateNative = (): Promise<PlayerSnapshot | null> =>
   guarded(() => NativePlayer.getState(), 'getState')
+
+/** The engine's real queue: track ids in playback order + its index. */
+export const getQueueNative = (): Promise<QueueChangedEvent | null> =>
+  guarded(() => NativePlayer.getQueue(), 'getQueue')
 
 // ---- Events --------------------------------------------------
 

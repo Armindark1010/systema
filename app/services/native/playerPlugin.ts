@@ -112,6 +112,18 @@ export interface SetQueueOptions {
  * local clock between events. Sending a position event every frame
  * would flood the bridge for no visible benefit.
  */
+/**
+ * Result of a notification-permission query or request (Phase 3).
+ *
+ * `required` is false below Android 13, where notifications need no
+ * runtime grant. `granted` false only hides the media notification —
+ * playback, lock-screen controls and Bluetooth buttons are unaffected.
+ */
+export interface NotificationPermissionState {
+  granted: boolean
+  required: boolean
+}
+
 export interface PlayerPlugin {
   play(options?: { track?: NativePlayerTrack }): Promise<void>
   pause(): Promise<void>
@@ -139,6 +151,10 @@ export interface PlayerPlugin {
   setShuffle(options: { enabled: boolean }): Promise<void>
   setRepeatMode(options: { mode: NativeRepeatMode }): Promise<void>
   setVolume(options: { volume: number }): Promise<void>
+
+  /** Media-notification visibility only; never gates playback. */
+  getNotificationPermission(): Promise<NotificationPermissionState>
+  requestNotificationPermission(): Promise<NotificationPermissionState>
 
   addListener(eventName: 'playbackStateChanged', handler: (snapshot: PlayerSnapshot) => void): Promise<PluginListenerHandle>
   addListener(eventName: 'currentTrackChanged', handler: (event: CurrentTrackChangedEvent) => void): Promise<PluginListenerHandle>

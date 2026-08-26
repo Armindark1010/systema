@@ -58,9 +58,14 @@ dependencies {
     // exoplayer + the default extractors/renderers it needs for local
     // audio. No DASH/HLS/IMA: nothing here streams from the network.
     implementation "androidx.media3:media3-exoplayer:$media3Version"
-    // Kept explicit — the session artifact is what a future
-    // MediaSessionService phase will build on.
     implementation "androidx.media3:media3-common:$media3Version"
+    // ---- SYSTEMA background playback (Phase 3) ----
+    // MediaSession + MediaSessionService: the foreground playback
+    // service, the media notification, lock-screen controls and media
+    // button handling all come from this one artifact. Pinned to the
+    // same media3Version as the engine so no second Media3 line can be
+    // pulled into the graph.
+    implementation "androidx.media3:media3-session:$media3Version"
 
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"

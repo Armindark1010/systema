@@ -24,6 +24,31 @@
 
         </activity>
 
+        <!--
+          Background playback service (Phase 3).
+
+          A Media3 MediaSessionService: it owns the long-lived playback
+          session so audio survives the Activity being backgrounded,
+          the screen locking, or the app being switched away from.
+
+          - not exported: only this app and the system media-button
+            dispatcher bind to it, nothing else can drive our player.
+          - foregroundServiceType="mediaPlayback": the specific type
+            Android requires for audio, not a generic foreground
+            service. Required from API 29 and enforced from API 34.
+          - the MEDIA_BUTTON intent filter is what routes headset and
+            Bluetooth transport keys to the session.
+        -->
+        <service
+            android:name=".player.PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -52,4 +77,25 @@
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+
+    <!--
+      Background playback (Phase 3).
+
+      FOREGROUND_SERVICE is a normal permission, granted at install.
+      FOREGROUND_SERVICE_MEDIA_PLAYBACK is its API 34+ counterpart: from
+      Android 14 each foreground service type needs its matching
+      permission, and this is the media-playback one specifically
+      rather than a catch-all.
+
+      POST_NOTIFICATIONS is runtime-requested on API 33+ only, and is
+      NOT required for playback — it only controls whether the media
+      notification is visible. Denying it must never stop the music, so
+      nothing in the playback path depends on it being granted.
+
+      No new storage permission is needed: background playback reuses
+      the MediaStore content:// URIs Phase 1 already resolves.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

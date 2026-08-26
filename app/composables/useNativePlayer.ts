@@ -28,6 +28,7 @@
 // keeps the bar smooth without a bridge message per frame.
 // ============================================================
 
+import type { Track } from '~/types'
 import { usePlayerStore } from '~/stores/player'
 import { useLibraryStore } from '~/stores/library'
 import { recordPlayed } from '~/composables/usePlaybackHistory'
@@ -36,6 +37,7 @@ import {
   addToQueueNative,
   clearQueueNative,
   getPositionNative,
+  getQueueNative,
   getStateNative,
   isNativePlayerAvailable,
   isPlayableNatively,
@@ -43,6 +45,8 @@ import {
   nextNative,
   pauseNative,
   previousNative,
+  getNotificationPermissionNative,
+  requestNotificationPermissionNative,
   removeFromQueueNative,
   resumeNative,
   seekByNative,
@@ -90,6 +94,8 @@ export function useNativePlayer() {
   let nativeTrackId: string | null = null
   /** Last id written to recents, so repeat events do not duplicate. */
   let recordedTrackId: string | null = null
+  /** One-shot latch for the notification permission prompt. */
+  let notificationPermissionAsked = false
   let lastResyncAt = 0
   let seekTimer: ReturnType<typeof setTimeout> | null = null
   let pendingSeekMs: number | null = null
@@ -112,15 +118,28 @@ export function useNativePlayer() {
 
   // ---- Native -> store ---------------------------------------
 
-  function applySnapshot(snapshot: PlayerSnapshot) {
+  /**
+   * @param authoritative Treat the snapshot as ground truth rather
+   *   than a possibly-out-of-order event. Used when we ASKED the
+   *   engine for its state (startup, returning to foreground), where
+   *   the reply is by definition current and the stale-event guard
+   *   would wrongly reject a track changed while backgrounded.
+   */
+  function applySnapshot(snapshot: PlayerSnapshot, authoritative = false) {
     // A snapshot naming a track the engine has already moved past is
     // stale — apply only its transport fields, never let it drag the
     // UI back to a superseded track.
-    const stale = Boolean(
+    const stale = !authoritative && Boolean(
       snapshot.currentTrackId
       && nativeTrackId
       && snapshot.currentTrackId !== nativeTrackId,
     )
+    if (authoritative) {
+      // Accept the engine's answer wholesale: drop the guard latch so
+      // a track advanced from the notification is not mistaken for a
+      // stale event.
+      nativeTrackId = snapshot.currentTrackId ?? null
+    }
     if (!stale && snapshot.currentTrackId) {
       applyTrackChange(snapshot.currentTrackId)
     }
@@ -224,6 +243,9 @@ export function useNativePlayer() {
    * transitions cannot create duplicates.
    */
   function noteNativePlayback(trackId: string) {
+    // Playback is genuinely under way: a good moment to ask about the
+    // notification, and the only place we do.
+    void ensureNotificationPermission()
     if (recordedTrackId === trackId) return
     const track = player.playbackOrder.find(t => t.id === trackId)
       ?? useLibraryStore().tracks.find(t => t.id === trackId)
@@ -489,13 +511,96 @@ export function useNativePlayer() {
 
     // Adopt whatever the engine is already doing — after an Activity
     // recreation playback continues while the WebView restarts.
-    const snapshot = await getStateNative()
-    if (snapshot) applySnapshot(snapshot)
+    await reconcileWithNative()
+
+    // Re-sync every time the UI becomes visible again. While SYSTEMA is
+    // backgrounded the WebView is throttled or frozen, so events sent
+    // from the service can be missed entirely: the user may have hit
+    // Next on the notification or the lock screen and the frontend
+    // would never have heard about it. Asking the engine on resume is
+    // the only reliable way to converge, and it costs one bridge call
+    // per foreground rather than any polling.
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('focus', onVisibilityChange)
 
     return true
   }
 
+  /**
+   * Pulls authoritative state from the engine and adopts it.
+   *
+   * Native is the source of truth; this never pushes the frontend's
+   * idea of playback down to the engine. Deliberately does NOT reset
+   * currentTrack/position/duration/queue when the engine has nothing
+   * to say — an Activity lifecycle change alone must not clear the UI.
+   */
+  async function reconcileWithNative() {
+    const snapshot = await getStateNative()
+    if (!snapshot) return
+
+    applySnapshot(snapshot, /* authoritative */ true)
+
+    // The queue can also have moved on (repeat wrapped, an unplayable
+    // file was skipped). Realign the order and index with the engine's.
+    const native = await getQueueNative()
+    if (!native?.trackIds?.length) return
+
+    const known = new Map(
+      [...player.playbackOrder, ...useLibraryStore().tracks].map(t => [t.id, t]),
+    )
+    const resolved = native.trackIds
+      .map(id => known.get(id))
+      .filter((t): t is Track => Boolean(t))
+
+    // Only adopt a fully resolvable queue: a partial list would silently
+    // drop tracks the user still has queued.
+    if (resolved.length !== native.trackIds.length) return
+
+    applyNative(() => {
+      player.playbackOrder = resolved
+      if (native.currentIndex >= 0 && native.currentIndex < resolved.length) {
+        player.currentIndex = native.currentIndex
+      }
+    })
+  }
+
+  /**
+   * Asks for POST_NOTIFICATIONS once, the first time audio actually
+   * starts — the moment the prompt is self-explanatory, rather than at
+   * app launch before the user has done anything.
+   *
+   * Best-effort by design: playback is already under way and a denial
+   * changes nothing about it, so the result is only logged.
+   */
+  async function ensureNotificationPermission() {
+    if (notificationPermissionAsked) return
+    notificationPermissionAsked = true
+    try {
+      const state = await getNotificationPermissionNative()
+      if (!state.required || state.granted) return
+      const result = await requestNotificationPermissionNative()
+      if (!result.granted) {
+        console.info(
+          '[SYSTEMA/PLAYER] Notification permission denied; playback and '
+          + 'lock-screen controls are unaffected, only the media '
+          + 'notification is hidden.',
+        )
+      }
+    } catch (error) {
+      console.warn('[SYSTEMA/PLAYER] Notification permission check failed', error)
+    }
+  }
+
+  function onVisibilityChange() {
+    if (document.visibilityState !== 'visible') return
+    void reconcileWithNative()
+  }
+
   function dispose() {
+    if (import.meta.client) {
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('focus', onVisibilityChange)
+    }
     stopClock()
     nativeTrackId = null
     recordedTrackId = null

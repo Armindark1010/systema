@@ -1,12 +1,18 @@
 package com.systema.music.player
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
+import androidx.core.content.ContextCompat
 import com.getcapacitor.annotation.CapacitorPlugin
+import com.getcapacitor.annotation.Permission
+import com.getcapacitor.annotation.PermissionCallback
 import com.systema.music.player.model.PlayerException
 import com.systema.music.player.model.PlayerSnapshot
 import com.systema.music.player.model.PlayerTrack
@@ -29,11 +35,21 @@ import org.json.JSONObject
  *   queueChanged         { trackIds, currentIndex }
  *   playerError          { code, message, trackId }
  */
-@CapacitorPlugin(name = "Player")
+@CapacitorPlugin(
+    name = "Player",
+    permissions = [
+        // POST_NOTIFICATIONS gates only the VISIBILITY of the media
+        // notification, never playback itself. The alias is a literal
+        // because Kotlin cannot reference a companion const from an
+        // annotation argument.
+        Permission(alias = "notifications", strings = [Manifest.permission.POST_NOTIFICATIONS]),
+    ],
+)
 class PlayerPlugin : Plugin() {
 
     companion object {
         private const val TAG = "SystemaPlayerPlugin"
+        private const val NOTIFICATION_ALIAS = "notifications"
 
         private const val EVENT_PLAYBACK_STATE = "playbackStateChanged"
         private const val EVENT_TRACK_CHANGED = "currentTrackChanged"
@@ -202,6 +218,66 @@ class PlayerPlugin : Plugin() {
     @PluginMethod
     fun getState(call: PluginCall) {
         call.resolve(engine.snapshot().toJs())
+    }
+
+    // ---------------------------------------------------------------
+    // Background playback (Phase 3)
+    // ---------------------------------------------------------------
+
+    /**
+     * Reports whether the media notification can be shown.
+     *
+     * Purely informational — playback never depends on it. On API 32
+     * and below notifications need no runtime grant, so this always
+     * reports granted there rather than inventing a permission the OS
+     * does not have.
+     */
+    @PluginMethod
+    fun getNotificationPermission(call: PluginCall) {
+        call.resolve(
+            JSObject()
+                .put("required", Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                .put("granted", hasNotificationPermission()),
+        )
+    }
+
+    /**
+     * Requests POST_NOTIFICATIONS on API 33+.
+     *
+     * Only meaningful for the *visibility* of the media notification:
+     * a denial leaves audio, lock-screen controls and Bluetooth buttons
+     * working, so callers must not treat it as fatal. On older releases
+     * this resolves immediately without prompting.
+     */
+    @PluginMethod
+    fun requestNotificationPermission(call: PluginCall) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            call.resolve(JSObject().put("granted", true).put("required", false))
+            return
+        }
+        if (hasNotificationPermission()) {
+            call.resolve(JSObject().put("granted", true).put("required", true))
+            return
+        }
+        // Capacitor routes the result back through the callback below.
+        requestPermissionForAlias(NOTIFICATION_ALIAS, call, "notificationResult")
+    }
+
+    @PermissionCallback
+    private fun notificationResult(call: PluginCall) {
+        call.resolve(
+            JSObject()
+                .put("granted", hasNotificationPermission())
+                .put("required", true),
+        )
+    }
+
+    private fun hasNotificationPermission(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
     }
 
     // ---------------------------------------------------------------

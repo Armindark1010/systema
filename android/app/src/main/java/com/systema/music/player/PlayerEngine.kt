@@ -1,6 +1,7 @@
 package com.systema.music.player
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -67,6 +68,9 @@ class PlayerEngine private constructor(context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private var player: ExoPlayer? = null
+
+    /** True once PlaybackService has been asked to start this session. */
+    private var serviceStarted = false
 
     /** Playlist index -> SYSTEMA track id. Parallel to the ExoPlayer timeline. */
     private val trackIds = mutableListOf<String>()
@@ -174,6 +178,30 @@ class PlayerEngine private constructor(context: Context) {
         }
     }
 
+    /**
+     * Starts [PlaybackService] so the session outlives the Activity.
+     *
+     * Called when playback is requested — at that point the app is
+     * foreground and permitted to start a service. Media3 handles the
+     * foreground promotion and the notification from there, so this
+     * runs once per session rather than on any kind of timer.
+     *
+     * Failures are swallowed deliberately: on the rare occasion Android
+     * refuses the start (an aggressive OEM, or a background race), audio
+     * still plays through the Activity-hosted player. Losing background
+     * controls is far better than crashing the app.
+     */
+    private fun ensureServiceStarted() {
+        if (serviceStarted) return
+        try {
+            appContext.startService(Intent(appContext, PlaybackService::class.java))
+            serviceStarted = true
+            Log.i(TAG, "Playback service start requested")
+        } catch (t: Throwable) {
+            Log.w(TAG, "Could not start playback service; in-app playback continues", t)
+        }
+    }
+
     /** Releases the player and clears all references. */
     fun release() = onMain {
         player?.let {
@@ -187,6 +215,17 @@ class PlayerEngine private constructor(context: Context) {
         player = null
         trackIds.clear()
         trackById.clear()
+
+        // Let the service shut down with the player it was publishing,
+        // so no empty notification is left behind.
+        if (serviceStarted) {
+            try {
+                appContext.stopService(Intent(appContext, PlaybackService::class.java))
+            } catch (t: Throwable) {
+                Log.w(TAG, "Stopping playback service failed", t)
+            }
+            serviceStarted = false
+        }
         Log.i(TAG, "ExoPlayer released")
     }
 
@@ -195,7 +234,14 @@ class PlayerEngine private constructor(context: Context) {
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) = emitSnapshot()
 
-        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = emitSnapshot()
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            // Bring the playback service up as soon as the user asks for
+            // audio, while the app is still foreground and allowed to
+            // start it. Media3 promotes it to a foreground service and
+            // posts the notification itself once playback is running.
+            if (playWhenReady) ensureServiceStarted()
+            emitSnapshot()
+        }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) = emitSnapshot()
 
@@ -341,6 +387,18 @@ class PlayerEngine private constructor(context: Context) {
         val index = player?.currentMediaItemIndex ?: -1
         forEachListener { it.onQueueChanged(ids, index) }
     }
+
+    /**
+     * The underlying [Player], for the MediaSession to publish.
+     *
+     * This is deliberately the *same* instance every caller drives —
+     * the session wraps it rather than owning a second player, so the
+     * notification, lock screen and Bluetooth buttons all operate on
+     * one queue with one set of shuffle/repeat semantics.
+     *
+     * Must be called from the main thread (the service's onCreate is).
+     */
+    fun sessionPlayer(): ExoPlayer = ensurePlayer()
 
     /** Current state, safe to call from any thread. */
     fun snapshot(): PlayerSnapshot = onMainSync(
