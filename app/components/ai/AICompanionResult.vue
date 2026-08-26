@@ -43,7 +43,7 @@ function onPlay() {
 
 <template>
   <article
-    class="ai-rise grid grid-cols-[2.75rem_minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-ai-line px-3 py-2.5 last:border-b-0 transition-colors duration-160 ease-sys"
+    class="ai-rise grid grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-ai-line px-3 py-2.5 last:border-b-0 transition-colors duration-160 ease-sys"
     :class="isCurrent ? 'bg-ai-muted' : 'hover:bg-ai-surface'"
     :style="index !== undefined ? { animationDelay: `${Math.min(index, 8) * 60}ms` } : undefined"
   >
@@ -59,20 +59,18 @@ function onPlay() {
       </span>
     </div>
 
-    <!-- title + artist -->
-    <div class="flex min-w-0 flex-col">
+    <!-- title + artist + match -->
+    <div class="flex min-w-0 flex-col gap-0.5">
       <span
         class="truncate text-body font-semibold"
         :class="isCurrent ? 'text-ai-primary' : 'text-ai-fg'"
       >{{ track.title }}</span>
       <span class="truncate text-small text-ai-fg-muted">{{ artist }}</span>
+      <span
+        class="text-micro font-bold tabular-nums tracking-[0.06em] text-ai-secondary"
+        :aria-label="`${match} percent match`"
+      >{{ match }}% match</span>
     </div>
-
-    <!-- match -->
-    <span
-      class="shrink-0 text-micro font-bold tabular-nums tracking-[0.08em] text-ai-secondary"
-      :aria-label="`${match} percent match`"
-    >{{ match }}%</span>
 
     <!-- controls -->
     <div class="flex shrink-0 items-center gap-1">

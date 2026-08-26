@@ -110,15 +110,29 @@ export const useAIStore = defineStore('ai', () => {
 
   const isBusy = computed(() => status.value === 'thinking' || status.value === 'responding')
 
-  const statusLine = computed(() => aiCompanionLines[status.value])
+  const statusLine = computed(() => {
+    // While idle, EMO acknowledges what is actually playing rather
+    // than repeating the same line — the companion stays aware of
+    // the shared player state.
+    if (status.value === 'idle' && player.isPlaying && player.currentTrack) {
+      return `Listening along to ${player.currentTrack.title}.`
+    }
+    return aiCompanionLines[status.value]
+  })
 
-  /** EMO expression derived from companion status. */
+  /**
+   * EMO expression derived from companion status, falling back to
+   * the shared player state when the companion has nothing to say.
+   */
   const emoExpression = computed(() => {
     switch (status.value) {
       case 'listening': return 'listening' as const
       case 'thinking': return 'thinking' as const
       case 'responding': return 'happy' as const
-      default: return 'idle' as const
+      default:
+        return player.isPlaying
+          ? (player.currentTrack && player.currentTrack.energy >= 75 ? 'dancing' as const : 'listening' as const)
+          : 'idle' as const
     }
   })
 

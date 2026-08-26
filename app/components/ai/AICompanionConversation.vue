@@ -74,11 +74,7 @@ watch(() => props.thinking, (v) => { if (v) scrollToEnd() })
         </div>
 
         <p class="text-body leading-relaxed text-ai-fg">
-          {{ visibleText(message) }}<span
-            v-if="isTyping(message)"
-            class="ai-caret ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 bg-ai-primary"
-            aria-hidden="true"
-          />
+          {{ visibleText(message) }}<span v-if="isTyping(message)" class="ai-caret" aria-hidden="true" />
         </p>
 
         <!-- attached music results -->

@@ -1335,6 +1335,12 @@ html.library-sheet-open body {
 
 /* typewriter caret on the streaming answer */
 .ai-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 0.125rem;
+  transform: translateY(0.125em);
+  background: var(--ai-primary);
   animation: ai-caret 0.9s steps(1) infinite;
 }
 @keyframes ai-caret {
