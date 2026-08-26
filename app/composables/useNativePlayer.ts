@@ -32,6 +32,7 @@ import type { Track } from '~/types'
 import { usePlayerStore } from '~/stores/player'
 import { useLibraryStore } from '~/stores/library'
 import { recordPlayed } from '~/composables/usePlaybackHistory'
+import { useSleepTimer } from '~/composables/useSleepTimer'
 import {
   addPlayerListeners,
   addToQueueNative,
@@ -152,6 +153,8 @@ export function useNativePlayer() {
       player.currentIndex = snapshot.currentIndex
       player.isShuffle = snapshot.shuffle
       player.repeatMode = fromNativeRepeat(snapshot.repeatMode)
+      // Why we are paused, not just that we are.
+      player.interrupted = snapshot.interrupted === true
 
       // Duration comes from the decoder, which is more trustworthy
       // than the MediaStore metadata the track was created with.
@@ -532,6 +535,18 @@ export function useNativePlayer() {
           )
         }
       },
+      onSleepTimerChanged: (state) => {
+        // The native timer is the truth; adopt its deadline rather
+        // than keeping a second countdown here.
+        useSleepTimer().adoptNativeState(state)
+      },
+
+      onSleepTimerExpired: () => {
+        // Media3 has already paused itself. This only reconciles the
+        // frontend mirrors and fires the EMO "sleepy" event.
+        useSleepTimer().handleNativeExpiry()
+      },
+
       onError: (error) => {
         // Surfaced, never thrown: one unplayable file must not break
         // the session. The engine has already skipped past it.

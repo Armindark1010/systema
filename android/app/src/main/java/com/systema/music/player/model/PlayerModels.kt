@@ -72,6 +72,12 @@ data class PlayerSnapshot(
     val shuffle: Boolean,
     val repeatMode: RepeatMode,
     val currentTrackId: String?,
+    /**
+     * True when playback is paused because Media3 lost audio focus (a
+     * call, another music app) rather than because the user paused.
+     * Lets the UI describe an interruption without guessing.
+     */
+    val interrupted: Boolean = false,
 )
 
 /**

@@ -76,11 +76,54 @@ class PlayerEngine private constructor(context: Context) {
     /** True once PlaybackService has been asked to start this session. */
     private var serviceStarted = false
 
+    /**
+     * True when the most recent pause came from losing audio focus
+     * rather than from the user. Surfaced in the snapshot so the UI can
+     * describe an interruption honestly; cleared as soon as playback
+     * resumes.
+     */
+    private var lastPauseWasInterruption = false
+
     /** Playlist index -> SYSTEMA track id. Parallel to the ExoPlayer timeline. */
     private val trackIds = mutableListOf<String>()
 
     /** Metadata by track id, so snapshots can name the current track. */
     private val trackById = mutableMapOf<String, PlayerTrack>()
+
+    /**
+     * Track ids Media3 has already failed to play in this session.
+     *
+     * A permanently broken file (deleted, corrupt, unsupported codec)
+     * fails the same way every time, so retrying it is pure waste.
+     * Cleared whenever the queue is replaced — the user may have fixed
+     * the underlying problem, and a fresh context deserves a fresh try.
+     */
+    private val failedTrackIds = mutableSetOf<String>()
+
+    /**
+     * The next queue index after [fromIndex] that has not already
+     * failed, honouring repeat-all's wrap-around, or null when every
+     * remaining item is known-bad.
+     */
+    private fun nextPlayableIndexFrom(fromIndex: Int): Int? {
+        val p = player ?: return null
+        if (trackIds.isEmpty()) return null
+
+        val wrap = p.repeatMode == Player.REPEAT_MODE_ALL
+        var i = fromIndex + 1
+        while (i < trackIds.size) {
+            if (trackIds[i] !in failedTrackIds) return i
+            i++
+        }
+        if (!wrap) return null
+        // Wrapped search, bounded by fromIndex so we cannot spin.
+        i = 0
+        while (i <= fromIndex && i < trackIds.size) {
+            if (trackIds[i] !in failedTrackIds) return i
+            i++
+        }
+        return null
+    }
 
     // ---- Listener plumbing -------------------------------------
 
@@ -246,6 +289,12 @@ class PlayerEngine private constructor(context: Context) {
         player = null
         trackIds.clear()
         trackById.clear()
+        failedTrackIds.clear()
+
+        // Drop any armed sleep timer with the player it would have
+        // paused, so no handler message outlives the engine.
+        mainHandler.removeCallbacks(sleepRunnable)
+        sleepDeadlineAt = null
 
         // Let the service shut down with the player it was publishing,
         // so no empty notification is left behind.
@@ -271,10 +320,46 @@ class PlayerEngine private constructor(context: Context) {
             // start it. Media3 promotes it to a foreground service and
             // posts the notification itself once playback is running.
             if (playWhenReady) ensureServiceStarted()
+
+            // AUDIO FOCUS, reported rather than re-implemented.
+            //
+            // Media3 already handles focus correctly because the player
+            // is built with handleAudioFocus = true: it ducks for a
+            // transient-may-duck request (navigation prompts), pauses
+            // for a transient one (a call), and stops for a permanent
+            // loss (another music app). We deliberately do not fight
+            // any of that.
+            //
+            // What was missing is that the frontend could not tell an
+            // interruption apart from the user pressing pause — both
+            // arrived as isPlaying=false. Forwarding the reason lets
+            // the UI stay honest without changing the behaviour.
+            lastPauseWasInterruption =
+                !playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS
+
+            if (lastPauseWasInterruption) {
+                Log.i(TAG, "Paused by audio focus loss")
+            }
+
             emitSnapshot()
         }
 
-        override fun onIsPlayingChanged(isPlaying: Boolean) = emitSnapshot()
+        /**
+         * Media3's own ducking notification.
+         *
+         * Purely informational: the volume change is already applied by
+         * the focus handler. We log it so a field report of "the music
+         * went quiet" is diagnosable from logcat.
+         */
+        override fun onVolumeChanged(volume: Float) {
+            Log.d(TAG, "Player volume now $volume")
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            // Playback is back: whatever interrupted it is over.
+            if (isPlaying) lastPauseWasInterruption = false
+            emitSnapshot()
+        }
 
         /**
          * A seek happened — from the notification, the lock screen, a
@@ -318,15 +403,33 @@ class PlayerEngine private constructor(context: Context) {
 
             forEachListener { it.onError(mapped, trackId) }
 
-            // One bad file must not end the session. Move past it when
-            // there is somewhere to go; otherwise stop cleanly.
+            // Remember the failure so we never retry this item again in
+            // this session. Without this a queue of unplayable files
+            // under REPEAT_ALL wraps around and retries the first
+            // broken track forever, pegging the CPU and spamming the
+            // frontend with identical errors.
+            if (trackId != null) failedTrackIds.add(trackId)
+
             val current = player
-            if (current != null && current.hasNextMediaItem()) {
-                Log.i(TAG, "Skipping unplayable item at $index")
-                current.seekToNextMediaItem()
+            if (current == null) {
+                emitSnapshot()
+                return
+            }
+
+            // One bad file must not end the session: advance to the
+            // next item that has not already failed. Skipping over the
+            // known-bad ones is what stops the error loop.
+            val nextPlayable = nextPlayableIndexFrom(index)
+            if (nextPlayable != null) {
+                Log.i(TAG, "Skipping unplayable item at $index -> $nextPlayable")
+                current.seekTo(nextPlayable, 0)
                 current.prepare()
             } else {
-                current?.stop()
+                // Everything left is known-broken. Stop cleanly rather
+                // than looping; the frontend already has the error.
+                Log.w(TAG, "No playable item remains; stopping")
+                failedTrackIds.clear()
+                current.stop()
             }
             emitSnapshot()
         }
@@ -429,6 +532,8 @@ class PlayerEngine private constructor(context: Context) {
                 else -> RepeatMode.OFF
             },
             currentTrackId = trackIdAt(index),
+            // Only meaningful while actually paused.
+            interrupted = lastPauseWasInterruption && !p.isPlaying,
         )
     }
 
@@ -533,6 +638,8 @@ class PlayerEngine private constructor(context: Context) {
 
             trackIds.clear()
             trackById.clear()
+            // A new context deserves a fresh attempt at every track.
+            failedTrackIds.clear()
             valid.forEach {
                 trackIds.add(it.id)
                 trackById[it.id] = it
@@ -575,6 +682,8 @@ class PlayerEngine private constructor(context: Context) {
 
             trackIds.clear()
             trackById.clear()
+            // A new context deserves a fresh attempt at every track.
+            failedTrackIds.clear()
             valid.forEach {
                 trackIds.add(it.id)
                 trackById[it.id] = it
@@ -657,20 +766,56 @@ class PlayerEngine private constructor(context: Context) {
         emitSnapshot()
     }
 
-    /** Absolute seek, clamped to [0, duration]. */
+    /**
+     * The seekable upper bound, or null while it is genuinely unknown.
+     *
+     * Media3 reports an unknown duration as [C.TIME_UNSET], but during
+     * preparation it also briefly reports **0**, and a 0 upper bound
+     * clamped every seek to the start of the track. That is what made
+     * "seek immediately after a track change" and "seek before the
+     * duration is known" silently jump to 0:00 instead of the
+     * requested position. Both cases are now treated as "unknown", and
+     * an unknown bound means we pass the request through and let
+     * ExoPlayer clamp it once the timeline resolves.
+     */
+    private fun seekableDurationMs(p: ExoPlayer): Long? =
+        p.duration.takeIf { it != C.TIME_UNSET && it > 0 }
+
+    /** Absolute seek, clamped to [0, duration] when the duration is known. */
     fun seekTo(positionMs: Long) = onMain {
-        val p = player ?: return@onMain
-        val duration = p.duration.takeIf { it != C.TIME_UNSET } ?: Long.MAX_VALUE
-        p.seekTo(positionMs.coerceIn(0, duration))
-        emitSnapshot()
+        try {
+            val p = player ?: return@onMain
+            if (p.mediaItemCount == 0) return@onMain
+            val duration = seekableDurationMs(p)
+            // Negative requests always clamp; the upper bound only
+            // applies once it is real.
+            val target = if (duration != null) {
+                positionMs.coerceIn(0, duration)
+            } else {
+                positionMs.coerceAtLeast(0)
+            }
+            p.seekTo(target)
+            emitSnapshot()
+        } catch (t: Throwable) {
+            // An out-of-range seek against a timeline that changed
+            // underneath us must not take the session down.
+            Log.w(TAG, "seekTo failed", t)
+        }
     }
 
     /** Relative seek for the ±15s controls. Clamped at both ends. */
     fun seekBy(deltaMs: Long) = onMain {
-        val p = player ?: return@onMain
-        val duration = p.duration.takeIf { it != C.TIME_UNSET } ?: Long.MAX_VALUE
-        p.seekTo((p.currentPosition + deltaMs).coerceIn(0, duration))
-        emitSnapshot()
+        try {
+            val p = player ?: return@onMain
+            if (p.mediaItemCount == 0) return@onMain
+            val duration = seekableDurationMs(p)
+            val raw = p.currentPosition + deltaMs
+            val target = if (duration != null) raw.coerceIn(0, duration) else raw.coerceAtLeast(0)
+            p.seekTo(target)
+            emitSnapshot()
+        } catch (t: Throwable) {
+            Log.w(TAG, "seekBy failed", t)
+        }
     }
 
     /** Jumps to a queue index. */
@@ -744,6 +889,7 @@ class PlayerEngine private constructor(context: Context) {
         p.clearMediaItems()
         trackIds.clear()
         trackById.clear()
+        failedTrackIds.clear()
         emitQueueChanged()
         emitSnapshot()
     }
@@ -776,4 +922,122 @@ class PlayerEngine private constructor(context: Context) {
 
     /** Current queue as SYSTEMA ids, in playlist order. */
     fun queueTrackIds(): List<String> = onMainSync(emptyList()) { trackIds.toList() }
+
+    // ---- Sleep timer -------------------------------------------
+
+    /**
+     * SLEEP TIMER — native, because the WebView one could not work.
+     *
+     * The previous implementation was a `setInterval` in the WebView.
+     * Android freezes or heavily throttles a backgrounded WebView, so
+     * the countdown stalled in exactly the situation the feature
+     * exists for: screen off, phone in a pocket. It also only flipped a
+     * Pinia boolean, so the real audio never stopped.
+     *
+     * This version lives beside the player:
+     *
+     * - **One mechanism.** A single [Handler] message on the main
+     *   looper. No thread, no coroutine scope, no wakelock and no
+     *   per-second tick — the handler wakes once, at the end.
+     * - **Absolute deadline.** We store the wall-clock instant the
+     *   timer should fire and derive the remaining time from it, so a
+     *   suspended CPU cannot make the timer drift or lose time the way
+     *   a decrementing counter does.
+     * - **Survives the Activity.** The engine is process-scoped and the
+     *   service keeps the process alive while audio plays, so
+     *   recreating the Activity leaves the deadline untouched.
+     * - **Independent of the queue.** Nothing here is bound to a track,
+     *   so Next/Previous cannot reset it.
+     *
+     * Not an alarm/wakelock by design: it only needs to fire while
+     * audio is playing, and playing audio already keeps the process
+     * alive. Asking for a wakelock would keep the CPU up for nothing.
+     */
+
+    /** Wall-clock ms when the timer fires, or null when inactive. */
+    private var sleepDeadlineAt: Long? = null
+
+    private val sleepRunnable = Runnable { onSleepTimerExpired() }
+
+    /** Fired when the timer elapses, so the bridge can tell the UI. */
+    interface SleepTimerListener {
+        fun onSleepTimerChanged(deadlineAt: Long?, remainingMs: Long)
+        fun onSleepTimerExpired()
+    }
+
+    private val sleepListeners = mutableListOf<SleepTimerListener>()
+
+    fun addSleepTimerListener(listener: SleepTimerListener) {
+        synchronized(sleepListeners) { sleepListeners.add(listener) }
+    }
+
+    fun removeSleepTimerListener(listener: SleepTimerListener) {
+        synchronized(sleepListeners) { sleepListeners.remove(listener) }
+    }
+
+    private fun forEachSleepListener(block: (SleepTimerListener) -> Unit) {
+        val copy = synchronized(sleepListeners) { sleepListeners.toList() }
+        copy.forEach {
+            try {
+                block(it)
+            } catch (t: Throwable) {
+                Log.e(TAG, "Sleep listener threw", t)
+            }
+        }
+    }
+
+    /**
+     * Arms the timer for [durationMs] from now, replacing any existing
+     * one. A non-positive duration cancels instead.
+     */
+    fun setSleepTimer(durationMs: Long) = onMain {
+        mainHandler.removeCallbacks(sleepRunnable)
+
+        if (durationMs <= 0) {
+            sleepDeadlineAt = null
+            Log.i(TAG, "Sleep timer cancelled")
+            forEachSleepListener { it.onSleepTimerChanged(null, 0) }
+            return@onMain
+        }
+
+        val deadline = System.currentTimeMillis() + durationMs
+        sleepDeadlineAt = deadline
+        mainHandler.postDelayed(sleepRunnable, durationMs)
+        Log.i(TAG, "Sleep timer armed for ${durationMs}ms")
+        forEachSleepListener { it.onSleepTimerChanged(deadline, durationMs) }
+    }
+
+    fun cancelSleepTimer() = setSleepTimer(0)
+
+    /** Milliseconds left, or 0 when no timer is armed. */
+    fun sleepRemainingMs(): Long = onMainSync(0L) {
+        val deadline = sleepDeadlineAt ?: return@onMainSync 0L
+        (deadline - System.currentTimeMillis()).coerceAtLeast(0)
+    }
+
+    fun sleepDeadlineAtMs(): Long? = onMainSync(null) { sleepDeadlineAt }
+
+    /**
+     * The timer elapsed: pause the REAL player.
+     *
+     * Pause rather than stop, so the user reopens the app exactly where
+     * they fell asleep. Pausing the shared player is enough for every
+     * surface to follow — MediaSession publishes the new state to the
+     * notification and lock screen on its own, and the snapshot below
+     * carries it to Pinia. Nothing is faked at any layer.
+     */
+    private fun onSleepTimerExpired() {
+        sleepDeadlineAt = null
+        Log.i(TAG, "Sleep timer expired — pausing playback")
+        try {
+            player?.pause()
+        } catch (t: Throwable) {
+            Log.e(TAG, "Sleep timer could not pause the player", t)
+        }
+        forEachSleepListener {
+            it.onSleepTimerChanged(null, 0)
+            it.onSleepTimerExpired()
+        }
+        emitSnapshot()
+    }
 }

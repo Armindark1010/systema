@@ -62,6 +62,13 @@ export interface PlayerSnapshot {
   shuffle: boolean
   repeatMode: NativeRepeatMode
   currentTrackId: string | null
+  /**
+   * True when playback is paused because Media3 lost audio focus — a
+   * phone call, a navigation prompt, another music app — rather than
+   * because the user pressed pause. Media3 handles the focus itself;
+   * this only lets the UI tell the two apart.
+   */
+  interrupted?: boolean
 }
 
 export interface PlayerErrorEvent {
@@ -130,6 +137,20 @@ export interface NotificationPermissionEvent {
   required: boolean
 }
 
+/**
+ * Sleep-timer state, as reported by the native timer.
+ *
+ * `deadlineAt` is a wall-clock epoch in milliseconds. The countdown is
+ * derived from it rather than decremented locally, so a WebView that
+ * was frozen while the phone slept catches up instead of showing time
+ * that never actually elapsed.
+ */
+export interface SleepTimerState {
+  active: boolean
+  deadlineAt: number | null
+  remainingMs: number
+}
+
 export interface PlayerPlugin {
   play(options?: { track?: NativePlayerTrack }): Promise<void>
   pause(): Promise<void>
@@ -158,6 +179,15 @@ export interface PlayerPlugin {
   setRepeatMode(options: { mode: NativeRepeatMode }): Promise<void>
   setVolume(options: { volume: number }): Promise<void>
 
+  /**
+   * Sleep timer. Lives natively, beside the player it must pause, so
+   * it keeps running while the app is backgrounded and the WebView is
+   * frozen. A duration of 0 or less cancels.
+   */
+  setSleepTimer(options: { durationMs: number }): Promise<SleepTimerState>
+  cancelSleepTimer(): Promise<SleepTimerState>
+  getSleepTimer(): Promise<SleepTimerState>
+
   /** Media-notification visibility only; never gates playback. */
   getNotificationPermission(): Promise<NotificationPermissionState>
   requestNotificationPermission(): Promise<NotificationPermissionState>
@@ -170,6 +200,8 @@ export interface PlayerPlugin {
   addListener(eventName: 'queueChanged', handler: (event: QueueChangedEvent) => void): Promise<PluginListenerHandle>
   addListener(eventName: 'playerError', handler: (event: PlayerErrorEvent) => void): Promise<PluginListenerHandle>
   addListener(eventName: 'notificationPermissionChanged', handler: (event: NotificationPermissionEvent) => void): Promise<PluginListenerHandle>
+  addListener(eventName: 'sleepTimerChanged', handler: (event: SleepTimerState) => void): Promise<PluginListenerHandle>
+  addListener(eventName: 'sleepTimerExpired', handler: () => void): Promise<PluginListenerHandle>
   removeAllListeners(): Promise<void>
 }
 

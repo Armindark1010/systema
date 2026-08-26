@@ -59,6 +59,8 @@ class PlayerPlugin : Plugin() {
         private const val EVENT_QUEUE = "queueChanged"
         private const val EVENT_ERROR = "playerError"
         private const val EVENT_NOTIFICATION_PERMISSION = "notificationPermissionChanged"
+        private const val EVENT_SLEEP_TIMER = "sleepTimerChanged"
+        private const val EVENT_SLEEP_EXPIRED = "sleepTimerExpired"
     }
 
     private val engine: PlayerEngine by lazy { PlayerEngine.get(context) }
@@ -115,9 +117,31 @@ class PlayerPlugin : Plugin() {
         }
     }
 
+    /**
+     * Sleep-timer events. Separate from the playback listener because
+     * the timer is not playback state: it has its own lifecycle and the
+     * UI subscribes to it independently.
+     */
+    private val sleepListener = object : PlayerEngine.SleepTimerListener {
+        override fun onSleepTimerChanged(deadlineAt: Long?, remainingMs: Long) {
+            notifyListeners(
+                EVENT_SLEEP_TIMER,
+                JSObject()
+                    .put("active", deadlineAt != null)
+                    .putNullable("deadlineAt", deadlineAt)
+                    .put("remainingMs", remainingMs),
+            )
+        }
+
+        override fun onSleepTimerExpired() {
+            notifyListeners(EVENT_SLEEP_EXPIRED, JSObject())
+        }
+    }
+
     override fun load() {
         super.load()
         engine.addListener(engineListener)
+        engine.addSleepTimerListener(sleepListener)
 
         // Tell the WebView where the notification permission stands as
         // soon as the bridge exists. MainActivity requests it natively
@@ -142,8 +166,73 @@ class PlayerPlugin : Plugin() {
         // Detach only. The engine is process-scoped and deliberately
         // outlives the Activity so playback survives a configuration
         // change; releasing it here would kill audio on every rotation.
+        //
+        // Detaching BOTH listeners matters: Capacitor builds a fresh
+        // plugin instance on Activity recreation, so a listener left
+        // behind would keep receiving events and the WebView would see
+        // every update twice.
         engine.removeListener(engineListener)
+        engine.removeSleepTimerListener(sleepListener)
         super.handleOnDestroy()
+    }
+
+    // ---------------------------------------------------------------
+    // Sleep timer
+    // ---------------------------------------------------------------
+
+    /**
+     * Arms the sleep timer. `durationMs` <= 0 cancels it.
+     *
+     * The timer lives in the engine, next to the player it has to
+     * pause, so it keeps running while the WebView is frozen.
+     */
+    @PluginMethod
+    fun setSleepTimer(call: PluginCall) {
+        val durationMs = call.getLong("durationMs")
+        if (durationMs == null) {
+            rejectInvalid(call, "durationMs is required.")
+            return
+        }
+        try {
+            engine.setSleepTimer(durationMs)
+            call.resolve(sleepStateJs())
+        } catch (t: Throwable) {
+            rejectUnknown(call, "The sleep timer could not be set.", t)
+        }
+    }
+
+    @PluginMethod
+    fun cancelSleepTimer(call: PluginCall) {
+        try {
+            engine.cancelSleepTimer()
+            call.resolve(sleepStateJs())
+        } catch (t: Throwable) {
+            rejectUnknown(call, "The sleep timer could not be cancelled.", t)
+        }
+    }
+
+    /**
+     * Authoritative remaining time.
+     *
+     * The UI renders its countdown from this rather than from its own
+     * decrementing counter, so a frozen WebView catches up on resume
+     * instead of showing time that never elapsed.
+     */
+    @PluginMethod
+    fun getSleepTimer(call: PluginCall) {
+        try {
+            call.resolve(sleepStateJs())
+        } catch (t: Throwable) {
+            rejectUnknown(call, "The sleep timer state could not be read.", t)
+        }
+    }
+
+    private fun sleepStateJs(): JSObject {
+        val deadline = engine.sleepDeadlineAtMs()
+        return JSObject()
+            .put("active", deadline != null)
+            .putNullable("deadlineAt", deadline)
+            .put("remainingMs", engine.sleepRemainingMs())
     }
 
     // ---------------------------------------------------------------
@@ -479,6 +568,7 @@ class PlayerPlugin : Plugin() {
         .put("shuffle", shuffle)
         .put("repeatMode", repeatMode.lowercase)
         .putNullable("currentTrackId", currentTrackId)
+        .put("interrupted", interrupted)
 
     private fun JSObject.putNullable(key: String, value: Any?): JSObject {
         // JSONObject.NULL, not JSObject.NULL: Kotlin does not inherit

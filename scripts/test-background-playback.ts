@@ -198,8 +198,24 @@ group('7. No polling, timers, wake locks or manual notifications')
   const both = svc + engine
 
   check('no WakeLock usage', !both.includes('WakeLock') && !both.includes('acquire('))
+  // Guards against POLLING primitives specifically. Matched loosely on
+  // "Timer(" this used to flag the sleep timer's own setSleepTimer()
+  // call, which is a single scheduled message rather than a loop, so
+  // the java.util.Timer type is named exactly.
   check('no scheduled executor / timer loops',
-    !both.includes('ScheduledExecutor') && !both.includes('Timer('))
+    !both.includes('ScheduledExecutor')
+    && !both.includes('java.util.Timer')
+    && !/\bTimer\(\)/.test(both)
+    && !both.includes('fixedRateTimer'))
+  // The sleep timer is allowed exactly one handler message, and must
+  // never tick: a per-second countdown in the engine would wake the
+  // CPU for nothing (the UI derives its countdown from the deadline).
+  const expiryBody = engine.slice(engine.indexOf('private fun onSleepTimerExpired'))
+  check('sleep timer schedules once, does not tick',
+    engine.includes('postDelayed(sleepRunnable')
+    // The expiry handler must not re-arm itself; that would turn a
+    // one-shot deadline into a repeating wake-up.
+    && !expiryBody.includes('postDelayed'))
   check('no manual NotificationCompat building', !both.includes('NotificationCompat.Builder'))
   check('no manual notification channel creation', !both.includes('NotificationChannel('))
   check('no startForeground call (Media3 owns it)', !svc.includes('startForeground('))

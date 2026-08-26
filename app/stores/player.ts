@@ -136,6 +136,15 @@ export const usePlayerStore = defineStore('player', () => {
   const buffering = ref(false)
   /** Last structured playback failure, or null. */
   const playerError = ref<{ code: string; message: string; trackId: string | null } | null>(null)
+
+  /**
+   * True while playback is paused by an audio-focus loss (a call, a
+   * navigation prompt, another music app) rather than by the user.
+   * Media3 owns the focus behaviour; this is the UI-facing mirror of
+   * it, so a surface can say "paused by another app" instead of
+   * implying the user did it. Cleared as soon as playback resumes.
+   */
+  const interrupted = ref(false)
   // `currentIndex` is declared with the queue model above: there is
   // exactly one index, shared by the UI and the native mirror.
 
@@ -397,13 +406,29 @@ export const usePlayerStore = defineStore('player', () => {
     }
   }
 
+  /**
+   * Seeks to an absolute position, in seconds (milliseconds are
+   * tolerated for backwards compatibility).
+   *
+   * The upper clamp only applies when the duration is actually known.
+   * Clamping against a zero/unknown duration used to force every such
+   * seek to 0:00 — which is what made seeking immediately after a
+   * track change, or before the decoder had reported a duration, jump
+   * back to the start. When the duration is unknown the request is
+   * passed through and the native engine (or the audio element)
+   * resolves it once the timeline lands.
+   */
   function seek(timeInSecondsOrMs: number) {
+    if (!Number.isFinite(timeInSecondsOrMs)) return
+
     const dur = duration.value || (currentTrack.value?.duration ?? 0)
     // If the value is in milliseconds (greater than duration when duration > 0)
     const seconds = dur > 0 && timeInSecondsOrMs > dur && timeInSecondsOrMs > 1000
       ? timeInSecondsOrMs / 1000
       : timeInSecondsOrMs
-    currentTime.value = Math.max(0, Math.min(seconds, dur))
+
+    const floored = Math.max(0, seconds)
+    currentTime.value = dur > 0 ? Math.min(floored, dur) : floored
   }
 
   function seekForward(seconds = 10) {
@@ -414,9 +439,16 @@ export const usePlayerStore = defineStore('player', () => {
     seek(currentTime.value - seconds)
   }
 
+  /**
+   * Seeks by percentage of the track. A no-op while the duration is
+   * unknown: without one, a percentage has nothing to resolve against
+   * and would seek to 0.
+   */
   function seekToPct(pct: number) {
+    if (!Number.isFinite(pct)) return
     const dur = duration.value || (currentTrack.value?.duration ?? 0)
-    seek((pct / 100) * dur)
+    if (dur <= 0) return
+    seek((Math.max(0, Math.min(100, pct)) / 100) * dur)
   }
 
   // ---- Queue Operations --------------------------------------
@@ -694,6 +726,7 @@ export const usePlayerStore = defineStore('player', () => {
     isNativePlayback,
     buffering,
     playerError,
+    interrupted,
     currentIndex,
     fullPlayerOpen,
     queueOpen,

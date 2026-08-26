@@ -18,6 +18,7 @@
 import { usePlayerStore } from '~/stores/player'
 import { useAudioEngine } from '~/composables/useAudioEngine'
 import { useNativePlayer } from '~/composables/useNativePlayer'
+import { usePlaybackRestore } from '~/composables/usePlaybackRestore'
 
 let engineInitialized = false
 let playbackTimer: ReturnType<typeof setInterval> | null = null
@@ -83,8 +84,28 @@ export function usePlayerEngine() {
 
     player.isPlayerReady = true
 
+    // PLAYBACK RESTORATION (Phase 4).
+    //
+    // Persistence starts before anything else so a crash during startup
+    // still leaves the previous session intact. The restore itself is
+    // attempted after the engine has been asked what it is doing,
+    // because a session that is genuinely still playing (the Activity
+    // was recreated while audio continued) must win over anything on
+    // disk.
+    const restore = usePlaybackRestore()
+    restore.install()
+
     const nativeReady = await useNativePlayer().init()
-    if (nativeReady) return
+
+    if (nativeReady) {
+      // Only restore when the engine came back with nothing. If Media3
+      // is already playing, reconcileWithNative() has adopted the live
+      // state and overwriting it would be wrong.
+      if (!player.currentTrack) restore.restore()
+      return
+    }
+
+    restore.restore()
 
     // Synchronize track changes with audio synth
     watch(

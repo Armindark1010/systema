@@ -26,6 +26,7 @@ import {
   type DurationEvent,
   type NotificationPermissionState,
   type NotificationPermissionEvent,
+  type SleepTimerState,
 } from './playerPlugin'
 
 export type {
@@ -36,6 +37,7 @@ export type {
   QueueChangedEvent,
   NotificationPermissionState,
   NotificationPermissionEvent,
+  SleepTimerState,
 } from './playerPlugin'
 
 /** Structured playback failure, shaped like LibraryError. */
@@ -201,6 +203,21 @@ export const getPositionNative = () =>
 export const getStateNative = (): Promise<PlayerSnapshot | null> =>
   guarded(() => NativePlayer.getState(), 'getState')
 
+// ---- Sleep timer ---------------------------------------------
+//
+// Thin passthrough: the timer itself is native, because only the
+// native side keeps running when the WebView is frozen. In the browser
+// these resolve to null and useSleepTimer falls back to its own timer.
+
+export const setSleepTimerNative = (durationMs: number): Promise<SleepTimerState | null> =>
+  guarded(() => NativePlayer.setSleepTimer({ durationMs }), 'setSleepTimer')
+
+export const cancelSleepTimerNative = (): Promise<SleepTimerState | null> =>
+  guarded(() => NativePlayer.cancelSleepTimer(), 'cancelSleepTimer')
+
+export const getSleepTimerNative = (): Promise<SleepTimerState | null> =>
+  guarded(() => NativePlayer.getSleepTimer(), 'getSleepTimer')
+
 /** The engine's real queue: track ids in playback order + its index. */
 export const getQueueNative = (): Promise<QueueChangedEvent | null> =>
   guarded(() => NativePlayer.getQueue(), 'getQueue')
@@ -215,6 +232,8 @@ export interface NativePlayerHandlers {
   onQueueChanged?: (event: QueueChangedEvent) => void
   onError?: (error: PlayerError) => void
   onNotificationPermission?: (event: NotificationPermissionEvent) => void
+  onSleepTimerChanged?: (event: SleepTimerState) => void
+  onSleepTimerExpired?: () => void
 }
 
 /**
@@ -248,6 +267,12 @@ export function addPlayerListeners(handlers: NativePlayerHandlers): () => void {
         handlers.onNotificationPermission,
       ),
     )
+  }
+  if (handlers.onSleepTimerChanged) {
+    pending.push(NativePlayer.addListener('sleepTimerChanged', handlers.onSleepTimerChanged))
+  }
+  if (handlers.onSleepTimerExpired) {
+    pending.push(NativePlayer.addListener('sleepTimerExpired', handlers.onSleepTimerExpired))
   }
   if (handlers.onError) {
     const onError = handlers.onError
