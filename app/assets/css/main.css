@@ -771,19 +771,55 @@ html[data-density='comfortable'] {
   color: var(--sys-primary);
 }
 
+/*
+  Active indicator.
+
+  Replaces the old 1px hairline on the top edge, which was easy to miss
+  on a phone. The active item now gets a filled pill behind its icon and
+  label, which reads at a glance and matches how the rest of SYSTEMA
+  marks selection.
+
+  Inset from the cell so the visible chip is smaller than the touch
+  target: the tap area stays the full grid cell.
+*/
 .mobile-bottom-nav__indicator {
   position: absolute;
-  top: 0;
-  left: 50%;
-  width: 1rem;
-  height: 1px;
-  background: var(--sys-primary);
+  top: 0.3125rem;
+  right: 0.375rem;
+  bottom: 0.3125rem;
+  left: 0.375rem;
+  border-radius: var(--sys-mobile-dock-radius);
+  background: var(--sys-primary-muted);
   opacity: 0;
-  transform: translateX(-50%);
+  transform: scale(0.9);
+  transition:
+    opacity 180ms var(--sys-ease),
+    transform 180ms var(--sys-ease);
 }
 
 .mobile-bottom-nav__item.is-active .mobile-bottom-nav__indicator {
   opacity: 1;
+  transform: scale(1);
+}
+
+/* Keep icon and label above the pill. */
+.mobile-bottom-nav__icon,
+.mobile-bottom-nav__label {
+  position: relative;
+  z-index: 1;
+}
+
+/* Small lift on the active icon so the state reads even in mono themes. */
+.mobile-bottom-nav__item.is-active .mobile-bottom-nav__icon {
+  transform: translateY(-1px);
+  transition: transform 180ms var(--sys-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-bottom-nav__indicator,
+  .mobile-bottom-nav__item.is-active .mobile-bottom-nav__icon {
+    transition: none;
+  }
 }
 
 .mobile-bottom-nav__icon {

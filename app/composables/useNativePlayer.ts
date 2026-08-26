@@ -190,7 +190,19 @@ export function useNativePlayer() {
   function applyTrackChange(trackId: string | null) {
     if (!trackId) return
     nativeTrackId = trackId
-    if (player.currentTrack?.id === trackId) return
+
+    if (player.currentTrack?.id === trackId) {
+      // The store already moved to this track optimistically when the
+      // user tapped it, so there is no UI work to do. Recents must
+      // STILL be recorded though: this native event is the confirmation
+      // that playback actually started, and it is the only signal we
+      // get. Returning here without recording is why recents stayed
+      // empty on device — the store deliberately skips recording while
+      // native playback owns the session, and this path skipped it too,
+      // so nothing recorded it at all.
+      noteNativePlayback(trackId)
+      return
+    }
 
     // Media3's current MediaItem carries the SYSTEMA track id as its
     // mediaId, so resolution is by stable id — never by index.

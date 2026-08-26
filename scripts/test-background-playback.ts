@@ -466,5 +466,72 @@ group('20. Notification channel')
 }
 
 // ------------------------------------------------------------
+group('21. Recents are recorded on device (regression)')
+// ------------------------------------------------------------
+{
+  const c = read(NATIVE_COMPOSABLE)
+
+  // THE BUG: the store moves currentTrack optimistically when the user
+  // taps a track, so by the time Media3 confirmed playback the ids
+  // already matched and applyTrackChange returned early — before
+  // noteNativePlayback(). The store itself deliberately does not record
+  // while native owns playback, so nothing recorded at all and recents
+  // stayed permanently empty on device.
+  check('early-return path still records recents',
+    /if \(player\.currentTrack\?\.id === trackId\) \{[\s\S]*?noteNativePlayback\(trackId\)[\s\S]*?return[\s\S]*?\}/.test(c))
+  check('recording is guarded against repeat events',
+    c.includes('if (recordedTrackId === trackId) return'))
+  check('store still skips recording during native playback',
+    read('app/stores/player.ts').includes('if (isNativePlayback.value) return'))
+
+  // Recents must resolve device tracks, which the mock catalog cannot.
+  const h = read('app/composables/usePlaybackHistory.ts')
+  check('device tracks can be registered', h.includes('export function registerTracksForHistory'))
+  check('library store registers loaded pages',
+    read('app/stores/library.ts').includes('registerTracksForHistory(page.tracks)'))
+  check('recordPlayed accepts the track so unknown ids can be learned',
+    /export function recordPlayed\(trackId: string, track\?: Track\)/.test(h))
+  check('mock seed dropped on native', h.includes('if (isNativeLibraryAvailable()) {'))
+}
+
+// ------------------------------------------------------------
+group('22. Safe-area inset applied app-wide')
+// ------------------------------------------------------------
+{
+  const appVue = read('app/app.vue')
+  check('root wrapper exists', appVue.includes('class="app-safe-top"'))
+  check('uses the safe-area inset', appVue.includes('env(safe-area-inset-top'))
+  check('padding, not margin (no collapse)', /\.app-safe-top \{[\s\S]*?padding-top:/.test(appVue))
+
+  // Must NOT be duplicated on the header, or notched devices get
+  // the inset twice.
+  const header = read('app/components/MobileHeader.vue')
+  check('header no longer applies its own inset',
+    !/\.mobile-header \{[\s\S]*?padding-top:/.test(header))
+  check('greeting still commented out, not restored',
+    !/\{\{ greeting \}\}/.test(header.replace(/<!--[\s\S]*?-->/g, '')))
+}
+
+// ------------------------------------------------------------
+group('23. Bottom navigation')
+// ------------------------------------------------------------
+{
+  const nav = read('app/components/MobileBottomNavigation.vue')
+  check('playlists replaces search', nav.includes("to: '/playlists'") && !nav.includes("to: '/search'"))
+  check('playlists active state is prefix-matched',
+    nav.includes("route.path.startsWith('/playlists')"))
+
+  const css = read('app/assets/css/main.css')
+  check('active indicator is a filled pill, not a hairline',
+    /\.mobile-bottom-nav__indicator \{[\s\S]*?background: var\(--sys-primary-muted\)/.test(css))
+  check('indicator is inset from the touch target',
+    /\.mobile-bottom-nav__indicator \{[\s\S]*?top: 0\.3125rem/.test(css))
+  check('icon and label sit above the pill',
+    /\.mobile-bottom-nav__icon,\s*\n\.mobile-bottom-nav__label \{[\s\S]*?z-index: 1/.test(css))
+  check('reduced-motion respected',
+    /@media \(prefers-reduced-motion: reduce\)[\s\S]*?mobile-bottom-nav__indicator/.test(css))
+}
+
+// ------------------------------------------------------------
 console.log(`\n\x1b[1mResults:\x1b[0m ${passed} passed, ${failed} failed\n`)
 if (failed > 0) process.exit(1)

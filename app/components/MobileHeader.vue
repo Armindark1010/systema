@@ -39,11 +39,11 @@
 
 <template>
   <!--
-    `mobile-header` adds the status-bar / camera cutout inset on top of
-    the existing padding, so the panel clears the notch on devices with
-    a display cutout and is unchanged on those without one.
+    The camera / status-bar inset is applied once at the app root
+    (app.vue, .app-safe-top) so it covers every page, including the
+    ones that hide this header. Nothing cutout-related belongs here.
   -->
-  <header class="mobile-header lg:hidden sticky top-0 z-30 bg-base px-4 pt-3 pb-3">
+  <header class="lg:hidden sticky top-0 z-30 bg-base px-4 pt-3 pb-3">
     <div class="sys-panel rounded-3 shadow-1 px-5 py-5">
       <div class="flex items-center justify-between">
         <BrandMark compact />
@@ -72,16 +72,3 @@
     </div>
   </header>
 </template>
-
-<style scoped>
-/*
-  Push the header below the status bar / camera cutout.
-
-  --sys-safe-top resolves to env(safe-area-inset-top), which is 0 in the
-  browser and on notchless devices, so this is additive to the existing
-  pt-3 rather than a replacement for it.
-*/
-.mobile-header {
-  padding-top: calc(0.75rem + var(--sys-safe-top));
-}
-</style>
