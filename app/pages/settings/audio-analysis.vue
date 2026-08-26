@@ -33,6 +33,24 @@ useHead({ title: 'Audio Analysis (debug)' })
 const library = useLibraryStore()
 
 const available = isAudioAnalysisAvailable()
+
+// ---- Library access -------------------------------------------
+// This page has to be self-sufficient. Someone arriving here to test
+// the DSP should not have to go to Library settings, scan, come back,
+// and hope the first page happens to be loaded. Permission, scanning
+// and loading all happen right here.
+
+const isNativeLibrary = computed(() => library.isNativeLibrary)
+const isScanning = computed(() => library.isScanning)
+const scanLabel = computed(() => library.scanLabel)
+const scanPercent = computed(() => library.scanPercent)
+const permissionGranted = computed(() => library.permissionStatus === 'granted')
+const libraryLoading = computed(() => library.isLoading)
+
+function onScan() {
+  if (isScanning.value) void library.cancelLibraryScan()
+  else void library.scanLibrary()
+}
 const selectedTrackId = ref<string | null>(null)
 const analysis = ref<AudioAnalysis | null>(null)
 const summary = ref<AudioAnalysisSummary | null>(null)
@@ -42,6 +60,9 @@ const errorCode = ref<string | null>(null)
 
 /** First page of the library is enough for a debug picker. */
 const tracks = computed(() => library.tracks.slice(0, 50))
+
+/** Total rows the native index knows about, not just the loaded page. */
+const totalInLibrary = computed(() => library.nativeTotal || library.tracks.length)
 
 const selectedTrack = computed(() =>
   tracks.value.find(t => t.id === selectedTrackId.value) ?? null)
@@ -113,7 +134,31 @@ const rows = computed(() => {
   ]
 })
 
-onMounted(refreshSummary)
+onMounted(async () => {
+  // Pull the first page if nothing is loaded yet, so the picker below
+  // is populated even when this page is the first thing opened.
+  if (library.isNativeLibrary && !library.tracks.length && !library.isLoading) {
+    try {
+      await library.loadFirstPage()
+    } catch {
+      // Non-fatal: the empty-state guidance below covers it.
+    }
+  }
+  await refreshSummary()
+})
+
+// After a scan finishes, reload the picker so newly indexed tracks
+// appear without the user having to leave and come back.
+watch(isScanning, async (scanning, wasScanning) => {
+  if (wasScanning && !scanning) {
+    try {
+      await library.loadFirstPage()
+    } catch {
+      // Ignored: the list simply stays as it was.
+    }
+    await refreshSummary()
+  }
+})
 </script>
 
 <template>
@@ -167,6 +212,37 @@ onMounted(refreshSummary)
       label="TRACK"
       description="SELECT AND ANALYSE"
     >
+      <!-- Step 1: get music into the index. Doing this here means the
+           page works on its own, without a detour to Library settings. -->
+      <div class="border border-line bg-surface px-4 py-4 mb-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p class="label text-fg-muted">STEP 1 — SCAN DEVICE</p>
+            <p class="mt-1 text-small text-fg-muted leading-relaxed">
+              <template v-if="isScanning">{{ scanLabel }}</template>
+              <template v-else-if="!permissionGranted">
+                Audio permission is required to read your music.
+              </template>
+              <template v-else-if="totalInLibrary">
+                {{ totalInLibrary }} track(s) indexed.
+              </template>
+              <template v-else>No tracks indexed yet.</template>
+            </p>
+          </div>
+          <button
+            type="button"
+            class="border border-line px-4 py-2 label text-fg hover:bg-surface-hover transition-colors"
+            @click="onScan"
+          >
+            {{ isScanning ? 'CANCEL' : 'SCAN' }}
+          </button>
+        </div>
+        <div v-if="isScanning && scanPercent !== null" class="mt-3 h-1 bg-line">
+          <div class="h-full bg-fg transition-all" :style="{ width: `${scanPercent}%` }" />
+        </div>
+      </div>
+
+      <p class="label text-fg-muted mb-2">STEP 2 — PICK A TRACK</p>
       <div class="border border-line divide-y divide-line max-h-[320px] overflow-y-auto">
         <button
           v-for="track in tracks"
@@ -179,12 +255,17 @@ onMounted(refreshSummary)
           <span class="block text-[12px] font-bold text-fg truncate">{{ track.title }}</span>
           <span class="block text-small text-fg-muted truncate">{{ track.artist ?? 'Unknown artist' }}</span>
         </button>
-        <p v-if="!tracks.length" class="px-4 py-6 text-small text-fg-muted">
-          The library index is empty. Scan the device library first.
+        <p v-if="libraryLoading && !tracks.length" class="px-4 py-6 text-small text-fg-muted">
+          Loading the library index…
+        </p>
+        <p v-else-if="!tracks.length" class="px-4 py-6 text-small text-fg-muted leading-relaxed">
+          No tracks indexed yet. Run SCAN above, grant the audio permission
+          when Android asks, and this list will fill in.
         </p>
       </div>
 
-      <div v-if="selectedTrack" class="mt-4 flex flex-wrap gap-3">
+      <p v-if="selectedTrack" class="label text-fg-muted mt-6 mb-2">STEP 3 — ANALYSE</p>
+      <div v-if="selectedTrack" class="flex flex-wrap gap-3">
         <button
           type="button"
           class="border border-line px-4 py-2 label text-fg hover:bg-surface-hover transition-colors disabled:opacity-50"

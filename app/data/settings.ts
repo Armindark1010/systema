@@ -72,6 +72,15 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     to: '/settings/about',
     icon: 'lucide:info',
   },
+  {
+    id: 'audio-analysis',
+    index: '08',
+    label: 'AUDIO DSP',
+    kicker: 'Developer Diagnostic',
+    description: 'On-device signal analysis: BPM, loudness, spectrum',
+    to: '/settings/audio-analysis',
+    icon: 'lucide:activity',
+  },
 ]
 
 export interface SettingsSearchEntry {

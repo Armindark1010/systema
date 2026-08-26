@@ -112,6 +112,10 @@ export type SettingsCategoryId =
   | 'gestures'
   | 'data'
   | 'about'
+  // Phase 13 developer diagnostic. Listed last, and labelled as a
+  // developer tool, so it reads as an instrument rather than a
+  // feature the user is expected to operate.
+  | 'audio-analysis'
 
 export interface SettingsCategory {
   id: SettingsCategoryId
