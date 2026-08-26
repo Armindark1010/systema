@@ -493,10 +493,18 @@ for (const file of labFiles) {
   }
 }
 
-// No new runtime dependency was smuggled in.
+// No new runtime dependency was smuggled into the WEB layer.
+//
+// UPDATED IN PHASE 15: the Android ONNX Runtime AAR is now a
+// deliberate, reviewed dependency, so the old "no onnxruntime in
+// Gradle" assertion has been superseded rather than silently dropped.
+// What still must hold — and is what the rule was protecting — is
+// that ONNX stays on the NATIVE side. A JavaScript ONNX runtime would
+// mean models running inside the WebView, bypassing the Kotlin
+// boundary entirely, and that remains forbidden.
 const pkg = JSON.parse(read('package.json'))
 const deps = { ...pkg.dependencies, ...pkg.devDependencies }
-ok('onnxruntime was NOT added as a dependency in Phase 14',
+ok('no JavaScript ONNX runtime is a dependency (inference stays native)',
   !Object.keys(deps).some(d => /onnxruntime/i.test(d)))
 ok('no tensorflow dependency was added',
   !Object.keys(deps).some(d => /tensorflow|tfjs/i.test(d)))
@@ -504,8 +512,17 @@ ok('no tensorflow dependency was added',
 const gradle = existsSync(resolve(root, 'android/app/build.gradle'))
   ? read('android/app/build.gradle')
   : ''
-ok('no onnxruntime AAR was added to Gradle',
-  !/onnxruntime/i.test(gradle))
+// Phase 15 adds exactly one ML runtime, on purpose. Assert it is the
+// CPU-only Android package and specifically NOT the Qualcomm QNN
+// variant, which cannot work on the MediaTek target device and would
+// only add an inert 6.5 MB native dependency.
+const onnxDeps = gradle.split('\n').filter(l => /onnxruntime/i.test(l) && /implementation/.test(l))
+ok('at most one ONNX Runtime artifact is declared',
+  onnxDeps.length <= 1, onnxDeps.join(' | '))
+ok('the Qualcomm-only QNN variant is not used',
+  !/onnxruntime-android-qnn/.test(gradle))
+ok('no tensorflow AAR was added to Gradle',
+  !/tensorflow|tflite/i.test(gradle))
 
 // ------------------------------------------------------------
 console.log('\n\x1b[1m12. Production selection is never automatic (§28)\x1b[0m')

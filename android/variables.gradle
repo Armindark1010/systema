@@ -31,4 +31,17 @@ ext {
     // 1.10.1 is the newest stable line built against Kotlin 2.1.x.
     // 1.11.0 moved to Kotlin 2.2.0 and would force a toolchain bump.
     media3Version = '1.10.1'
+
+    // ---- SYSTEMA ONNX inference runtime (Phase 15) ----
+    // The full onnxruntime-android package, not onnxruntime-mobile:
+    // the mobile variant ships a reduced operator set, and a candidate
+    // model failing to load because an op was stripped out would be
+    // indistinguishable from a genuine integration bug. Size can be
+    // traded away later, once a model is actually chosen.
+    //
+    // NOT onnxruntime-android-qnn: QNN is Qualcomm's execution
+    // provider and the target device (Poco X7 Pro) is MediaTek
+    // Dimensity 8400-Ultra, so that artifact would add ~6.5 MB and a
+    // Qualcomm runtime dependency that can never activate here.
+    onnxRuntimeVersion = '1.27.0'
 }

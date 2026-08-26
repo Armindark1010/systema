@@ -12,8 +12,10 @@
     "open:android": "npx cap open android",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
-    "test": "npx tsx scripts/test-search.ts && npx tsx scripts/test-settings.ts && npx tsx scripts/test-music-library.ts && npx tsx scripts/test-library-pagination.ts && npx tsx scripts/test-native-player.ts && npx tsx scripts/test-player-sync.ts && npx tsx scripts/test-player-navigation.ts && npx tsx scripts/test-background-playback.ts && npx tsx scripts/test-playback-restore.ts && npx tsx scripts/test-restore-race.ts && npx tsx scripts/test-native-search.ts && npx tsx scripts/test-audio-experience.ts && npx tsx scripts/test-audio-analysis.ts && npx tsx scripts/test-analysis-persistence.ts && npx tsx scripts/test-analysis-no-autostart.ts && npx tsx scripts/test-ai-benchmark.ts && npx tsx scripts/test-ai-benchmark-safety.ts && bash scripts/run-dsp-tests.sh",
-    "test:dsp": "bash scripts/run-dsp-tests.sh"
+    "test": "npx tsx scripts/test-search.ts && npx tsx scripts/test-settings.ts && npx tsx scripts/test-music-library.ts && npx tsx scripts/test-library-pagination.ts && npx tsx scripts/test-native-player.ts && npx tsx scripts/test-player-sync.ts && npx tsx scripts/test-player-navigation.ts && npx tsx scripts/test-background-playback.ts && npx tsx scripts/test-playback-restore.ts && npx tsx scripts/test-restore-race.ts && npx tsx scripts/test-native-search.ts && npx tsx scripts/test-audio-experience.ts && npx tsx scripts/test-audio-analysis.ts && npx tsx scripts/test-analysis-persistence.ts && npx tsx scripts/test-analysis-no-autostart.ts && npx tsx scripts/test-ai-benchmark.ts && npx tsx scripts/test-ai-benchmark-safety.ts && npx tsx scripts/test-onnx-integration.ts && npx tsx scripts/test-inference-safety.ts && bash scripts/run-dsp-tests.sh && bash scripts/run-inference-tests.sh",
+    "test:dsp": "bash scripts/run-dsp-tests.sh",
+    "test:inference": "bash scripts/run-inference-tests.sh",
+    "gen:test-model": "python3 scripts/make-test-onnx-model.py"
   },
   "engines": {
     "node": ">=20.19.0"

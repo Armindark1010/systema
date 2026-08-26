@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.WebViewListener;
 import com.systema.music.analysis.AudioAnalysisPlugin;
+import com.systema.music.inference.InferencePlugin;
 import com.systema.music.library.MusicLibraryPlugin;
 import com.systema.music.player.PlayerPlugin;
 
@@ -62,6 +63,19 @@ public class MainActivity extends BridgeActivity {
             Log.e(TAG, "Failed to register AudioAnalysisPlugin", t);
         }
 
+        // Phase 15 ONNX inference, used only by the developer
+        // benchmark lab. If ONNX Runtime's native library is missing
+        // for this ABI the class still loads — availability is probed
+        // lazily inside the runtime — so registration failing here
+        // would indicate a genuine build problem, not a device
+        // limitation. Either way it must not affect playback.
+        Log.i(TAG, "Registering InferencePlugin");
+        try {
+            registerPlugin(InferencePlugin.class);
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to register InferencePlugin", t);
+        }
+
         super.onCreate(savedInstanceState);
 
         // Ask for POST_NOTIFICATIONS natively, right at startup.
@@ -91,6 +105,8 @@ public class MainActivity extends BridgeActivity {
                 + (getBridge().getPlugin("Player") != null));
             Log.i(TAG, "AudioAnalysis plugin registered with bridge: "
                 + (getBridge().getPlugin("AudioAnalysis") != null));
+            Log.i(TAG, "Inference plugin registered with bridge: "
+                + (getBridge().getPlugin("Inference") != null));
             if (!present) {
                 Log.e(
                     TAG,

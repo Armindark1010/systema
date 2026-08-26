@@ -149,6 +149,30 @@ const sustainedIterations = ref(20)
         </div>
       </section>
 
+      <!-- ---- ONNX runtime lab (Phase 15) ---------------- -->
+      <section class="border border-line bg-surface">
+        <div class="border-b border-line px-5 py-3">
+          <p class="label text-fg-muted">
+            ONNX RUNTIME
+          </p>
+        </div>
+        <div class="px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+          <p class="text-small text-fg-muted max-w-[64ch] leading-relaxed">
+            Choose a runtime and a model, then measure real ONNX inference on
+            this device. Ships with a deterministic 423-byte test model that
+            proves the runtime genuinely executes; real candidate models are
+            side-loaded, never committed. No production model has been chosen.
+          </p>
+          <button
+            type="button"
+            class="sys-btn-outline shrink-0"
+            @click="router.push('/dev/ai-benchmark/onnx')"
+          >
+            ONNX RUNTIME LAB →
+          </button>
+        </div>
+      </section>
+
       <!-- ---- Environment -------------------------------- -->
       <LabBanner
         v-if="lab.environmentWarning"

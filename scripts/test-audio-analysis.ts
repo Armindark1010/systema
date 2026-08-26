@@ -15,8 +15,8 @@
 // MediaStore, and every analysis entry point has to degrade quietly.
 // ============================================================
 
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { resolve, join } from 'node:path'
 
 let passed = 0
 let failed = 0
@@ -220,11 +220,51 @@ console.log('\nNo forbidden dependencies were introduced')
 // ============================================================
 
 const appGradle = read('android/app/build.gradle')
-for (const forbidden of ['onnxruntime', 'tensorflow', 'pytorch', 'clap', 'openai', 'huggingface']) {
+for (const forbidden of ['tensorflow', 'pytorch', 'clap', 'openai', 'huggingface']) {
   ok(`no ${forbidden} dependency`, !appGradle.toLowerCase().includes(forbidden))
 }
 ok('WorkManager is the only new Android dependency',
   appGradle.includes('androidx.work:work-runtime-ktx'))
+
+// UPDATED IN PHASE 15.
+//
+// This suite used to assert that no ONNX Runtime dependency existed
+// anywhere. Phase 15 adds it deliberately for the developer benchmark
+// lab, so the blanket rule is superseded. What this suite is really
+// protecting is narrower and still absolutely in force: the PHASE 13
+// ANALYSER MUST REMAIN PURE DSP. No ML runtime may leak into the code
+// that produces BPM, loudness and spectral features, because those
+// results are stored and relied upon, and swapping in a model would
+// silently change every one of them.
+//
+// So the check moves from the build file to the analysis package,
+// where it actually means something.
+/** Every .kt file under a package, recursively. */
+function walkKotlin(dir: string, out: string[] = []): string[] {
+  const abs = resolve(root, dir)
+  let entries: string[]
+  try {
+    entries = readdirSync(abs)
+  } catch {
+    return out
+  }
+  for (const e of entries) {
+    const p = join(dir, e)
+    if (statSync(resolve(root, p)).isDirectory()) walkKotlin(p, out)
+    else if (e.endsWith('.kt')) out.push(resolve(root, p))
+  }
+  return out
+}
+
+const analysisPackageFiles = walkKotlin('android/app/src/main/java/com/systema/music/analysis')
+for (const file of analysisPackageFiles) {
+  const src = readFileSync(file, 'utf8')
+  const name = file.split('/').pop()
+  ok(`${name} imports no ML runtime`,
+    !/ai\.onnxruntime|org\.tensorflow|org\.pytorch/.test(src))
+  ok(`${name} does not reach into the inference package`,
+    !/com\.systema\.music\.inference/.test(src))
+}
 
 const pkg = JSON.parse(read('package.json')) as {
   dependencies: Record<string, string>

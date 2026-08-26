@@ -71,6 +71,12 @@ dependencies {
     // is implemented in-project: no DSP framework, no ML runtime, no
     // native library is pulled in for it.
     implementation "androidx.work:work-runtime-ktx:$workVersion"
+    // ---- SYSTEMA ONNX inference runtime (Phase 15) ----
+    // Confined to com.systema.music.inference.OnnxInferenceRuntime.
+    // No other file in the project may import ai.onnxruntime.*, so the
+    // runtime can be swapped without touching the plugin, the
+    // TypeScript services or the UI. A unit test enforces that.
+    implementation "com.microsoft.onnxruntime:onnxruntime-android:$onnxRuntimeVersion"
 
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"

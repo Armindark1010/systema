@@ -16,3 +16,23 @@ android/app/src/main/assets/public/
 android/app/src/main/assets/capacitor.config.json
 *.keystore
 *.jks
+
+# ---- AI model weights (Phase 15) ----
+# Candidate models run from ~15 MB to ~620 MB. They are side-loaded per
+# device (adb push to Android/data/com.systema.music/files/models/),
+# never committed: git handles opaque binaries badly and the repo would
+# grow permanently with every candidate tried.
+#
+# The one exception is deliberately NOT ignored — the 423-byte
+# arithmetic test model at
+# android/app/src/main/assets/models/systema-test-model.onnx — because
+# it has no learned weights and the integration test needs it present.
+*.pt
+*.pth
+*.safetensors
+*.tflite
+*.ckpt
+*.h5
+*.pb
+android/app/src/main/assets/models/*.onnx
+!android/app/src/main/assets/models/systema-test-model.onnx
