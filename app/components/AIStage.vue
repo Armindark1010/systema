@@ -12,14 +12,14 @@ const route = useRoute()
 const settings = useSettingsStore()
 
 const tabs = [
-  { label: 'STUDIO', to: '/ai' },
+  { label: 'COMPANION', to: '/ai' },
+  { label: 'STUDIO', to: '/ai/studio' },
   { label: 'SEARCH', to: '/ai/search' },
   { label: 'GENERATE', to: '/ai/generate' },
   { label: 'INSIGHTS', to: '/ai/insights' },
 ]
 
 function isActive(to: string): boolean {
-  if (to === '/ai') return route.path === '/ai'
   return route.path === to
 }
 </script>

@@ -60,6 +60,8 @@ export const SETTINGS_STORAGE_KEY = 'systema:settings'
 export const LEGACY_THEME_KEY = 'systema:theme'
 export const PLAYLISTS_STORAGE_KEY = 'systema:playlists'
 export const FAVORITES_STORAGE_KEY = 'systema:favorites'
+/** AI companion conversations. Replaced later by the native AI database. */
+export const AI_CONVERSATIONS_STORAGE_KEY = 'systema:ai-conversations'
 
 const memory = new Map<string, string>()
 

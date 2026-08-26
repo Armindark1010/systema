@@ -83,9 +83,15 @@ export default defineConfig({
       'ai-secondary': 'var(--ai-secondary)',
       'ai-accent': 'var(--ai-accent)',
       'ai-cyan': 'var(--ai-cyan)',
+      'ai-elevated': 'var(--ai-surface-elevated)',
+      'ai-scrim': 'var(--ai-scrim)',
+      'ai-veil': 'var(--ai-veil)',
+      'ai-header': 'var(--ai-header)',
+      'ai-tint': 'var(--ai-tint)',
       'ai-line': 'var(--ai-border)',
       'ai-line-strong': 'var(--ai-border-strong)',
       'ai-glow': 'var(--ai-glow)',
+      'ai-glow-strong': 'var(--ai-glow-strong)',
     },
 
     // ----------------------------------------------------------
@@ -152,6 +158,8 @@ export default defineConfig({
       'ai-2': 'var(--ai-shadow-2)',
       'ai-glow': '0 0 28px var(--ai-glow)',
       'ai-glow-lg': '0 0 64px var(--ai-glow)',
+      'ai-glow-focus': '0 0 0 1px var(--ai-primary), 0 0 32px var(--ai-glow-strong)',
+      'ai-sheet': '0 -24px 64px -24px rgb(0 0 0 / 0.85)',
     },
 
     transitionDuration: {
@@ -224,6 +232,25 @@ export default defineConfig({
     'chip': 'inline-flex items-center gap-1.5 h-6 px-2 text-micro font-semibold uppercase tracking-[0.12em] border border-line text-fg-muted',
     'chip-active': 'chip border-primary text-primary bg-primary-muted',
     'ai-chip': 'inline-flex items-center gap-1.5 h-6 px-2 text-micro font-semibold uppercase tracking-[0.14em] border border-ai-line text-ai-fg-muted hover:(border-ai-primary text-ai-fg) t-col',
+
+    // --- AI COMPANION recipes -------------------------------------
+    // Shared vocabulary for the Intelligent Music Companion page so
+    // no component invents its own colours or spacing.
+    // press feedback — every companion control shares one gesture
+    'ai-press': 't-all active:scale-95',
+    'ai-companion-page': 'relative w-full min-h-[100dvh] bg-ai-base text-ai-fg overflow-x-hidden',
+    'ai-card': 'border border-ai-line bg-ai-surface',
+    'ai-card-elevated': 'border border-ai-line-strong bg-ai-muted',
+    'ai-hairline': 'border-b border-ai-line',
+    'ai-label': 'text-micro font-bold uppercase tracking-[0.16em] text-ai-fg-muted',
+    'ai-label-strong': 'text-micro font-bold uppercase tracking-[0.16em] text-ai-fg',
+    'ai-value': 'text-body font-semibold text-ai-fg',
+    'ai-meta': 'text-small text-ai-fg-muted',
+    // touch targets stay >= 44px on mobile
+    'ai-icon-btn': 'grid place-items-center w-11 h-11 shrink-0 border border-ai-line bg-ai-surface text-ai-fg-muted ai-press focus-ring-ai hover:(border-ai-line-strong bg-ai-hover text-ai-fg) disabled:(opacity-40 pointer-events-none)',
+    'ai-action-chip': 'inline-flex items-center justify-center gap-2 h-10 px-3 border border-ai-line bg-ai-surface text-micro font-bold uppercase tracking-[0.12em] text-ai-fg-muted ai-press focus-ring-ai hover:(border-ai-primary bg-ai-muted text-ai-fg) disabled:(opacity-40 pointer-events-none)',
+    'ai-send-btn': 'grid place-items-center w-11 h-11 shrink-0 bg-ai-primary text-white ai-press focus-ring-ai hover:bg-ai-secondary active:bg-ai-secondary disabled:(bg-ai-muted text-ai-fg-faint border border-ai-line pointer-events-none)',
+    'ai-sheet-panel': 'w-full max-w-[36rem] flex flex-col bg-ai-surface border-t border-ai-line-strong shadow-ai-sheet',
   },
 
   // ----------------------------------------------------------

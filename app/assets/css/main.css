@@ -221,11 +221,29 @@
   --ai-accent: #e879f9;
   --ai-cyan: #4cc3ff;
 
+  /* elevated companion surface — sheets, prompt, conversation cards */
+  --ai-surface-elevated: #221a3a;
+
   --ai-border: #262040;
   --ai-border-strong: #3b3263;
 
   --ai-glow: rgb(139 92 246 / 0.2);
   --ai-glow-soft: rgb(139 92 246 / 0.1);
+  --ai-glow-strong: rgb(139 92 246 / 0.34);
+
+  /* translucent companion layers.
+     The --ai-* palette is raw hex, so UnoCSS cannot derive an alpha
+     from it. These are declared centrally instead of using
+     arbitrary per-component opacity values. */
+  --ai-scrim: rgb(8 6 15 / 0.82);
+  --ai-veil: rgb(8 6 15 / 0.72);
+  --ai-header: rgb(8 6 15 / 0.92);
+  --ai-tint: rgb(8 6 15 / 0.4);
+
+  /* companion geometry */
+  --ai-safe-top: env(safe-area-inset-top, 0px);
+  --ai-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --ai-sheet-max-h: 82dvh;
 
   --ai-shadow-1: 0 1px 2px rgb(0 0 0 / 0.5);
   --ai-shadow-2: 0 16px 48px -20px rgb(76 29 149 / 0.35);
@@ -1243,6 +1261,110 @@ html.library-sheet-open body {
     linear-gradient(to bottom, rgb(139 92 246 / 0.035) 1px, transparent 1px);
   background-size: 4rem 4rem;
   mask-image: radial-gradient(60rem 30rem at 50% 0%, black 30%, transparent 75%);
+}
+
+/* ------------------------------------------------------------
+   6.5 AI COMPANION — controlled glow + companion motion
+   Glow is deliberately scoped to EMO, the prompt and active
+   states only. The page itself never glows as a whole.
+   ------------------------------------------------------------ */
+
+/* focused halo behind EMO — one soft violet pool, nothing more */
+.ai-companion-halo {
+  background: radial-gradient(
+    closest-side,
+    var(--ai-glow-strong),
+    var(--ai-glow-soft) 55%,
+    transparent 78%
+  );
+}
+
+/* EMO reads as violet on the companion page without touching the
+   character components themselves — only its local tokens shift. */
+.ai-companion-emo {
+  --emo-body: var(--ai-surface-muted);
+  --emo-body-muted: var(--ai-surface-hover);
+  --emo-body-detail: var(--ai-primary);
+  --emo-line: var(--ai-border-strong);
+  --emo-face: #05030b;
+  --emo-face-detail: var(--ai-surface);
+}
+.ai-companion-emo .emo-companion {
+  color: var(--ai-foreground);
+}
+/* the companion speaks in sentences here, not system labels */
+.ai-companion-emo .emo-companion__status {
+  margin-top: 0.875rem;
+  color: var(--ai-foreground);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.ai-companion-emo--compact {
+  --emo-companion-width: 9rem;
+}
+.ai-companion-emo--compact .emo-companion__status {
+  margin-top: 0.625rem;
+  font-size: 0.8125rem;
+  color: var(--ai-foreground-muted);
+}
+.ai-companion-emo .emo-character:focus-visible {
+  outline-color: var(--ai-primary);
+}
+
+/* slow breathing glow for the active AI states */
+.ai-pulse-glow {
+  animation: ai-pulse-glow 3.6s var(--sys-ease) infinite;
+}
+@keyframes ai-pulse-glow {
+  0%, 100% { opacity: 0.45; transform: scale(0.97); }
+  50% { opacity: 0.85; transform: scale(1.03); }
+}
+
+/* three-dot thinking indicator */
+.ai-think-dot {
+  animation: ai-think-dot 1.05s var(--sys-ease) infinite;
+}
+.ai-think-dot:nth-child(2) { animation-delay: 0.16s; }
+.ai-think-dot:nth-child(3) { animation-delay: 0.32s; }
+@keyframes ai-think-dot {
+  0%, 100% { opacity: 0.28; transform: translateY(0); }
+  45% { opacity: 1; transform: translateY(-2px); }
+}
+
+/* typewriter caret on the streaming answer */
+.ai-caret {
+  animation: ai-caret 0.9s steps(1) infinite;
+}
+@keyframes ai-caret {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+/* result rows and messages arrive one after another, gently */
+.ai-rise {
+  animation: ai-rise 320ms var(--sys-ease) both;
+}
+@keyframes ai-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* bottom sheet */
+.ai-sheet-enter-active,
+.ai-sheet-leave-active {
+  transition: transform 280ms var(--sys-ease), opacity 200ms var(--sys-ease);
+}
+.ai-sheet-enter-from,
+.ai-sheet-leave-to {
+  transform: translateY(100%);
+  opacity: 0.6;
+}
+
+/* disabled companion controls never animate on press */
+.ai-press:disabled:active {
+  transform: none;
 }
 
 /* ------------------------------------------------------------

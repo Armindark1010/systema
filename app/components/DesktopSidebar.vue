@@ -27,8 +27,9 @@ const groups = [
   {
     label: 'INTELLIGENCE',
     items: [
-      { index: '07', label: 'AI STUDIO', to: '/ai' },
-      { index: '08', label: 'INSIGHTS', to: '/ai/insights' },
+      { index: '07', label: 'AI COMPANION', to: '/ai' },
+      { index: '08', label: 'AI STUDIO', to: '/ai/studio' },
+      { index: '09', label: 'INSIGHTS', to: '/ai/insights' },
     ],
   },
 ]
@@ -43,7 +44,8 @@ const THEME_LABEL: Record<string, string> = {
 
 function isActive(to: string): boolean {
   if (to === '/') return route.path === '/'
-  if (to === '/ai') return route.path === '/ai' || route.path.startsWith('/ai/search') || route.path.startsWith('/ai/generate')
+  if (to === '/ai') return route.path === '/ai'
+  if (to === '/ai/studio') return route.path.startsWith('/ai/studio') || route.path.startsWith('/ai/search') || route.path.startsWith('/ai/generate')
   return route.path === to || route.path.startsWith(to + '/')
 }
 </script>
