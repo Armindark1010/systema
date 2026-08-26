@@ -81,6 +81,7 @@ class PlaybackService : MediaSessionService() {
         mediaSession = try {
             MediaSession.Builder(this, player)
                 .apply { sessionActivity?.let(::setSessionActivity) }
+                .setCallback(SessionCallback())
                 .build()
         } catch (t: Throwable) {
             // A session failure must not crash the app; in-app playback
@@ -90,6 +91,59 @@ class PlaybackService : MediaSessionService() {
         }
 
         Log.i(TAG, "Playback service created (session=${mediaSession != null})")
+    }
+
+    /**
+     * Grants controllers the commands SYSTEMA actually supports.
+     *
+     * Media3 derives the notification's buttons and its progress bar
+     * from the session's available commands. The default connection
+     * result is usually enough, but being explicit here documents the
+     * contract and guarantees the seek commands survive: a scrubber
+     * only appears if COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM is available,
+     * and skip buttons need COMMAND_SEEK_TO_{NEXT,PREVIOUS}.
+     *
+     * Crucially the command set is intersected with what the PLAYER
+     * reports, so we never advertise something ExoPlayer cannot do —
+     * seeking an unseekable or still-unknown-duration item stays
+     * correctly unavailable until the duration resolves.
+     */
+    private inner class SessionCallback : MediaSession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult {
+            val default = MediaSession.ConnectionResult.AcceptedResultBuilder(session).build()
+            val player = session.player
+
+            val available = Player.Commands.Builder()
+                .addAll(default.availablePlayerCommands)
+                // Intersect with reality: only keep what the player says
+                // it can execute right now.
+                .apply {
+                    listOf(
+                        Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
+                        Player.COMMAND_SEEK_TO_MEDIA_ITEM,
+                        Player.COMMAND_SEEK_BACK,
+                        Player.COMMAND_SEEK_FORWARD,
+                        Player.COMMAND_SEEK_TO_NEXT,
+                        Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                        Player.COMMAND_SEEK_TO_PREVIOUS,
+                        Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                        Player.COMMAND_GET_CURRENT_MEDIA_ITEM,
+                        Player.COMMAND_GET_TIMELINE,
+                        Player.COMMAND_GET_METADATA,
+                        Player.COMMAND_PLAY_PAUSE,
+                    ).forEach { command ->
+                        if (player.isCommandAvailable(command)) add(command) else remove(command)
+                    }
+                }
+                .build()
+
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailablePlayerCommands(available)
+                .build()
+        }
     }
 
     /**

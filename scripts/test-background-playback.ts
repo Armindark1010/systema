@@ -356,5 +356,115 @@ group('15. Phase 2 behaviour preserved')
 }
 
 // ------------------------------------------------------------
+group('16. Notification is actually posted (Phase 3 fix)')
+// ------------------------------------------------------------
+{
+  const engine = read(ENGINE)
+
+  // ROOT CAUSE 1: startService() leaves the service in the background
+  // state and Media3 will not post a media notification for it.
+  check('uses startForegroundService on API 26+',
+    engine.includes('appContext.startForegroundService(intent)'))
+  check('falls back to startService below API 26',
+    /SDK_INT >= Build\.VERSION_CODES\.O[\s\S]*?startForegroundService[\s\S]*?else[\s\S]*?startService\(intent\)/.test(engine))
+  check('plain startService is no longer the only path',
+    !/^\s*appContext\.startService\(Intent\(/m.test(engine))
+
+  // ROOT CAUSE 2: the service was only started from the playWhenReady
+  // listener, which fires after playback has already begun.
+  check('service starts when the queue is set, before playWhenReady',
+    /ensureServiceStarted\(\)\s*\n\s*\n?\s*p\.playWhenReady = true/.test(engine))
+  check('service also (re)starts on resume', /ensureServiceStarted\(\)\s*\n\s*p\.play\(\)/.test(engine))
+  check('start remains latched against repeats', engine.includes('if (serviceStarted) return'))
+  check('foreground-start rejection is caught, playback survives',
+    /startForegroundService[\s\S]*?catch \(t: Throwable\)/.test(engine))
+}
+
+// ------------------------------------------------------------
+group('17. Seek commands are advertised and executable')
+// ------------------------------------------------------------
+{
+  const engine = read(ENGINE)
+  const svc = read(SERVICE)
+
+  // ROOT CAUSE 3: without declared increments ExoPlayer does not
+  // advertise COMMAND_SEEK_BACK / COMMAND_SEEK_FORWARD.
+  check('seek-back increment declared', engine.includes('setSeekBackIncrementMs(SEEK_INCREMENT_MS)'))
+  check('seek-forward increment declared', engine.includes('setSeekForwardIncrementMs(SEEK_INCREMENT_MS)'))
+  check('increment matches the in-app +/-15s controls',
+    /SEEK_INCREMENT_MS = 15_000L/.test(engine))
+
+  check('session declares a callback', svc.includes('setCallback(SessionCallback())'))
+  check('scrubber command requested',
+    svc.includes('Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM'))
+  check('seek-to-item command requested', svc.includes('Player.COMMAND_SEEK_TO_MEDIA_ITEM'))
+  check('seek back/forward commands requested',
+    svc.includes('Player.COMMAND_SEEK_BACK') && svc.includes('Player.COMMAND_SEEK_FORWARD'))
+  check('next/previous commands requested',
+    svc.includes('Player.COMMAND_SEEK_TO_NEXT') && svc.includes('Player.COMMAND_SEEK_TO_PREVIOUS'))
+
+  // Must never advertise a command the player cannot execute.
+  check('commands intersected with player.isCommandAvailable',
+    svc.includes('player.isCommandAvailable(command)'))
+  check('unavailable commands are removed, not force-added',
+    /if \(player\.isCommandAvailable\(command\)\) add\(command\) else remove\(command\)/.test(svc))
+}
+
+// ------------------------------------------------------------
+group('18. Seek is reflected back into the UI')
+// ------------------------------------------------------------
+{
+  const engine = read(ENGINE)
+  const c = read(NATIVE_COMPOSABLE)
+
+  // ROOT CAUSE 4: a seek from the notification emitted no event at all.
+  check('engine listens for position discontinuities',
+    engine.includes('override fun onPositionDiscontinuity'))
+  check('seek discontinuities emit a snapshot',
+    /DISCONTINUITY_REASON_SEEK[\s\S]{0,220}emitSnapshot\(\)/.test(engine))
+  check('non-seek discontinuities do not spam snapshots',
+    /reason == Player\.DISCONTINUITY_REASON_SEEK/.test(engine))
+
+  check('frontend re-anchors on native position drift',
+    c.includes('const drift = Math.abs(nativeSeconds - player.currentTime)'))
+  check('re-anchors while playing when drift exceeds 1s',
+    c.includes('if (!snapshot.isPlaying || drift > 1)'))
+  check('small drift still ignored to keep the bar smooth',
+    c.includes('drift > 1'))
+}
+
+// ------------------------------------------------------------
+group('19. Notification permission resolved before playback')
+// ------------------------------------------------------------
+{
+  const c = read(NATIVE_COMPOSABLE)
+  check('permission settled during init, not on first track',
+    /void ensureNotificationPermission\(\)[\s\S]{0,400}await reconcileWithNative\(\)/.test(c))
+  check('no longer requested from the playback path',
+    !/noteNativePlayback[\s\S]{0,200}ensureNotificationPermission/.test(c))
+  check('still asked only once', c.includes('notificationPermissionAsked'))
+  check('init is not blocked on the permission result',
+    c.includes('void ensureNotificationPermission()'))
+}
+
+// ------------------------------------------------------------
+group('20. Notification channel')
+// ------------------------------------------------------------
+{
+  const strings = read('android/app/src/main/res/values/strings.xml')
+  const svc = read(SERVICE)
+  const engine = read(ENGINE)
+
+  check('channel name overridden for Media3',
+    strings.includes('default_notification_channel_name'))
+  check('channel is not created manually (no duplicate entry)',
+    !svc.includes('NotificationChannel(') && !engine.includes('NotificationChannel('))
+  check('no manual notification building anywhere',
+    !svc.includes('NotificationCompat') && !engine.includes('NotificationCompat'))
+  check('no per-second notification rebuild',
+    !svc.includes('setInterval') && !/Timer\(/.test(svc))
+}
+
+// ------------------------------------------------------------
 console.log(`\n\x1b[1mResults:\x1b[0m ${passed} passed, ${failed} failed\n`)
 if (failed > 0) process.exit(1)

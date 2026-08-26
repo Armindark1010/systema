@@ -157,10 +157,17 @@ export function useNativePlayer() {
         player.duration = snapshot.durationMs / 1000
       }
 
-      // Only re-anchor position on non-playing snapshots. While
-      // playing, the local clock is smoother than sporadic events.
-      if (!snapshot.isPlaying) {
-        player.currentTime = snapshot.positionMs / 1000
+      // Re-anchor position when paused, and whenever the engine's
+      // position has diverged from our local clock by more than a
+      // second. That divergence is what a seek from the notification,
+      // lock screen or a Bluetooth remote looks like from here: the
+      // native position jumps while our clock keeps ticking forward.
+      // Small differences are ignored so the bar stays smooth rather
+      // than stuttering on every sporadic event.
+      const nativeSeconds = snapshot.positionMs / 1000
+      const drift = Math.abs(nativeSeconds - player.currentTime)
+      if (!snapshot.isPlaying || drift > 1) {
+        player.currentTime = nativeSeconds
       }
     })
 
@@ -243,9 +250,6 @@ export function useNativePlayer() {
    * transitions cannot create duplicates.
    */
   function noteNativePlayback(trackId: string) {
-    // Playback is genuinely under way: a good moment to ask about the
-    // notification, and the only place we do.
-    void ensureNotificationPermission()
     if (recordedTrackId === trackId) return
     const track = player.playbackOrder.find(t => t.id === trackId)
       ?? useLibraryStore().tracks.find(t => t.id === trackId)
@@ -509,6 +513,11 @@ export function useNativePlayer() {
 
     disposeActions = installActionBridge()
 
+    // Settle the notification permission before any track plays, so
+    // Media3's first notification is not suppressed. Not awaited: it
+    // must never delay adopting native state.
+    void ensureNotificationPermission()
+
     // Adopt whatever the engine is already doing — after an Activity
     // recreation playback continues while the WebView restarts.
     await reconcileWithNative()
@@ -565,12 +574,16 @@ export function useNativePlayer() {
   }
 
   /**
-   * Asks for POST_NOTIFICATIONS once, the first time audio actually
-   * starts — the moment the prompt is self-explanatory, rather than at
-   * app launch before the user has done anything.
+   * Resolves POST_NOTIFICATIONS once, during native init.
    *
-   * Best-effort by design: playback is already under way and a denial
-   * changes nothing about it, so the result is only logged.
+   * Deliberately BEFORE the first track rather than on playback start.
+   * Android suppresses a notification posted while the permission is
+   * still unresolved, so asking at playback time meant the very first
+   * notification was dropped even when the user then granted it.
+   * Settling the permission up front means Media3's first post lands.
+   *
+   * Best-effort: a denial only hides the notification, so the result is
+   * logged and nothing in the playback path waits on it.
    */
   async function ensureNotificationPermission() {
     if (notificationPermissionAsked) return

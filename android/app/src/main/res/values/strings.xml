@@ -4,4 +4,14 @@
     <string name="title_activity_main">SYSTEMA</string>
     <string name="package_name">com.systema.music</string>
     <string name="custom_url_scheme">com.systema.music</string>
+
+    <!--
+      Media3 creates the playback notification channel itself, with a
+      stable channel id, and labels it from this string resource.
+      Overriding it here renames the channel in Android's notification
+      settings from the library default to something the user
+      recognises. We deliberately do NOT create a channel ourselves:
+      duplicating it would leave two entries in Settings.
+    -->
+    <string name="default_notification_channel_name">Playback</string>
 </resources>

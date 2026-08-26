@@ -3,6 +3,7 @@ package com.systema.music.player
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -53,6 +54,9 @@ class PlayerEngine private constructor(context: Context) {
 
     companion object {
         private const val TAG = "SystemaPlayerEngine"
+
+        /** Matches the in-app +/-15s transport controls. */
+        private const val SEEK_INCREMENT_MS = 15_000L
 
         @Volatile
         private var instance: PlayerEngine? = null
@@ -162,6 +166,14 @@ class PlayerEngine private constructor(context: Context) {
                 // Pause instead of continuing into a speaker when
                 // headphones are unplugged.
                 .setHandleAudioBecomingNoisy(true)
+                // Declaring the increments is what makes ExoPlayer
+                // advertise COMMAND_SEEK_BACK / COMMAND_SEEK_FORWARD in
+                // its available commands, which is how the notification
+                // and Android Auto decide whether to offer those
+                // buttons. Matches the in-app +/-15s controls exactly so
+                // every surface steps by the same amount.
+                .setSeekBackIncrementMs(SEEK_INCREMENT_MS)
+                .setSeekForwardIncrementMs(SEEK_INCREMENT_MS)
                 .build()
                 .also { it.addListener(playerListener) }
 
@@ -194,10 +206,29 @@ class PlayerEngine private constructor(context: Context) {
     private fun ensureServiceStarted() {
         if (serviceStarted) return
         try {
-            appContext.startService(Intent(appContext, PlaybackService::class.java))
+            val intent = Intent(appContext, PlaybackService::class.java)
+
+            // startForegroundService, not startService.
+            //
+            // A plain startService() leaves the service in the background
+            // state, and Media3 will not post a media notification for a
+            // background service — which is exactly why the notification
+            // never appeared even though audio played fine. From API 26
+            // the system also requires the foreground variant here and
+            // expects startForeground() within ~5s; MediaSessionService
+            // makes that call itself as soon as it has a session.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                appContext.startForegroundService(intent)
+            } else {
+                appContext.startService(intent)
+            }
+
             serviceStarted = true
-            Log.i(TAG, "Playback service start requested")
+            Log.i(TAG, "Playback service started in foreground mode")
         } catch (t: Throwable) {
+            // Android 12+ throws ForegroundServiceStartNotAllowedException
+            // if we somehow got here from the background. Audio still
+            // plays; only the notification is missing.
             Log.w(TAG, "Could not start playback service; in-app playback continues", t)
         }
     }
@@ -244,6 +275,30 @@ class PlayerEngine private constructor(context: Context) {
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) = emitSnapshot()
+
+        /**
+         * A seek happened — from the notification, the lock screen, a
+         * Bluetooth remote, or our own transport.
+         *
+         * Without this the position moved natively but nothing told the
+         * WebView, so the in-app progress bar kept counting from where
+         * it was and only corrected on the next unrelated event. Media3
+         * raises a SEEK discontinuity for exactly this case; forwarding
+         * one snapshot re-anchors the UI clock immediately.
+         *
+         * This is event-driven, not polled: it fires once per seek.
+         */
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int,
+        ) {
+            if (reason == Player.DISCONTINUITY_REASON_SEEK ||
+                reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT
+            ) {
+                emitSnapshot()
+            }
+        }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val index = player?.currentMediaItemIndex ?: -1
@@ -485,6 +540,14 @@ class PlayerEngine private constructor(context: Context) {
 
             p.setMediaItems(valid.map(::toMediaItem), safeIndex, positionMs)
             p.prepare()
+
+            // Bring the service up BEFORE playback starts. Starting it
+            // from the playWhenReady listener alone was too late and too
+            // indirect: by then the notification had already been
+            // skipped for the first item. This call is latched, so the
+            // duplicate from the listener is a no-op.
+            ensureServiceStarted()
+
             p.playWhenReady = true
 
             emitQueueChanged()
@@ -535,6 +598,9 @@ class PlayerEngine private constructor(context: Context) {
                 p.seekTo(p.currentMediaItemIndex, 0)
                 p.prepare()
             }
+            // Resuming after the service was torn down must bring it
+            // back, otherwise playback continues with no notification.
+            ensureServiceStarted()
             p.play()
         } catch (t: Throwable) {
             Log.e(TAG, "play failed", t)
