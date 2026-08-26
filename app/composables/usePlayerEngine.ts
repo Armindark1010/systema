@@ -101,11 +101,18 @@ export function usePlayerEngine() {
       // Only restore when the engine came back with nothing. If Media3
       // is already playing, reconcileWithNative() has adopted the live
       // state and overwriting it would be wrong.
-      if (!player.currentTrack) restore.restore()
+      //
+      // restoreWhenReady() rather than a one-shot attempt: on a cold
+      // start the native library is still loading at this point, and
+      // resolving saved ids against an empty index used to look
+      // identical to "every track was deleted" — which cleared the
+      // session. It now waits for the library to become authoritative
+      // and retries.
+      if (!player.currentTrack) restore.restoreWhenReady()
       return
     }
 
-    restore.restore()
+    restore.restoreWhenReady()
 
     // Synchronize track changes with audio synth
     watch(

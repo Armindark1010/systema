@@ -9,6 +9,8 @@
 import { defineStore } from 'pinia'
 import { useLocalStorage } from '@vueuse/core'
 import { LocalSearchEngine } from '~/services/search/localSearch'
+import { NativeSearchEngine } from '~/services/search/nativeSearchEngine'
+import { isNativeLibraryAvailable } from '~/services/native/musicLibraryPlugin'
 import type {
   SearchFilterType,
   SearchGroupedResults,
@@ -36,14 +38,42 @@ const DEFAULT_SUGGESTIONS = [
 
 export const useSearchStore = defineStore('search', () => {
   // ---- Engine instance ---------------------------------------
-  const engine = new LocalSearchEngine()
+  //
+  // Phase 4.1. Which engine answers depends on where we are running,
+  // because the two environments have genuinely different sources of
+  // truth:
+  //
+  //   Android — the user's music lives in the native Room index, and
+  //     it is far too large to mirror into JavaScript. NativeSearchEngine
+  //     queries it through the existing bridge, one page per search.
+  //
+  //   Browser — there is no device library at all. LocalSearchEngine
+  //     over the bundled demo catalog is what keeps `npm run dev`
+  //     usable, and it stays exactly as it was.
+  //
+  // The bug this fixes: the store always built LocalSearchEngine with
+  // no data, so on a real phone the demo catalog was the ONLY thing
+  // searchable. Mock songs came back; the user's own music did not.
+  const localEngine = new LocalSearchEngine()
+  const nativeEngine = isNativeLibraryAvailable()
+    // Intent detection is pure query analysis, so it is shared rather
+    // than reimplemented.
+    ? new NativeSearchEngine(localEngine)
+    : null
+  const engine = nativeEngine ?? localEngine
+
+  /** True when results come from the device index, not the demo catalog. */
+  const usesNativeLibrary = computed(() => nativeEngine !== null)
+
   const playlistsStore = usePlaylists()
 
-  // Keep engine playlists in sync
+  // Keep engine playlists in sync. Playlists are app data, not device
+  // data, so both engines match them in memory.
   watch(
     () => playlistsStore.playlists.value,
     (pl) => {
-      engine.updatePlaylists(pl)
+      localEngine.updatePlaylists(pl)
+      nativeEngine?.updatePlaylists(pl)
     },
     { immediate: true },
   )
@@ -98,6 +128,8 @@ export const useSearchStore = defineStore('search', () => {
   // ---- Actions -----------------------------------------------
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  /** Discards out-of-order async results from the native engine. */
+  let searchToken = 0
 
   function setQuery(val: string) {
     query.value = val
@@ -131,15 +163,15 @@ export const useSearchStore = defineStore('search', () => {
     isSearching.value = true
     error.value = null
 
-    try {
-      const options: SearchOptions = {
-        mode: searchMode.value,
-        filters: { type: selectedFilter.value },
-        limit: 40,
-        fuzzy: true,
-      }
+    const options: SearchOptions = {
+      mode: searchMode.value,
+      filters: { type: selectedFilter.value },
+      limit: 40,
+      fuzzy: true,
+    }
 
-      const res = engine.searchSync ? engine.searchSync(q, options) : results.value
+    /** Shared tail: whichever engine answered, the state lands the same way. */
+    function applyResults(res: SearchGroupedResults) {
       results.value = res
 
       // Update mode reflection
@@ -153,11 +185,38 @@ export const useSearchStore = defineStore('search', () => {
       if (!searchHistory.value.includes(q)) {
         searchHistory.value.unshift(q)
       }
-    } catch (e: any) {
-      error.value = e?.message || 'Search error'
-    } finally {
-      isSearching.value = false
     }
+
+    // The local engine answers synchronously, and staying synchronous
+    // there keeps typing feeling instant. The native engine has to
+    // cross the bridge, so it resolves asynchronously — with a token
+    // so a slow reply for an old query cannot overwrite a newer one.
+    if (engine.searchSync) {
+      try {
+        applyResults(engine.searchSync(q, options))
+      } catch (e: any) {
+        error.value = e?.message || 'Search error'
+      } finally {
+        isSearching.value = false
+      }
+      return
+    }
+
+    const token = ++searchToken
+
+    engine.search(q, options)
+      .then((res) => {
+        if (token !== searchToken) return
+        applyResults(res)
+      })
+      .catch((e: any) => {
+        if (token !== searchToken) return
+        error.value = e?.message || 'Search error'
+      })
+      .finally(() => {
+        if (token !== searchToken) return
+        isSearching.value = false
+      })
   }
 
   function submitSearch(term?: string) {
@@ -175,6 +234,9 @@ export const useSearchStore = defineStore('search', () => {
 
   function clearResults() {
     if (debounceTimer) clearTimeout(debounceTimer)
+    // Invalidate any native search still in flight, so its reply
+    // cannot repopulate results the user just cleared.
+    searchToken++
     results.value = {
       tracks: [],
       albums: [],
@@ -237,6 +299,7 @@ export const useSearchStore = defineStore('search', () => {
     hasResults,
     totalCount,
     isSemantic,
+    usesNativeLibrary,
     suggestedQueries,
     visibleTracks,
     visibleAlbums,

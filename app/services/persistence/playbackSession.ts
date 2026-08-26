@@ -241,6 +241,63 @@ export function clampPosition(
   return Math.min(positionSeconds, durationSeconds)
 }
 
+// ---- Restore decision (Phase 4.1) ----------------------------
+//
+// resolvePlaybackSession() answers "which of these tracks still
+// exist?". It cannot answer "is it safe to act on that?", because a
+// library that has not finished loading yields exactly the same empty
+// result as a library whose files were all deleted.
+//
+// Conflating those two destroyed real user sessions: on an Android
+// cold start the restore ran before the first page landed, resolved
+// nothing, and took the "everything is gone" branch — which clears
+// storage. The decision below makes the difference explicit so no
+// caller can collapse it again by accident.
+
+export type RestoreDecision =
+  /** Library still initialising. Do nothing, stay armed, ask again. */
+  | { action: 'wait', reason: 'library-loading' }
+  /** Library unavailable (error, denied permission). Keep the session. */
+  | { action: 'defer', reason: 'library-unavailable' }
+  /** Nothing stored, or the payload failed validation. */
+  | { action: 'skip', reason: 'no-session' | 'invalid-session' }
+  /** Library is authoritative and every saved track is genuinely gone. */
+  | { action: 'discard', reason: 'all-tracks-missing' }
+  /** Restore this. */
+  | { action: 'restore', session: RestoredPlaybackSession }
+
+/**
+ * Decides what to do with a stored session, given how trustworthy the
+ * library currently is.
+ *
+ * `libraryReadiness` is the caller's classification (see
+ * libraryReadiness.ts). Only `'ready'` permits a destructive outcome.
+ */
+export function decideRestore(input: {
+  session: PersistedPlaybackSession | null
+  libraryReadiness: 'loading' | 'ready' | 'failed'
+  available: ReadonlyMap<string, Track> | Track[]
+}): RestoreDecision {
+  if (!input.session) return { action: 'skip', reason: 'no-session' }
+
+  // A stored session exists, so the library's state now decides
+  // everything. These two branches are the fix: neither may delete.
+  if (input.libraryReadiness === 'loading') {
+    return { action: 'wait', reason: 'library-loading' }
+  }
+  if (input.libraryReadiness === 'failed') {
+    return { action: 'defer', reason: 'library-unavailable' }
+  }
+
+  const resolved = resolvePlaybackSession(input.session, input.available)
+
+  // Only reachable with a READY library, so this genuinely means the
+  // files are gone rather than "not loaded yet".
+  if (!resolved) return { action: 'discard', reason: 'all-tracks-missing' }
+
+  return { action: 'restore', session: resolved }
+}
+
 // ---- Storage IO ----------------------------------------------
 // Thin, and never throwing: a persistence failure must not be able to
 // stop the app from starting.

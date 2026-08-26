@@ -482,12 +482,19 @@ group('10. Playback restoration wiring (§6, §7, §10)')
   check('restoration never records history', !readCode(RESTORE).includes('recordPlayed'))
   check('the recents rule is explicit', restore.includes('RECENTS ARE UNTOUCHED'))
 
+  // Phase 4.1 renamed restore() -> restoreWhenReady(): the restore now
+  // waits for the native library instead of running once, immediately.
+  // The guard itself is unchanged — live playback still wins.
   check('live native playback wins over stored state',
-    read('app/composables/usePlayerEngine.ts').includes('if (!player.currentTrack) restore.restore()'))
+    read('app/composables/usePlayerEngine.ts').includes('if (!player.currentTrack) restore.restoreWhenReady()'))
   check('saves are debounced', restore.includes('SAVE_DEBOUNCE_MS'))
   check('state is saved when backgrounded', restore.includes('visibilitychange'))
   check('state is saved on pause', restore.includes('if (!playing) saveNow()'))
-  check('restore runs at most once', restore.includes('if (!import.meta.client || restored) return false'))
+  // Still one-shot, but the latch is now set only on a SETTLED outcome
+  // (restored / skipped / discarded) and never on a wait — otherwise
+  // the first, too-early attempt would consume the only chance.
+  check('restore runs at most once',
+    restore.includes('if (!import.meta.client || restoreSettled || restoreInFlight) return restoreSettled'))
 
   // §6: no heavy data.
   check('no artwork is persisted', !session.includes('artworkUri'))
