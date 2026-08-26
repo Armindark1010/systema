@@ -1,15 +1,21 @@
 package com.systema.music;
 
 import android.Manifest;
+import android.app.ActivityManager;
+import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Debug;
 import android.util.Log;
+import android.webkit.RenderProcessGoneDetail;
+import android.webkit.WebView;
 
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.WebViewListener;
 import com.systema.music.analysis.AudioAnalysisPlugin;
 import com.systema.music.library.MusicLibraryPlugin;
 import com.systema.music.player.PlayerPlugin;
@@ -76,6 +82,8 @@ public class MainActivity extends BridgeActivity {
         // buttons all keep working.
         requestNotificationPermissionIfNeeded();
 
+        installRendererDiagnostics();
+
         if (getBridge() != null) {
             boolean present = getBridge().getPlugin("MusicLibrary") != null;
             Log.i(TAG, "MusicLibrary plugin registered with bridge: " + present);
@@ -90,6 +98,95 @@ public class MainActivity extends BridgeActivity {
                         + "Look for an earlier PluginLoadException / InvalidPluginException."
                 );
             }
+        }
+    }
+
+    /**
+     * Makes a WebView renderer death visible instead of silent.
+     *
+     * WHY THIS EXISTS
+     * ---------------
+     * When the WebView's render process dies — almost always because it
+     * hit its per-renderer memory cap — Android tears the whole app
+     * down. By default Capacitor does not handle onRenderProcessGone,
+     * so the failure surfaces to the user as "the app closed itself"
+     * with nothing in logcat that names a cause, and no Java stack
+     * trace, because no Java exception was ever thrown.
+     *
+     * That is exactly what "runs for a few minutes, then crashes"
+     * looks like, and it is indistinguishable from a native crash
+     * without this hook. Logging `didCrash()` separates the two cases
+     * definitively:
+     *
+     *   didCrash = false → the SYSTEM killed the renderer, i.e. it was
+     *                      out of memory. Look at the heap figures
+     *                      logged below.
+     *   didCrash = true  → the renderer itself crashed (a WebView/Chromium
+     *                      bug), which is a very different investigation.
+     *
+     * Returning false preserves the existing behaviour — the process
+     * still goes away — because silently reloading the WebView would
+     * hide a real bug and lose playback state. This is a diagnostic,
+     * not a workaround.
+     *
+     * Diagnose with:
+     *   adb logcat -s SystemaMain
+     */
+    private void installRendererDiagnostics() {
+        if (getBridge() == null) {
+            Log.w(TAG, "No bridge; renderer diagnostics not installed");
+            return;
+        }
+
+        logMemoryState("startup");
+
+        getBridge().addWebViewListener(new WebViewListener() {
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                boolean rendererCrashed =
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && detail.didCrash();
+
+                Log.e(TAG, "WEBVIEW RENDER PROCESS GONE — the app is about to die.");
+                Log.e(TAG, "  didCrash=" + rendererCrashed
+                    + (rendererCrashed
+                        ? "  (the renderer itself crashed — a WebView bug, not memory)"
+                        : "  (the SYSTEM killed the renderer — almost certainly out of memory)"));
+                logMemoryState("at renderer death");
+
+                // Not handled: let the default teardown happen. Swallowing
+                // this would mask the bug rather than fix it.
+                return false;
+            }
+        });
+    }
+
+    /**
+     * Logs the Java heap and this app's total memory footprint.
+     *
+     * The renderer runs in a separate process with its own limit, so
+     * these numbers do not capture it directly — but a Java heap that
+     * climbs steadily between the two log points is strong evidence
+     * that the WebView side is growing too.
+     */
+    private void logMemoryState(String when) {
+        try {
+            Runtime runtime = Runtime.getRuntime();
+            long usedMb = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024);
+            long maxMb = runtime.maxMemory() / (1024 * 1024);
+
+            ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+            int pssMb = 0;
+            if (am != null) {
+                Debug.MemoryInfo[] infos = am.getProcessMemoryInfo(new int[]{ android.os.Process.myPid() });
+                if (infos != null && infos.length > 0) {
+                    pssMb = infos[0].getTotalPss() / 1024;
+                }
+            }
+
+            Log.i(TAG, "MEMORY " + when + ": javaHeap=" + usedMb + "/" + maxMb + "MB, totalPss=" + pssMb + "MB");
+        } catch (Throwable t) {
+            // Diagnostics must never be the thing that breaks the app.
+            Log.w(TAG, "Could not read memory state", t);
         }
     }
 
