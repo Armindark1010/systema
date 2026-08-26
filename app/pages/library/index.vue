@@ -54,7 +54,14 @@ const {
   permissionStatus,
   requestLibraryPermission,
   scanLibrary,
+  // Pagination
+  hasMoreTracks,
+  isLoadingMore,
+  loadedCount,
+  allTracksLoaded,
+  loadMoreTracks,
 } = library
+
 
 /**
  * On Android an empty track list is meaningful: it means we are still
@@ -113,6 +120,19 @@ const selectedAction = ref<
 const activeIndex = computed(() =>
   librarySections.findIndex(section => section.id === activeSection.value),
 )
+
+// ---- Infinite scroll ---------------------------------------
+// The Library scrolls the document, so the sentinel is observed
+// against the viewport. Loading begins ~400px before it appears.
+const loadMoreSentinel = ref<HTMLElement | null>(null)
+
+// Only observe while there is genuinely another page to fetch and the
+// tracks pane is the one on screen.
+const canLoadMore = computed(
+  () => isNativeLibrary.value && hasMoreTracks.value && activeIndex.value === 0,
+)
+
+useInfiniteScroll(loadMoreSentinel, () => loadMoreTracks(), canLoadMore, { rootMargin: 400 })
 
 let emoTimer: ReturnType<typeof setTimeout> | undefined
 function react(expression: EmoExpression, message: string, resetAfter = 700) {
@@ -402,16 +422,43 @@ function isPaneVisible(paneIndex: number) {
                   </button>
                 </template>
               </LibraryEmptyState>
-              <LibraryTracks
-                v-else
-                :tracks="sortedTracks"
-                :get-artist="getArtist"
-                :get-album="getAlbum"
-                :format-duration="formatDuration"
-                @play="selectTrack"
-                @actions="track => openActions('track', track)"
-                @longpress="onTrackLongPress"
-              />
+              <template v-else>
+                <LibraryTracks
+                  :tracks="sortedTracks"
+                  :get-artist="getArtist"
+                  :get-album="getAlbum"
+                  :format-duration="formatDuration"
+                  @play="selectTrack"
+                  @actions="track => openActions('track', track)"
+                  @longpress="onTrackLongPress"
+                />
+
+                <!--
+                  Pagination sentinel. Observed by IntersectionObserver
+                  with a bottom rootMargin, so the next page starts
+                  loading before the user hits the true end of the list.
+                -->
+                <div
+                  v-if="isNativeLibrary && hasMoreTracks"
+                  ref="loadMoreSentinel"
+                  class="library-page__sentinel"
+                  aria-hidden="true"
+                />
+
+                <p
+                  v-if="isLoadingMore"
+                  class="library-page__more label-muted"
+                  role="status"
+                >
+                  LOADING MORE TRACKS…
+                </p>
+                <p
+                  v-else-if="allTracksLoaded && loadedCount > 0"
+                  class="library-page__more label-muted"
+                >
+                  {{ loadedCount }} TRACKS · END OF LIBRARY
+                </p>
+              </template>
             </div>
 
             <!-- 1: ALBUMS -->
@@ -522,6 +569,16 @@ function isPaneVisible(paneIndex: number) {
   width: 100%;
   align-items: flex-start;
   will-change: transform;
+}
+
+.library-page__sentinel {
+  width: 100%;
+  height: 1px;
+}
+
+.library-page__more {
+  padding-block: var(--library-gap, 0.75rem);
+  text-align: center;
 }
 
 .library-page__swipe-pane {

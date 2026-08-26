@@ -138,7 +138,8 @@ console.log('Testing album and artist grouping...')
   const page = [
     makeTrack({ id: 'ms:v:1', mediaStoreId: 1 }),
     makeTrack({ id: 'ms:v:2', mediaStoreId: 2, title: 'Signal Grid' }),
-    makeTrack({ id: 'ms:v:3', mediaStoreId: 3, title: 'Nightcall', artist: 'Kavinsky', albumArtist: 'Kavinsky', album: 'OutRun' }),
+    // A different album => a different MediaStore albumId, as on a real device.
+    makeTrack({ id: 'ms:v:3', mediaStoreId: 3, title: 'Nightcall', artist: 'Kavinsky', albumArtist: 'Kavinsky', album: 'OutRun', albumId: 77 }),
   ]
   const albums = toUiAlbums(page)
   const artists = toUiArtists(page)
@@ -266,5 +267,49 @@ console.log('Testing construction-time catalog seeding...')
   assert.equal(android.isLoading, true, 'android shows the skeleton until the index loads')
 }
 console.log('✓ mock data is never seeded on native, even before init runs')
+
+// 12. Artwork association regression.
+//     Album identity previously collapsed on (title, artist), so two
+//     genuinely different albums sharing a name were merged and the
+//     cover of one leaked onto tracks of the other.
+console.log('Testing artwork association...')
+{
+  // Same title + same artist, different MediaStore albums.
+  const liveAlbum = makeTrack({
+    id: 'ms:v:10', mediaStoreId: 10, title: 'Song A',
+    album: 'Greatest Hits', albumArtist: 'Various', albumId: 11,
+    artworkUri: 'content://media/external/audio/albumart/11',
+  })
+  const studioAlbum = makeTrack({
+    id: 'ms:v:11', mediaStoreId: 11, title: 'Song B',
+    album: 'Greatest Hits', albumArtist: 'Various', albumId: 22,
+    artworkUri: 'content://media/external/audio/albumart/22',
+  })
+
+  const a = toUiTrack(liveAlbum)
+  const b = toUiTrack(studioAlbum)
+  assert.notEqual(a.albumId, b.albumId, 'distinct MediaStore albums must not share an id')
+
+  const albums = toUiAlbums([liveAlbum, studioAlbum])
+  assert.equal(albums.length, 2, 'same-named albums must stay separate')
+  assert.notEqual(albums[0]!.cover, albums[1]!.cover, 'covers must not be shared')
+
+  // Each track keeps its own artwork independent of album grouping.
+  assert.ok(a.artwork!.includes('/11'), 'track A keeps its own art')
+  assert.ok(b.artwork!.includes('/22'), 'track B keeps its own art')
+
+  // Tracks that DO belong to the same MediaStore album still group.
+  const sameAlbum = toUiAlbums([
+    makeTrack({ id: 'ms:v:20', mediaStoreId: 20, albumId: 99 }),
+    makeTrack({ id: 'ms:v:21', mediaStoreId: 21, albumId: 99 }),
+  ])
+  assert.equal(sameAlbum.length, 1, 'one MediaStore album groups into one entry')
+
+  // Missing albumId falls back to name-based identity, still stable.
+  const noId1 = toUiTrack(makeTrack({ id: 'ms:v:30', album: 'Demo', albumId: null }))
+  const noId2 = toUiTrack(makeTrack({ id: 'ms:v:31', album: 'Demo', albumId: null }))
+  assert.equal(noId1.albumId, noId2.albumId, 'name fallback stays deterministic')
+}
+console.log('✓ artwork stays bound to the correct album and track')
 
 console.log('--- ALL NATIVE MUSIC LIBRARY TESTS PASSED! ---')

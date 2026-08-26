@@ -35,6 +35,9 @@ export function useLibrary() {
     libraryError,
     hasMoreTracks,
     isLoadingMore,
+    loadedCount,
+    allTracksLoaded,
+    searchQuery,
     isScanning,
     needsPermission,
     scanPercent,
@@ -94,6 +97,9 @@ export function useLibrary() {
     libraryError,
     hasMoreTracks,
     isLoadingMore,
+    loadedCount,
+    allTracksLoaded,
+    searchQuery,
     isScanning,
     needsPermission,
     scanPercent,
@@ -124,6 +130,8 @@ export function useLibrary() {
     scanLibrary: libraryStore.scanLibrary,
     cancelLibraryScan: libraryStore.cancelLibraryScan,
     loadMoreTracks: libraryStore.loadMoreTracks,
+    resetPagination: libraryStore.resetPagination,
+    setSearchQuery: libraryStore.setSearchQuery,
     clearLibraryError: libraryStore.clearLibraryError,
   }
 }

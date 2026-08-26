@@ -113,6 +113,15 @@ export const useLibraryStore = defineStore('library', () => {
   const nativeTotal = ref(0)
   const hasMoreTracks = ref(false)
   const isLoadingMore = ref(false)
+  /** Library search term. Changing it restarts pagination. */
+  const searchQuery = ref('')
+
+  /**
+   * Incremented on every pagination reset. Responses tagged with an
+   * older generation are discarded, which is what keeps a re-sort or a
+   * new search from mixing datasets or corrupting the offset.
+   */
+  let pageGeneration = 0
 
   /**
    * True once a native page has actually been written into `tracks`.
@@ -136,6 +145,14 @@ export const useLibraryStore = defineStore('library', () => {
   )
 
   const isScanning = computed(() => scanState.value === 'SCANNING')
+
+  /** How many rows are actually held client-side right now. */
+  const loadedCount = computed(() => tracks.value.length)
+
+  /** True once every row in the native index has been paged in. */
+  const allTracksLoaded = computed(
+    () => isNativeLibrary.value && !hasMoreTracks.value && loadedCount.value > 0,
+  )
 
   const needsPermission = computed(
     () => isNativeLibrary.value && permissionStatus.value !== 'granted',
@@ -172,7 +189,18 @@ export const useLibraryStore = defineStore('library', () => {
     new Map(history.recentTrackIds.value.map((id, index) => [id, index])),
   )
 
+  /** Sorts the native index can serve itself, in global order. */
+  const NATIVE_SORTS: LibrarySortKey[] = ['title', 'artist', 'album', 'duration', 'recently-added']
+
   const sortedTracks = computed<Track[]>(() => {
+    // On native the database already ordered the whole library and we
+    // hold a prefix of that order. Re-sorting client-side would only
+    // reorder the loaded rows, making tracks jump between positions as
+    // each new page arrives — so the server order is preserved as-is.
+    if (isNativeLibrary.value && NATIVE_SORTS.includes(sortBy.value)) {
+      return tracks.value
+    }
+
     const list = [...tracks.value]
     const byText = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' })
     const missingLast = (value?: string | number) => value === undefined || value === '' ? 1 : 0
@@ -239,7 +267,12 @@ export const useLibraryStore = defineStore('library', () => {
   }
 
   function setSortBy(key: LibrarySortKey) {
+    if (sortBy.value === key) return
     sortBy.value = key
+    // The native index does the ordering, so a new sort is a different
+    // dataset: restart from offset 0 rather than appending to the old
+    // one. On the web this is a no-op and the client sort applies.
+    if (isNativeLibrary.value) void resetPagination()
   }
 
   function resetPresentation() {
@@ -492,33 +525,65 @@ export const useLibraryStore = defineStore('library', () => {
     }
   }
 
-  /** Replaces the catalog with the first page of device tracks. */
+  /**
+   * Sort/order/query actually sent to the native index.
+   *
+   * Only the sorts the native layer can serve are forwarded. The
+   * remaining UI sorts (recently-played, most-played, ai-*) have no
+   * native equivalent yet, so the index is read in a stable order and
+   * those are applied client-side over the loaded rows.
+   */
+  function nativeQueryArgs() {
+    return {
+      sort: nativeSortKey(),
+      order: (sortBy.value === 'title' || sortBy.value === 'artist' || sortBy.value === 'album'
+        ? 'asc'
+        : 'desc') as 'asc' | 'desc',
+      query: searchQuery.value.trim() || undefined,
+    }
+  }
+
+  /**
+   * Loads page one and resets pagination.
+   *
+   * Every call takes a fresh generation token. A response belonging to
+   * an older generation (the user re-sorted or retyped while it was in
+   * flight) is discarded instead of being merged, which is what would
+   * otherwise corrupt the offset or mix two datasets.
+   */
   async function loadFirstPage(): Promise<void> {
     if (!isNativeLibrary.value) return
+
+    const generation = ++pageGeneration
     isLoading.value = true
+    // Any in-flight "load more" from the previous generation is now
+    // irrelevant; releasing the flag lets the observer re-arm cleanly.
+    isLoadingMore.value = false
+
     try {
-      const page = await getTracksPage({
-        offset: 0,
-        limit: pageSize.value,
-        sort: nativeSortKey(),
-        order: sortBy.value === 'title' || sortBy.value === 'artist' || sortBy.value === 'album'
-          ? 'asc'
-          : 'desc',
-      })
+      const args = nativeQueryArgs()
+      const page = await getTracksPage({ offset: 0, limit: pageSize.value, ...args })
+
+      if (generation !== pageGeneration) {
+        libLog('loadFirstPage: stale response discarded', { generation })
+        return
+      }
 
       tracks.value = page.tracks
       albums.value = page.albums
       artists.value = page.artists
       nativeTotal.value = page.total
       loadedOffset.value = page.tracks.length
-      hasMoreTracks.value = page.hasMore
+      // Trust the row count we actually hold, not just the native flag:
+      // if a page comes back short we must not keep asking forever.
+      hasMoreTracks.value = page.hasMore && page.tracks.length > 0
       nativeDataLoaded.value = true
       libraryError.value = null
 
       libLog('loadFirstPage: bridge returned', {
         received: page.tracks.length,
         totalInIndex: page.total,
-        hasMore: page.hasMore,
+        hasMore: hasMoreTracks.value,
       })
       libLog('loadFirstPage: pinia store now holds', {
         tracks: tracks.value.length,
@@ -526,37 +591,85 @@ export const useLibraryStore = defineStore('library', () => {
         artists: artists.value.length,
       })
     } catch (error) {
+      if (generation !== pageGeneration) return
       libraryError.value = toLibraryError(error)
     } finally {
-      isLoading.value = false
+      if (generation === pageGeneration) isLoading.value = false
     }
   }
 
-  /** Appends the next page. The full library never ships at once. */
+  /**
+   * Appends the next page.
+   *
+   * Guarded so overlapping triggers (fast scrolling, observer firing
+   * repeatedly) can only ever produce one in-flight request.
+   */
   async function loadMoreTracks(): Promise<void> {
-    if (!isNativeLibrary.value || !hasMoreTracks.value || isLoadingMore.value) return
+    if (!isNativeLibrary.value) return
+    if (!hasMoreTracks.value || isLoadingMore.value || isLoading.value) return
+
+    const generation = pageGeneration
+    const offset = loadedOffset.value
     isLoadingMore.value = true
+
     try {
-      const page = await getTracksPage({
-        offset: loadedOffset.value,
-        limit: pageSize.value,
-        sort: nativeSortKey(),
-        order: sortBy.value === 'title' || sortBy.value === 'artist' || sortBy.value === 'album'
-          ? 'asc'
-          : 'desc',
-      })
+      const args = nativeQueryArgs()
+      const page = await getTracksPage({ offset, limit: pageSize.value, ...args })
+
+      // Dataset changed while this page was in flight (re-sort, new
+      // search). Dropping it prevents mixing two result sets.
+      if (generation !== pageGeneration) {
+        libLog('loadMoreTracks: stale page discarded', { generation, offset })
+        return
+      }
+
+      // A page that returns nothing means we are done, regardless of
+      // what the total claimed.
+      if (page.tracks.length === 0) {
+        hasMoreTracks.value = false
+        return
+      }
 
       tracks.value = mergeUnique(tracks.value, page.tracks)
       albums.value = mergeUnique(albums.value, page.albums)
       artists.value = mergeUnique(artists.value, page.artists)
       nativeTotal.value = page.total
-      loadedOffset.value += page.tracks.length
-      hasMoreTracks.value = page.hasMore
+      // Advance by the page we requested, so a duplicate row filtered
+      // out by mergeUnique can never stall the cursor.
+      loadedOffset.value = offset + page.tracks.length
+      hasMoreTracks.value = page.hasMore && loadedOffset.value < page.total
+
+      libLog('loadMoreTracks: appended page', {
+        offset,
+        received: page.tracks.length,
+        loaded: loadedOffset.value,
+        total: page.total,
+        hasMore: hasMoreTracks.value,
+      })
     } catch (error) {
+      if (generation !== pageGeneration) return
       libraryError.value = toLibraryError(error)
     } finally {
-      isLoadingMore.value = false
+      if (generation === pageGeneration) isLoadingMore.value = false
     }
+  }
+
+  /**
+   * Re-reads the library from offset 0 with the current sort/query.
+   * Used whenever the dataset definition changes.
+   */
+  async function resetPagination(): Promise<void> {
+    if (!isNativeLibrary.value) return
+    loadedOffset.value = 0
+    hasMoreTracks.value = false
+    await loadFirstPage()
+  }
+
+  /** Library search. Changing the term restarts pagination. */
+  function setSearchQuery(value: string): void {
+    if (searchQuery.value === value) return
+    searchQuery.value = value
+    void resetPagination()
   }
 
   function clearLibraryError(): void {
@@ -585,6 +698,7 @@ export const useLibraryStore = defineStore('library', () => {
     hasMoreTracks,
     isLoadingMore,
     nativeDataLoaded,
+    searchQuery,
 
     // getters
     totalTracks,
@@ -592,6 +706,8 @@ export const useLibraryStore = defineStore('library', () => {
     selectedSortLabel,
     sortedTracks,
     isScanning,
+    loadedCount,
+    allTracksLoaded,
     needsPermission,
     scanPercent,
     scanLabel,
@@ -618,6 +734,8 @@ export const useLibraryStore = defineStore('library', () => {
     cancelLibraryScan,
     loadFirstPage,
     loadMoreTracks,
+    resetPagination,
+    setSearchQuery,
     clearLibraryError,
   }
 })

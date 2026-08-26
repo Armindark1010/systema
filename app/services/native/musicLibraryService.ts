@@ -103,7 +103,24 @@ export function artistIdFor(name: string | null): string {
   return `na:${slug(name ?? UNKNOWN_ARTIST)}`
 }
 
-export function albumIdFor(album: string | null, artist: string | null): string {
+/**
+ * Album identity.
+ *
+ * MediaStore's own `albumId` is authoritative and is what album art is
+ * keyed by, so it is used whenever present. Two distinct albums that
+ * merely share a title (compilations, live vs studio, "Greatest Hits")
+ * therefore stay separate — collapsing them by name made unrelated
+ * tracks share one cover.
+ *
+ * The name-based form is only a fallback for rows where MediaStore
+ * reports no albumId at all.
+ */
+export function albumIdFor(
+  album: string | null,
+  artist: string | null,
+  mediaStoreAlbumId?: number | null,
+): string {
+  if (mediaStoreAlbumId != null) return `nal:${mediaStoreAlbumId}`
   return `nal:${slug(album ?? UNKNOWN_ALBUM)}:${slug(artist ?? UNKNOWN_ARTIST)}`
 }
 
@@ -136,7 +153,7 @@ export function toUiTrack(track: MusicTrack): Track {
     id: track.id,
     title: track.title,
     artistId: artistIdFor(track.artist),
-    albumId: albumIdFor(track.album, track.albumArtist ?? track.artist),
+    albumId: albumIdFor(track.album, track.albumArtist ?? track.artist, track.albumId),
     genreId: genreIdFor(track.genre),
     duration: Math.max(0, Math.round(track.duration / 1000)),
     year: track.year ?? 0,
@@ -175,7 +192,7 @@ export function toUiAlbums(tracks: MusicTrack[]): Album[] {
   const map = new Map<string, Album>()
   for (const track of tracks) {
     const primaryArtist = track.albumArtist ?? track.artist
-    const id = albumIdFor(track.album, primaryArtist)
+    const id = albumIdFor(track.album, primaryArtist, track.albumId)
     if (map.has(id)) continue
     map.set(id, {
       id,
