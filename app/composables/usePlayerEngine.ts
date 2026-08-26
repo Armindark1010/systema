@@ -51,7 +51,9 @@ export function usePlayerEngine() {
         if (player.repeatMode === 'one') {
           player.currentTime = 0
         } else {
-          player.next()
+          // Automatic end-of-track: repeat-one repeats here,
+          // unlike an explicit user skip.
+          player.next({ auto: true })
         }
       } else {
         player.currentTime += elapsedSec

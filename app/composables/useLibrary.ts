@@ -51,8 +51,19 @@ export function useLibrary() {
    * Clicking a library track plays it, updates Pinia, Mini Player, and EMO,
    * but MUST NOT open the Full Screen Player. The user remains in the Library.
    */
+  /**
+   * Tapping a Library track starts a playback CONTEXT from the list
+   * currently on screen, positioned at that track — so Previous and
+   * Next walk the visible library order instead of dead-ending on a
+   * one-item queue.
+   *
+   * Matches how Playlist, Search, Album and Artist behave.
+   */
   function playTrack(track: Track) {
-    playerStore.playTrack(track, 'LIBRARY')
+    const list = sortedTracks.value
+    const index = list.findIndex(t => t.id === track.id)
+    if (index >= 0) playerStore.playQueue(list, index)
+    else playerStore.playTrack(track, 'LIBRARY')
   }
 
   function playTracks(tracksToPlay: Track[], _context: string, shuffle = false) {
@@ -61,11 +72,17 @@ export function useLibrary() {
     playerStore.playQueue(items, 0)
   }
 
+  /**
+   * Shuffle the library: play the whole list as the context with
+   * shuffle enabled, so Next/Previous follow one deterministic
+   * shuffled order rather than re-randomising per press.
+   */
   function shuffleLibrary() {
     const list = sortedTracks.value
     if (!list.length) return
-    const randomTrack = list[Math.floor(Math.random() * list.length)]
-    if (randomTrack) playTrack(randomTrack)
+    const start = Math.floor(Math.random() * list.length)
+    playerStore.playQueue(list, start)
+    if (!playerStore.isShuffle) playerStore.toggleShuffle()
   }
 
   function addTrackToQueue(track: Track) {

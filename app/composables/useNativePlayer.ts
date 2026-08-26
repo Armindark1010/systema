@@ -30,6 +30,7 @@
 
 import { usePlayerStore } from '~/stores/player'
 import { useLibraryStore } from '~/stores/library'
+import { recordPlayed } from '~/composables/usePlaybackHistory'
 import {
   addPlayerListeners,
   addToQueueNative,
@@ -87,6 +88,8 @@ export function useNativePlayer() {
 
   /** Last track id Media3 reported. Guards against stale events. */
   let nativeTrackId: string | null = null
+  /** Last id written to recents, so repeat events do not duplicate. */
+  let recordedTrackId: string | null = null
   let lastResyncAt = 0
   let seekTimer: ReturnType<typeof setTimeout> | null = null
   let pendingSeekMs: number | null = null
@@ -163,45 +166,70 @@ export function useNativePlayer() {
     nativeTrackId = trackId
     if (player.currentTrack?.id === trackId) return
 
-    const fromQueue = player.queue.find(t => t.id === trackId)
-    const fromHistory = player.history.find(t => t.id === trackId)
-    const next = fromQueue ?? fromHistory
+    // Media3's current MediaItem carries the SYSTEMA track id as its
+    // mediaId, so resolution is by stable id — never by index.
+    const orderIndex = player.playbackOrder.findIndex(t => t.id === trackId)
 
-    // The engine is playing something the local queue does not know
-    // about. Rather than leaving the UI stale, resolve it from the
-    // library store — the native queue is the truth, not our mirror.
-    if (!next) {
-      const resolved = useLibraryStore().tracks.find(t => t.id === trackId)
-      if (!resolved) return
+    if (orderIndex >= 0) {
+      // Move the index; the order itself is untouched, so the frontend
+      // order and the native playlist stay identical.
       applyNative(() => {
-        if (player.currentTrack) player.history.push(player.currentTrack)
-        player.currentTrack = resolved
-        player.currentTime = 0
-        player.duration = resolved.duration
+        player.currentIndex = orderIndex
+        const track = player.playbackOrder[orderIndex]
+        if (track) {
+          player.currentTime = 0
+          player.duration = track.duration
+        }
+      })
+      noteNativePlayback(trackId)
+      return
+    }
+
+    // The engine is playing something our mirror does not contain.
+    // Resolve it from the library rather than leaving the UI stale.
+    const resolved = useLibraryStore().tracks.find(t => t.id === trackId)
+    if (!resolved) {
+      // Structured, visible, and non-destructive: we do NOT silently
+      // substitute a different track.
+      console.warn(
+        `[SYSTEMA/PLAYER] Media3 reported unknown track "${trackId}"; `
+        + 'the UI cannot resolve it.',
+      )
+      applyNative(() => {
+        player.playerError = {
+          code: 'NOT_FOUND',
+          message: 'The playing track could not be resolved.',
+          trackId,
+        }
       })
       return
     }
 
     applyNative(() => {
-      if (fromQueue) {
-        // Advanced into the queue: mirror that move locally.
-        const idx = player.queue.findIndex(t => t.id === trackId)
-        if (idx >= 0) {
-          if (player.currentTrack) player.history.push(player.currentTrack)
-          player.queue.splice(0, idx + 1)
-        }
-      } else {
-        // Stepped back into history.
-        const idx = player.history.findIndex(t => t.id === trackId)
-        if (idx >= 0) {
-          if (player.currentTrack) player.queue.unshift(player.currentTrack)
-          player.history.splice(idx, 1)
-        }
-      }
-      player.currentTrack = next
+      // The writable currentTrack setter splices it in after the
+      // current position and moves the index there.
+      player.currentTrack = resolved
       player.currentTime = 0
-      player.duration = next.duration
+      player.duration = resolved.duration
     })
+    noteNativePlayback(trackId)
+  }
+
+  /**
+   * RECENTS on native.
+   *
+   * Recorded here, from the engine's real current item, and only once
+   * playback is genuinely under way. Repeat events for the same track
+   * collapse in recordPlayed(), so pause/resume and duplicate
+   * transitions cannot create duplicates.
+   */
+  function noteNativePlayback(trackId: string) {
+    if (recordedTrackId === trackId) return
+    const track = player.playbackOrder.find(t => t.id === trackId)
+      ?? useLibraryStore().tracks.find(t => t.id === trackId)
+    if (!track) return
+    recordedTrackId = trackId
+    recordPlayed(trackId, track)
   }
 
   // ---- Local progress clock ----------------------------------
@@ -249,12 +277,19 @@ export function useNativePlayer() {
 
   // ---- Store -> native ---------------------------------------
 
-  /** Native queue = current track followed by the upcoming queue. */
+  /**
+   * Pushes the WHOLE playback order to Media3, with the current index.
+   *
+   * The frontend order and the native playlist are now the same list,
+   * so the engine receives tracks that were played before the current
+   * one too — which is what makes native Previous able to step back
+   * through them instead of dead-ending.
+   */
   function pushQueue(autoPlay: boolean, positionMs = 0) {
-    const current = player.currentTrack
-    if (!current) return
-    const tracks = [current, ...player.queue]
-    void setQueueNative(tracks, 0, { autoPlay, positionMs })
+    const order = player.playbackOrder
+    if (!order.length) return
+    const index = Math.max(0, player.currentIndex)
+    void setQueueNative(order, index, { autoPlay, positionMs })
   }
 
   function flushSeek() {
@@ -282,6 +317,25 @@ export function useNativePlayer() {
    * update: reading `player.currentTrack` here gives the track the
    * user just selected, and the engine is told to match.
    */
+  // ---- Navigation serialization -------------------------------
+  // Rapid Next/Next/Next (or Previous/Previous/Next) fires overlapping
+  // async bridge calls. Without ordering, an earlier reply can land
+  // after a later one and leave the UI on a track the engine already
+  // moved past. Commands are therefore chained: each waits for the
+  // previous to settle, so the final state always reflects the last
+  // command issued.
+  let navigationChain: Promise<unknown> = Promise.resolve()
+
+  function enqueueNavigation(command: () => Promise<unknown>) {
+    navigationChain = navigationChain
+      .catch(() => undefined)
+      .then(() => command())
+      .catch((error) => {
+        console.warn('[SYSTEMA/PLAYER] Navigation command failed', error)
+      })
+    return navigationChain
+  }
+
   function installActionBridge() {
     return player.$onAction(({ name, args, after }) => {
       if (applyingNativeState) return
@@ -294,6 +348,9 @@ export function useNativePlayer() {
             // synthesised engine rather than failing natively.
             if (!isPlayableNatively(player.currentTrack)) return
             if (track && player.currentTrack?.id !== track.id) return
+            // The store either jumped within the existing context or
+            // started a new one. Pushing the whole order with the
+            // current index covers both without special-casing.
             pushQueue(true)
             break
           }
@@ -321,11 +378,11 @@ export function useNativePlayer() {
             break
 
           case 'next':
-            void nextNative()
+            enqueueNavigation(nextNative)
             break
 
           case 'previous':
-            void previousNative()
+            enqueueNavigation(previousNative)
             break
 
           case 'seek':
@@ -345,28 +402,30 @@ export function useNativePlayer() {
 
           case 'addToQueue': {
             const track = args[0] as { id: string } | undefined
-            const atStart = args[1] === true
-            const added = player.queue.find(t => t.id === track?.id)
+            const added = player.playbackOrder.find(t => t.id === track?.id)
             if (!added || !isPlayableNatively(added)) return
-            // Native indices include the current track at 0.
-            void addToQueueNative(added, atStart ? 1 : undefined)
+            // The store already inserted it; mirror the same absolute
+            // position so both lists stay identical.
+            const at = player.playbackOrder.findIndex(t => t.id === added.id)
+            void addToQueueNative(added, at >= 0 ? at : undefined)
             break
           }
 
           case 'removeFromQueue': {
             const arg = args[0]
-            const id = typeof arg === 'string' ? arg : undefined
-            if (id) void removeFromQueueNative(id)
-            // Index-based removals are rarer; re-push to stay exact.
+            if (typeof arg === 'string') void removeFromQueueNative(arg)
+            // Index-based removals addressed the UP NEXT view, which
+            // the store has already resolved; re-push to stay exact.
             else pushQueue(false)
             break
           }
 
           case 'reorderQueue': {
-            const from = args[0] as number
-            const to = args[1] as number
-            // +1 for the current track occupying native index 0.
-            void moveInQueueNative(from + 1, to + 1)
+            // The store translated the UP NEXT indices into absolute
+            // positions and committed them. Re-push the resulting
+            // order so Media3 holds exactly the same list; its own
+            // current item keeps playing across the update.
+            pushQueue(false)
             break
           }
 
@@ -375,8 +434,9 @@ export function useNativePlayer() {
             break
 
           case 'shuffleQueue':
-            // The store reordered its own array; mirror it wholesale.
-            pushQueue(false)
+            // Regenerating the permutation does not change the
+            // underlying order, so nothing needs re-pushing; Media3
+            // keeps its own shuffle order for the same playlist.
             break
 
           case 'toggleShuffle':
@@ -438,6 +498,7 @@ export function useNativePlayer() {
   function dispose() {
     stopClock()
     nativeTrackId = null
+    recordedTrackId = null
     if (seekTimer) clearTimeout(seekTimer)
     seekTimer = null
     disposeListeners?.()

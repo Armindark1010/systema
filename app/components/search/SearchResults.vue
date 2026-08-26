@@ -13,6 +13,7 @@ import type { Album, Artist, Playlist, Track } from '~/types'
 import type { ActionItem } from './SearchActionSheet.vue'
 import { useSearchStore } from '~/stores/search'
 import { usePlayerStore } from '~/stores/player'
+import { useLibraryStore } from '~/stores/library'
 
 const search = useSearchStore()
 const player = usePlayerStore()
@@ -40,9 +41,11 @@ function albumArtist(album: Album) {
 }
 
 function playlistCover(playlist: Playlist) {
+  // Resolve from the library, not the playback queue: a playlist's
+  // artwork has nothing to do with what happens to be queued.
   const firstTrackId = playlist.trackIds[0]
   if (firstTrackId) {
-    const track = player.queue.find(t => t.id === firstTrackId)
+    const track = useLibraryStore().tracks.find(t => t.id === firstTrackId)
     if (track) return trackCover(track)
   }
   return playlist.cover
@@ -50,7 +53,14 @@ function playlistCover(playlist: Playlist) {
 
 function onPlayTrack(track: Track) {
   // CRITICAL REQUIREMENT: Play track immediately via Pinia, do NOT open Full Player!
-  player.playTrack(track, 'SEARCH')
+  // The visible track results become the playback context, so Next and
+  // Previous walk the search results rather than dead-ending.
+  const list = search.visibleTracks
+    .map(res => res.item as Track)
+    .filter((t): t is Track => Boolean(t?.id))
+  const index = list.findIndex(t => t.id === track.id)
+  if (index >= 0) player.playQueue(list, index)
+  else player.playTrack(track, 'SEARCH')
   toast.add({
     title: 'Now playing',
     description: track.title,

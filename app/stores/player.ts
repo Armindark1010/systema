@@ -11,6 +11,7 @@ import type { Album, Playlist, RepeatMode, Track } from '~/types'
 import { tracks as catalog } from '~/data/music'
 import { recordPlayed } from '~/composables/usePlaybackHistory'
 import { useSettingsStore } from '~/stores/settings'
+import { useLibraryStore } from '~/stores/library'
 
 export interface PlayerSleepTimerState {
   active: boolean
@@ -28,14 +29,98 @@ export const usePlayerStore = defineStore('player', () => {
   ].filter((t): t is Track => Boolean(t))
 
   // ---- State -------------------------------------------------
-  const currentTrack = ref<Track | null>(initialTrack)
+  // ---- Canonical queue model ---------------------------------
+  // ONE flat ordered list plus an index into it, mirroring the Media3
+  // playlist exactly. Previously the queue was a *consumed* array
+  // (next() shifted tracks out, previous() pushed them back), which
+  // meant the frontend order and the native order diverged the moment
+  // playback moved: Media3 still held A,B,C,D at index 1 while Pinia
+  // held [C,D] with A,B stranded in a separate history array.
+  //
+  // `queue` and `history` below are now derived views over this list,
+  // so every existing consumer keeps working while the underlying
+  // order can no longer drift from the engine's.
+  const playbackOrder = ref<Track[]>(
+    initialTrack ? [initialTrack, ...initialQueue] : [...initialQueue],
+  )
+  /** Index into `playbackOrder`. -1 when nothing is loaded. */
+  const currentIndex = ref(initialTrack ? 0 : -1)
+
+  /**
+   * Deterministic shuffle order: a permutation of `playbackOrder`
+   * indices, current track first. Never a re-randomised pick per Next,
+   * so forward and backward navigation retrace the same path.
+   */
+  const shuffleOrder = ref<number[]>([])
+
+  /**
+   * Playback order as a list of `playbackOrder` indices.
+   * Linear when shuffle is off, the shuffle permutation when on.
+   */
+  function orderPositions(): number[] {
+    if (isShuffle.value && shuffleOrder.value.length === playbackOrder.value.length) {
+      return shuffleOrder.value
+    }
+    return playbackOrder.value.map((_, i) => i)
+  }
+
+  /**
+   * The playing track, derived from the order + index so it can never
+   * disagree with the queue. Writable for the native mirror: assigning
+   * a track moves the index to it rather than storing a second copy.
+   */
+  const currentTrack = computed<Track | null>({
+    get: () => playbackOrder.value[currentIndex.value] ?? null,
+    set: (track: Track | null) => {
+      if (!track) {
+        currentIndex.value = -1
+        return
+      }
+      const idx = playbackOrder.value.findIndex(t => t.id === track.id)
+      if (idx >= 0) {
+        currentIndex.value = idx
+        return
+      }
+      // The engine is playing something outside the known order (it
+      // skipped an unplayable file, say). Splice it in after the
+      // current position so ordering stays sensible.
+      const at = Math.max(0, currentIndex.value + 1)
+      playbackOrder.value = [
+        ...playbackOrder.value.slice(0, at),
+        track,
+        ...playbackOrder.value.slice(at),
+      ]
+      currentIndex.value = at
+    },
+  })
+
+  /**
+   * UP NEXT — everything after the current track in playback order
+   * (shuffle-aware). A derived view, so the Queue UI keeps rendering
+   * the same shape while the data can no longer drift from native.
+   */
+  const queue = computed<Track[]>(() => {
+    if (currentIndex.value < 0) return playbackOrder.value
+    const positions = orderPositions()
+    const at = positions.indexOf(currentIndex.value)
+    if (at < 0) return []
+    return positions.slice(at + 1).map(i => playbackOrder.value[i]!).filter(Boolean)
+  })
+
+  /** Tracks already passed in the current playback order. */
+  const history = computed<Track[]>(() => {
+    if (currentIndex.value < 0) return []
+    const positions = orderPositions()
+    const at = positions.indexOf(currentIndex.value)
+    if (at <= 0) return []
+    return positions.slice(0, at).map(i => playbackOrder.value[i]!).filter(Boolean)
+  })
+
   const isPlaying = ref(false)
   const currentTime = ref(0) // seconds (e.g. 14.2)
   const duration = ref(initialTrack ? initialTrack.duration : 0) // seconds
   const volume = ref(0.82)
   const muted = ref(false)
-  const queue = ref<Track[]>(initialQueue)
-  const history = ref<Track[]>([])
   const isShuffle = ref(false)
   const repeatMode = ref<RepeatMode>('off')
   const sleepTimer = ref<PlayerSleepTimerState | null>(null)
@@ -51,11 +136,8 @@ export const usePlayerStore = defineStore('player', () => {
   const buffering = ref(false)
   /** Last structured playback failure, or null. */
   const playerError = ref<{ code: string; message: string; trackId: string | null } | null>(null)
-  /**
-   * Index of the current track within the native queue. -1 when the
-   * native queue is empty or playback is running in the browser.
-   */
-  const currentIndex = ref(-1)
+  // `currentIndex` is declared with the queue model above: there is
+  // exactly one index, shared by the UI and the native mirror.
 
   // UI modal / sheet state
   const fullPlayerOpen = ref(false)
@@ -101,22 +183,97 @@ export const usePlayerStore = defineStore('player', () => {
    * Updates state, clears currentTime, marks as playing.
    * Does NOT open full player — the caller or Mini Player decides UI navigation.
    */
-  function playTrack(track: Track, _context = 'LIBRARY') {
-    if (currentTrack.value && currentTrack.value.id !== track.id) {
-      history.value.push(currentTrack.value)
-    }
-    // If track is in the upcoming queue, remove it from queue
-    const inQueueIdx = queue.value.findIndex(t => t.id === track.id)
-    if (inQueueIdx >= 0) {
-      queue.value.splice(inQueueIdx, 1)
+  // ---- Navigation helpers ------------------------------------
+
+  /**
+   * Previous restarts the current track past this many seconds rather
+   * than stepping back. Kept as a named constant so it is adjustable
+   * in one place.
+   */
+  const RESTART_THRESHOLD_SECONDS = 3
+
+  /**
+   * Builds the deterministic shuffle permutation.
+   *
+   * The current track is pinned first so enabling shuffle never
+   * interrupts what is playing, and the rest are shuffled once. The
+   * permutation is then FIXED, which is what makes Next and Previous
+   * retrace the same path instead of re-randomising per press.
+   */
+  function rebuildShuffleOrder() {
+    const indices = playbackOrder.value.map((_, i) => i)
+    const current = currentIndex.value
+
+    const rest = indices.filter(i => i !== current)
+    for (let i = rest.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      const tmp = rest[i]!
+      rest[i] = rest[j]!
+      rest[j] = tmp
     }
 
-    currentTrack.value = track
+    shuffleOrder.value = current >= 0 ? [current, ...rest] : rest
+  }
+
+  /** Moves to an index in `playbackOrder` and starts playback. */
+  function moveTo(index: number) {
+    const track = playbackOrder.value[index]
+    if (!track) return
+    currentIndex.value = index
+    duration.value = track.duration
+    currentTime.value = 0
+    isPlaying.value = true
+    notePlaybackStarted()
+  }
+
+  /**
+   * RECENTS boundary.
+   *
+   * Recents record tracks that actually START playing. On native the
+   * engine confirms this and useNativePlayer records it from the real
+   * currentMediaItem, so recording here too would double-count and let
+   * a track that never played (missing file) into the history.
+   */
+  function notePlaybackStarted() {
+    if (isNativePlayback.value) return
+    const track = currentTrack.value
+    if (track) recordPlayed(track.id, track)
+  }
+
+  /**
+   * PLAY(track) semantics — deliberately two distinct behaviours.
+   *
+   *   Track IS already in the playback order
+   *     -> preserve the queue and jump to that item. Tapping a track
+   *        in the queue, or re-tapping one in the list you are already
+   *        playing from, must not destroy the context.
+   *
+   *   Track is NOT in the playback order
+   *     -> this is a new single-track context; it becomes the order.
+   *        Callers that want a fuller context (a playlist, an album,
+   *        a filtered list) call playQueue() with the whole list —
+   *        that is what Library/Search/Playlist do via playTracks().
+   *
+   * Either way the queue is never silently replaced just because a
+   * card was tapped.
+   */
+  function playTrack(track: Track, _context = 'LIBRARY') {
+    const existing = playbackOrder.value.findIndex(t => t.id === track.id)
+
+    if (existing >= 0) {
+      // Preserve the context; simply move to that item.
+      currentIndex.value = existing
+    } else {
+      playbackOrder.value = [track]
+      currentIndex.value = 0
+      rebuildShuffleOrder()
+    }
+
     duration.value = track.duration
     currentTime.value = 0
     isPlaying.value = true
     isLoading.value = false
-    recordPlayed(track.id)
+    notePlaybackStarted()
   }
 
   function pause() {
@@ -135,66 +292,86 @@ export const usePlayerStore = defineStore('player', () => {
     else resume()
   }
 
-  function next() {
-    if (repeatMode.value === 'one') {
+  /**
+   * Advance one item in the ACTUAL playback order.
+   *
+   * Walks the shuffle permutation when shuffle is on and the linear
+   * order otherwise, so A->B->C->D is deterministic and never a random
+   * pick. REPEAT_ONE applies to automatic track ends, not to a
+   * deliberate skip, so an explicit Next still advances.
+   */
+  function next(options: { auto?: boolean } = {}) {
+    if (currentIndex.value < 0) return
+
+    // Automatic end-of-track under repeat-one: replay the same item.
+    if (options.auto && repeatMode.value === 'one') {
       currentTime.value = 0
       isPlaying.value = true
       return
     }
 
-    if (queue.value.length > 0) {
-      let nextTrack: Track
-      if (isShuffle.value && queue.value.length > 1) {
-        const randomIndex = Math.floor(Math.random() * queue.value.length)
-        const [picked] = queue.value.splice(randomIndex, 1)
-        nextTrack = picked!
-      } else {
-        nextTrack = queue.value.shift()!
-      }
+    const positions = orderPositions()
+    const at = positions.indexOf(currentIndex.value)
+    if (at < 0) return
 
-      if (currentTrack.value) {
-        history.value.push(currentTrack.value)
-        if (repeatMode.value === 'all') {
-          queue.value.push(currentTrack.value)
-        }
-      }
+    if (at < positions.length - 1) {
+      moveTo(positions[at + 1]!)
+      return
+    }
 
-      currentTrack.value = nextTrack
-      duration.value = nextTrack.duration
-      currentTime.value = 0
-      isPlaying.value = true
-      recordPlayed(nextTrack.id)
-    } else if (repeatMode.value === 'all' && history.value.length > 0) {
-      // Loop entire history back into queue
-      const loopQueue = [...history.value]
-      if (currentTrack.value) loopQueue.push(currentTrack.value)
-      history.value = []
-      const first = loopQueue.shift()!
-      queue.value = loopQueue
-      currentTrack.value = first
-      duration.value = first.duration
-      currentTime.value = 0
-      isPlaying.value = true
-      recordPlayed(first.id)
-    } else if (shouldAutoplay()) {
+    // End of the order.
+    if (repeatMode.value === 'all' && positions.length > 0) {
+      moveTo(positions[0]!)
+      return
+    }
+
+    if (shouldAutoplay()) {
       const related = relatedTracks(currentTrack.value)
       if (related.length) {
-        queue.value = related.slice(1)
-        const first = related[0]!
-        if (currentTrack.value) history.value.push(currentTrack.value)
-        currentTrack.value = first
-        duration.value = first.duration
-        currentTime.value = 0
-        isPlaying.value = true
-        recordPlayed(first.id)
-      } else {
-        isPlaying.value = false
-        currentTime.value = 0
+        // Extend the existing order rather than replacing it, so the
+        // tracks already played stay reachable with Previous.
+        const first = playbackOrder.value.length
+        playbackOrder.value = [...playbackOrder.value, ...related]
+        rebuildShuffleOrder()
+        moveTo(first)
+        return
       }
-    } else {
-      isPlaying.value = false
-      currentTime.value = 0
     }
+
+    isPlaying.value = false
+    currentTime.value = 0
+  }
+
+  /**
+   * Step back one item in the actual playback order.
+   *
+   * Standard music-player behaviour: past RESTART_THRESHOLD_SECONDS
+   * into a track, Previous restarts it instead of moving back.
+   */
+  function previous() {
+    if (currentIndex.value < 0) return
+
+    if (currentTime.value > RESTART_THRESHOLD_SECONDS) {
+      currentTime.value = 0
+      return
+    }
+
+    const positions = orderPositions()
+    const at = positions.indexOf(currentIndex.value)
+    if (at < 0) return
+
+    if (at > 0) {
+      moveTo(positions[at - 1]!)
+      return
+    }
+
+    // Start of the order.
+    if (repeatMode.value === 'all' && positions.length > 0) {
+      moveTo(positions[positions.length - 1]!)
+      return
+    }
+
+    currentTime.value = 0
   }
 
   function shouldAutoplay() {
@@ -217,27 +394,6 @@ export const usePlayerStore = defineStore('player', () => {
       return useSettingsStore().playback.queueAfterPlaylist
     } catch {
       return 'replace'
-    }
-  }
-
-  function previous() {
-    if (currentTime.value > 3) {
-      currentTime.value = 0
-      return
-    }
-
-    if (history.value.length > 0) {
-      const prevTrack = history.value.pop()!
-      if (currentTrack.value) {
-        queue.value.unshift(currentTrack.value)
-      }
-      currentTrack.value = prevTrack
-      duration.value = prevTrack.duration
-      currentTime.value = 0
-      isPlaying.value = true
-      recordPlayed(prevTrack.id)
-    } else {
-      currentTime.value = 0
     }
   }
 
@@ -265,96 +421,127 @@ export const usePlayerStore = defineStore('player', () => {
 
   // ---- Queue Operations --------------------------------------
 
+  /**
+   * Queue a track. `atStart` places it immediately after the current
+   * item ("play next") rather than at the end of the order.
+   */
   function addToQueue(track: Track, atStart = false) {
-    if (atStart) {
-      queue.value.unshift(track)
-    } else {
-      queue.value.push(track)
-    }
-  }
+    const at = atStart
+      ? Math.max(0, currentIndex.value + 1)
+      : playbackOrder.value.length
 
-  function removeFromQueue(trackIdOrIndex: string | number) {
-    if (typeof trackIdOrIndex === 'number') {
-      if (trackIdOrIndex >= 0 && trackIdOrIndex < queue.value.length) {
-        queue.value.splice(trackIdOrIndex, 1)
-      }
-    } else {
-      const idx = queue.value.findIndex(t => t.id === trackIdOrIndex)
-      if (idx >= 0) {
-        queue.value.splice(idx, 1)
-      }
-    }
+    playbackOrder.value = [
+      ...playbackOrder.value.slice(0, at),
+      track,
+      ...playbackOrder.value.slice(at),
+    ]
+
+    // Inserting before the current item would shift it.
+    if (at <= currentIndex.value) currentIndex.value += 1
+    rebuildShuffleOrder()
   }
 
   /**
-   * Reorders the real Pinia queue array.
-   * Commits the new order immediately.
+   * Removes a track from the order.
+   *
+   * A numeric argument indexes the UP NEXT view (what the Queue UI
+   * renders), not the raw order — that is the contract callers have
+   * always used.
+   */
+  function removeFromQueue(trackIdOrIndex: string | number) {
+    let orderIndex = -1
+
+    if (typeof trackIdOrIndex === 'number') {
+      const upNextTrack = queue.value[trackIdOrIndex]
+      if (!upNextTrack) return
+      orderIndex = playbackOrder.value.findIndex(t => t.id === upNextTrack.id)
+    } else {
+      orderIndex = playbackOrder.value.findIndex(t => t.id === trackIdOrIndex)
+    }
+
+    if (orderIndex < 0) return
+    // Removing the playing item is not a queue edit; ignore it.
+    if (orderIndex === currentIndex.value) return
+
+    playbackOrder.value = playbackOrder.value.filter((_, i) => i !== orderIndex)
+    if (orderIndex < currentIndex.value) currentIndex.value -= 1
+    rebuildShuffleOrder()
+  }
+
+  /**
+   * Reorders the REAL playback order.
+   *
+   * Indices address the UP NEXT view; they are translated to absolute
+   * positions in `playbackOrder` so the change is a genuine playback
+   * reorder rather than a cosmetic list shuffle. The currently playing
+   * track keeps playing and its index is adjusted, never restarted.
    */
   function reorderQueue(fromIndex: number, toIndex: number) {
-    if (
-      fromIndex === toIndex ||
-      fromIndex < 0 ||
-      toIndex < 0 ||
-      fromIndex >= queue.value.length ||
-      toIndex >= queue.value.length
-    ) {
-      return
-    }
+    if (fromIndex === toIndex) return
 
-    const nextQueue = [...queue.value]
-    const [moved] = nextQueue.splice(fromIndex, 1)
-    if (!moved) return
-    nextQueue.splice(toIndex, 0, moved)
-    queue.value = nextQueue
+    const upNext = queue.value
+    const moved = upNext[fromIndex]
+    const target = upNext[toIndex]
+    if (!moved || !target) return
+
+    const from = playbackOrder.value.findIndex(t => t.id === moved.id)
+    const to = playbackOrder.value.findIndex(t => t.id === target.id)
+    if (from < 0 || to < 0) return
+
+    const nextOrder = [...playbackOrder.value]
+    const [item] = nextOrder.splice(from, 1)
+    if (!item) return
+    nextOrder.splice(to, 0, item)
+
+    // Keep the index pointing at the same TRACK, not the same slot.
+    const playing = currentTrack.value
+    playbackOrder.value = nextOrder
+    if (playing) {
+      const idx = nextOrder.findIndex(t => t.id === playing.id)
+      if (idx >= 0) currentIndex.value = idx
+    }
+    rebuildShuffleOrder()
   }
 
+  /** Clears everything except the track currently playing. */
   function clearQueue() {
-    queue.value = []
+    const playing = currentTrack.value
+    if (playing) {
+      playbackOrder.value = [playing]
+      currentIndex.value = 0
+    } else {
+      playbackOrder.value = []
+      currentIndex.value = -1
+    }
+    rebuildShuffleOrder()
+  }
+
+  /** Plays an UP NEXT item by its index in that view. */
+  function playQueueItem(queueIndex: number) {
+    const picked = queue.value[queueIndex]
+    if (!picked) return
+    const orderIndex = playbackOrder.value.findIndex(t => t.id === picked.id)
+    if (orderIndex < 0) return
+    moveTo(orderIndex)
+  }
+
+  /** Regenerates the shuffle permutation, keeping the current track. */
+  function shuffleQueue() {
+    rebuildShuffleOrder()
   }
 
   /**
-   * Plays an upcoming queue item by its index in the queue.
+   * Toggle shuffle without interrupting playback.
+   *
+   * Enabling builds a permutation with the current track pinned first;
+   * disabling simply stops consulting it, so the original order is
+   * restored intact. The playing track is preserved either way — the
+   * order is never destructively rewritten.
    */
-  function playQueueItem(queueIndex: number) {
-    if (queueIndex < 0 || queueIndex >= queue.value.length) return
-    const [picked] = queue.value.splice(queueIndex, 1)
-    if (!picked) return
-
-    if (currentTrack.value) {
-      history.value.push(currentTrack.value)
-    }
-
-    currentTrack.value = picked
-    duration.value = picked.duration
-    currentTime.value = 0
-    isPlaying.value = true
-    recordPlayed(picked.id)
-  }
-
-  function shuffleQueue() {
-    const array = [...queue.value]
-    for (let i = array.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      const temp = array[i]!
-      array[i] = array[j]!
-      array[j] = temp
-    }
-    queue.value = array
-  }
-
   function toggleShuffle() {
     isShuffle.value = !isShuffle.value
-
-    // On Android the Media3 engine owns shuffle: it keeps the queue in
-    // its original order and applies a stable shuffle order on top, so
-    // the current track keeps playing and previous/next stay coherent.
-    // Destructively reshuffling our copy here would desynchronise the
-    // two and lose the original order for good.
-    if (isNativePlayback.value) return
-
-    if (isShuffle.value && queue.value.length > 1) {
-      shuffleQueue()
-    }
+    if (isShuffle.value) rebuildShuffleOrder()
+    else shuffleOrder.value = []
   }
 
   function cycleRepeat() {
@@ -381,29 +568,60 @@ export const usePlayerStore = defineStore('player', () => {
     if (id) toggleFavoriteId(id)
   }
 
+  /**
+   * Start a playback CONTEXT from a list.
+   *
+   * The whole list becomes the playback order and `startIndex` becomes
+   * the current item, so tapping track C of A,B,C,D,E gives
+   * Previous -> B and Next -> D. The tracks before the start point are
+   * genuinely part of the order and reachable with Previous, rather
+   * than being dropped as they were before.
+   *
+   * Used identically by Library, Search, Playlist, Album and Artist,
+   * so all five surfaces behave the same.
+   */
   function playQueue(tracks: Track[], startIndex = 0) {
     if (!tracks.length) return
     const safeIndex = Math.max(0, Math.min(startIndex, tracks.length - 1))
-    const start = tracks[safeIndex]!
-    const rest = tracks.slice(safeIndex + 1)
 
+    // "Append" mode: keep playing, add the list after the current item.
     if (queueMode() === 'append' && currentTrack.value) {
-      queue.value = [...queue.value, start, ...rest]
+      const at = Math.max(0, currentIndex.value + 1)
+      playbackOrder.value = [
+        ...playbackOrder.value.slice(0, at),
+        ...tracks,
+        ...playbackOrder.value.slice(at),
+      ]
+      rebuildShuffleOrder()
       return
     }
 
-    history.value = tracks.slice(0, safeIndex)
-    currentTrack.value = start
+    playbackOrder.value = [...tracks]
+    currentIndex.value = safeIndex
+    rebuildShuffleOrder()
+
+    const start = tracks[safeIndex]!
     duration.value = start.duration
-    queue.value = rest
     currentTime.value = 0
     isPlaying.value = true
-    recordPlayed(start.id)
+    notePlaybackStarted()
   }
 
   function playPlaylist(pl: Playlist, startIndex = 0) {
+    // Resolve against the live library first so playlists of device
+    // tracks work; the mock catalog remains the browser fallback.
+    const resolve = (id: string): Track | undefined => {
+      try {
+        const fromLibrary = useLibraryStore().tracks.find(t => t.id === id)
+        if (fromLibrary) return fromLibrary
+      } catch {
+        /* store unavailable (SSR) */
+      }
+      return catalog.find(t => t.id === id)
+    }
+
     const playlistTracks = pl.trackIds
-      .map(id => catalog.find(t => t.id === id))
+      .map(resolve)
       .filter((t): t is Track => Boolean(t))
     playQueue(playlistTracks, startIndex)
   }
@@ -412,7 +630,12 @@ export const usePlayerStore = defineStore('player', () => {
     playQueue(albumTracks, startIndex)
   }
 
+  /**
+   * Demo affordance: give the browser mock player something to skip
+   * to. Never runs on native, where the real queue is authoritative.
+   */
   function ensureFullPlayerNavigation() {
+    if (isNativePlayback.value) return
     if (!currentTrack.value || queue.value.length > 0) return
     const companionIds = ['tr-37', 'tr-39', 'tr-40']
     const companions = companionIds
@@ -420,7 +643,8 @@ export const usePlayerStore = defineStore('player', () => {
       .map(id => catalog.find(t => t.id === id))
       .filter((t): t is Track => Boolean(t))
     if (companions.length) {
-      queue.value = companions
+      playbackOrder.value = [...playbackOrder.value, ...companions]
+      rebuildShuffleOrder()
     }
   }
 
@@ -465,6 +689,8 @@ export const usePlayerStore = defineStore('player', () => {
     sleepTimer,
     isPlayerReady,
     isLoading,
+    playbackOrder,
+    shuffleOrder,
     isNativePlayback,
     buffering,
     playerError,

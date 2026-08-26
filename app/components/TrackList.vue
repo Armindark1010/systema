@@ -23,13 +23,13 @@ const player = usePlayer()
 const { toggleFavorite: toggleLibraryFavorite } = useMusicLibrary()
 
 function onPlay(t: Track) {
+  // The list on screen is the playback context, positioned at the
+  // tapped track. (The previous check read `player.queue.value` — an
+  // extra `.value` on an already-unwrapped store array, so it was
+  // always undefined-guarded into the else branch.)
   const idx = props.tracks.findIndex((x) => x.id === t.id)
-  const alreadyInQueue = player.queue.value.some((q: any) => (q.track ? q.track.id : q.id) === t.id)
-  if (alreadyInQueue) {
-    player.playTrack(t, props.context)
-  } else {
-    player.playQueue(props.tracks, idx)
-  }
+  if (idx >= 0) player.playQueue(props.tracks, idx)
+  else player.playTrack(t, props.context)
 }
 
 function onFavorite(id: string) {

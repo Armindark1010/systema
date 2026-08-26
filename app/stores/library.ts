@@ -8,7 +8,7 @@
 import { defineStore } from 'pinia'
 import type { Album, Artist, Playlist, Track } from '~/types'
 import { tracks as catalogTracks, albums as catalogAlbums, artists as catalogArtists } from '~/data/music'
-import { usePlaybackHistory } from '~/composables/usePlaybackHistory'
+import { usePlaybackHistory, registerTracksForHistory } from '~/composables/usePlaybackHistory'
 import { usePlaylists } from '~/composables/usePlaylists'
 import { useSettingsStore } from '~/stores/settings'
 import {
@@ -570,6 +570,9 @@ export const useLibraryStore = defineStore('library', () => {
       }
 
       tracks.value = page.tracks
+      // Let recents resolve device tracks, which the mock catalog
+      // cannot. Cheap and idempotent.
+      registerTracksForHistory(page.tracks)
       albums.value = page.albums
       artists.value = page.artists
       nativeTotal.value = page.total
@@ -631,6 +634,7 @@ export const useLibraryStore = defineStore('library', () => {
       }
 
       tracks.value = mergeUnique(tracks.value, page.tracks)
+      registerTracksForHistory(page.tracks)
       albums.value = mergeUnique(albums.value, page.albums)
       artists.value = mergeUnique(artists.value, page.artists)
       nativeTotal.value = page.total
