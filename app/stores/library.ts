@@ -81,12 +81,21 @@ export const useLibraryStore = defineStore('library', () => {
 
   const sortBy = ref<LibrarySortKey>(defaultSortFromSettings())
 
-  // On the web these stay seeded with the mock catalog. On Android the
-  // first successful scan/load replaces them with real device tracks.
-  const tracks = ref<Track[]>(catalogTracks)
-  const albums = ref<Album[]>(catalogAlbums)
-  const artists = ref<Artist[]>(catalogArtists)
-  const isLoading = ref(false)
+  // Seed the catalog per platform AT CONSTRUCTION.
+  //
+  // This must not wait for initNativeLibrary(): Nuxt mounts the Vue app
+  // before the `app:mounted` hook fires, so a store seeded with mock
+  // data would paint 40 demo tracks on Android for at least one frame —
+  // and forever if anything downstream failed. On native we start empty
+  // and let the real index fill in.
+  const seedWithMock = !isNativeLibraryAvailable()
+  const tracks = ref<Track[]>(seedWithMock ? catalogTracks : [])
+  const albums = ref<Album[]>(seedWithMock ? catalogAlbums : [])
+  const artists = ref<Artist[]>(seedWithMock ? catalogArtists : [])
+
+  // Native starts in a loading state so the Library shows its skeleton
+  // rather than an empty list while the first scan runs.
+  const isLoading = ref(!seedWithMock)
 
   // ---- Native library state ----------------------------------
   // Deliberately platform-agnostic: no Android or Capacitor concept
@@ -300,6 +309,16 @@ export const useLibraryStore = defineStore('library', () => {
    * returns immediately and the mock catalog stays untouched.
    */
   async function initNativeLibrary(): Promise<void> {
+    try {
+      await runNativeInit()
+    } finally {
+      // Never leave the Library stuck on its skeleton, whatever
+      // happened above.
+      isLoading.value = false
+    }
+  }
+
+  async function runNativeInit(): Promise<void> {
     const available = isNativeLibraryAvailable()
     libLog('init: isNativeLibraryAvailable', {
       available,
@@ -314,14 +333,15 @@ export const useLibraryStore = defineStore('library', () => {
 
     isNativeLibrary.value = true
 
-    // ANDROID PATH — the device is the only source of truth from here
-    // on. Drop the mock catalog immediately so a permission prompt or
-    // an empty device can never be mistaken for a real library.
-    if (!nativeDataLoaded.value) {
+    // ANDROID PATH — the device is the only source of truth. The store
+    // already seeded empty at construction; this is a safety net for
+    // the case where the store was created before Capacitor finished
+    // booting (guarded so it can never wipe real data).
+    if (!nativeDataLoaded.value && tracks.value.length > 0) {
       tracks.value = []
       albums.value = []
       artists.value = []
-      libLog('init: cleared mock catalog for native platform')
+      libLog('init: cleared stale mock catalog on native platform')
     }
 
     await attachScanListeners()

@@ -43,6 +43,27 @@ const scanStatusText = computed(() => {
   return scanLabel.value || undefined
 })
 
+// ---- Integration diagnostics -------------------------------
+// Reports what the native chain actually did, on the device.
+const diagnostics = ref<{ step: string; value: string; ok: boolean | null }[]>([])
+const diagnosticsRunning = ref(false)
+
+async function runDiagnostics() {
+  diagnosticsRunning.value = true
+  try {
+    const { runLibraryDiagnostics } = await import('~/services/native/musicLibraryDiagnostics')
+    diagnostics.value = await runLibraryDiagnostics()
+  } catch (error) {
+    diagnostics.value = [{
+      step: 'diagnostics',
+      value: `Failed to run: ${String(error)}`,
+      ok: false,
+    }]
+  } finally {
+    diagnosticsRunning.value = false
+  }
+}
+
 function onScanClick() {
   if (!isNativeLibrary.value) return
   if (isScanning.value) void library.cancelLibraryScan()
@@ -222,6 +243,37 @@ watch(() => settings.library.defaultSort, (value) => {
           />
         </div>
       </div>
+      <div class="mt-4 border border-line">
+        <SettingRow
+          id="library-diagnostics"
+          icon="lucide:stethoscope"
+          label="INTEGRATION DIAGNOSTICS"
+          description="Runs the full native chain and reports where it stops."
+        >
+          <button
+            class="sys-btn-outline !h-8"
+            :disabled="diagnosticsRunning"
+            @click="runDiagnostics"
+          >
+            {{ diagnosticsRunning ? 'RUNNING' : 'RUN' }}
+          </button>
+        </SettingRow>
+        <div v-if="diagnostics.length" class="border-t border-line p-3 space-y-1.5">
+          <div
+            v-for="entry in diagnostics"
+            :key="entry.step"
+            class="flex items-start gap-2 text-micro font-mono leading-relaxed"
+          >
+            <span
+              class="shrink-0 w-3 text-center"
+              :class="entry.ok === null ? 'text-fg-muted' : entry.ok ? 'text-success' : 'text-danger'"
+            >{{ entry.ok === null ? '·' : entry.ok ? '✓' : '✗' }}</span>
+            <span class="shrink-0 text-fg-muted">{{ entry.step }}</span>
+            <span class="min-w-0 break-all text-fg">{{ entry.value }}</span>
+          </div>
+        </div>
+      </div>
+
       <SettingsNote>
         {{ isNativeLibrary
           ? 'REAL PROGRESS FROM THE NATIVE INDEX. COUNTS REFLECT ACTUAL MEDIASTORE ROWS PROCESSED.'

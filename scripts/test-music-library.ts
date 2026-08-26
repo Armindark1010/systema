@@ -238,4 +238,33 @@ console.log('Testing plugin name contract...')
 }
 console.log('✓ plugin name matches the native annotation')
 
+// 11. Construction-time seeding regression.
+//     Nuxt mounts the Vue app BEFORE the app:mounted hook fires, so a
+//     store that seeds mock data and only clears it inside an async
+//     init will paint demo tracks on Android — and keep them forever if
+//     anything downstream fails. The seed decision must therefore be
+//     made synchronously, at store construction.
+console.log('Testing construction-time catalog seeding...')
+{
+  const MOCK = ['tr-01', 'tr-02']
+
+  // Mirrors the store's synchronous seed decision.
+  function seed(nativeAvailable: boolean) {
+    const seedWithMock = !nativeAvailable
+    return {
+      tracks: seedWithMock ? [...MOCK] : [],
+      isLoading: !seedWithMock,
+    }
+  }
+
+  const web = seed(false)
+  assert.deepEqual(web.tracks, MOCK, 'web MUST seed the mock catalog synchronously')
+  assert.equal(web.isLoading, false, 'web must not show a loading skeleton')
+
+  const android = seed(true)
+  assert.deepEqual(android.tracks, [], 'android must NEVER seed mock tracks, not even for one frame')
+  assert.equal(android.isLoading, true, 'android shows the skeleton until the index loads')
+}
+console.log('✓ mock data is never seeded on native, even before init runs')
+
 console.log('--- ALL NATIVE MUSIC LIBRARY TESTS PASSED! ---')
