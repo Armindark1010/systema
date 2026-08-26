@@ -283,7 +283,7 @@ explicitly.
 
 | Claim | Status |
 |---|---|
-| Test model is a real ONNX file with the intended graph | **TEST VERIFIED** (102 assertions) |
+| Test model is a real ONNX file with the intended graph | **TEST VERIFIED** (144 assertions) |
 | ONNX Runtime executes it → `[9,25,49,81]`, dynamic shapes, 50-run determinism | **DESKTOP VERIFIED** (onnxruntime 1.29.0, Python) |
 | `ai.onnxruntime` confined to one file | **TEST VERIFIED** |
 | No fallback, no fabrication, no weights committed | **TEST VERIFIED** (82 assertions) |
@@ -293,9 +293,10 @@ explicitly.
 | Selecting ONNX resolves `OnnxInferenceRuntime` | **ANDROID CODE VERIFIED** — resolution logic replayed in tests, not executed on device |
 | APK builds (`./gradlew assembleDebug`) | **NOT RUN HERE** — no JVM in this sandbox; JDK download blocked by TLS |
 | Kotlin contract suite (descriptor, preprocessing, reference lifecycle) | **NOT RUN HERE** — no JVM/kotlinc in this environment. Runs via `./gradlew testDebugUnitTest` |
-| **ONNX Runtime loads and executes on the Poco X7 Pro** | **NOT VERIFIED ON HARDWARE** |
-| Real-audio pipeline end to end on device | **NOT VERIFIED ON HARDWARE** |
-| Repeated inference without crash; unload releases memory | **NOT VERIFIED ON HARDWARE** |
+| **ONNX Runtime loads and executes on the Poco X7 Pro** | **DEVICE VERIFIED** (2026-08-27) |
+| Real-audio pipeline end to end on device | **DEVICE VERIFIED** (2026-08-27) |
+| Repeated inference without crash (10 runs) | **DEVICE VERIFIED** (2026-08-27) |
+| Unload releases native memory | **ANDROID CODE VERIFIED** — no leak instrumented on device |
 
 Desktop ONNX Runtime executing the file says the **model** is correct.
 It says nothing about the **Android AAR**, the ABI, or this device.
@@ -331,3 +332,92 @@ recommendations. No change to the Phase 13 analyser or its stored
 results. No cloud inference.
 
 **Phase 16 handles audio embeddings.**
+
+
+---
+
+## 11. Device verification and closing audit (2026-08-27)
+
+Run on the **Poco X7 Pro**.
+
+### Deterministic model — REAL INFERENCE VERIFIED
+
+```
+input  [1, 2, 3, 4]
+output [9.00, 25.00, 49.00, 81.00]
+deterministic across 10 runs: YES
+```
+
+### Real audio — ONNX Runtime (CPU)
+
+| Metric | Value |
+|---|---|
+| decode | 19 586 ms |
+| prep | 6.8 ms |
+| inference | 9.4 ms |
+| tensor | 11.8 ms (derived) |
+| total | 19 614 ms |
+| rtf | 0.150 |
+| out dim | 2 889 792 |
+
+### What "out dim 2889792" is
+
+It is the **decoded sample count**, not an embedding dimension.
+
+The test model is **element-wise** — `(x·2+1)²` applied per sample —
+and declares a dynamic shape `[-1]`, so *N* floats in produce *N*
+floats out. The chain:
+
+```
+track → MediaCodec → PCM @ 22 050 Hz mono → 2 889 792 samples
+      → RAW_TENSOR passthrough (no resample, shape unchanged)
+      → input tensor float32 [2889792]
+      → session.run()
+      → output tensor float32 [2889792]
+      → result.output.size → outputDimension → UI "out dim"
+```
+
+Cross-checks, all consistent:
+
+- 2 889 792 ÷ 22 050 Hz = **131.06 s** → a 2 m 11 s track
+- 19 614 ms ÷ 131 056 ms = **0.1497** → matches the reported rtf 0.150
+- The 5-minute cap (6 615 000 samples) was **not** reached
+- Replayed against real onnxruntime at that exact size:
+  2 889 792 in → 2 889 792 out
+
+`out dim` is therefore correct and expected. It is **not** an
+embedding, and it must not be read as one.
+
+### Bug found and fixed
+
+`19 586 + 6.8 + 9.4 = 19 602.2`, but TOTAL showed `19 614` — **11.8 ms
+unexplained on screen**. `totalMs` correctly includes `tensorMs`, and
+the summary even computed `summary.tensor`, but no cell rendered it.
+
+A total whose parts do not add up invites the reader to suspect hidden
+cost inside `inference`, which is precisely the wrong conclusion. Fixed
+by rendering **MEDIAN TENSOR** and stating the formula in the UI. The
+underlying measurements were already correct; only the display was
+incomplete.
+
+### Timing boundaries (confirmed, unchanged)
+
+| Metric | Includes | Excludes |
+|---|---|---|
+| `decodeMs` | MediaExtractor + MediaCodec + resample to 22.05 kHz mono | everything else |
+| `preprocessingMs` | `ModelInputPreparer.prepare` (here: a passthrough copy) | decode, inference |
+| `inferenceMs` | **`session.run()` only** | decode, prep, tensor alloc, output conversion, UI |
+| `tensorMs` | tensor allocation + output read-back | `run()` itself |
+| `totalMs` | decode + prep + inference + tensor | **cold load** (paid once per batch) |
+| `rtf` | `totalMs / audioDurationMs` | — |
+
+### Real-audio path — confirmed genuine
+
+`MediaExtractor`/`MediaCodec` over the user's own `ContentResolver`
+URI. No synthetic generator exists anywhere in the inference package,
+the ONNX lab does not import Phase 14's synthetic dataset, and a track
+that decodes to nothing **fails** rather than being substituted. The
+device numbers corroborate this independently: a 19.6 s decode and a
+131 s duration cannot come from a generator.
+
+**PHASE 15 — CLOSED.**
