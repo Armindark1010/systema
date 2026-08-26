@@ -64,8 +64,28 @@ export interface InferenceEnvironment {
   timestamp: number
 }
 
+/**
+ * Canonical runtime identifiers, mirroring Kotlin's `RuntimeIds`.
+ *
+ * These strings cross the Capacitor bridge, so the two languages must
+ * agree exactly. `scripts/test-onnx-integration.ts` asserts that this
+ * union and the Kotlin object list the same values.
+ *
+ * "onnxruntime" names the ENGINE. Note that 'onnx' is deliberately NOT
+ * used here: it is already the `ModelFormat` token for the FILE format
+ * (`app/services/ai-lab/types.ts`), and a runtime is not a format.
+ */
+export const RUNTIME_ONNX = 'onnxruntime'
+export const RUNTIME_REFERENCE = 'reference'
+
+export type RuntimeId = typeof RUNTIME_ONNX | typeof RUNTIME_REFERENCE
+
+/** Every runtime the app knows about, for validation and tests. */
+export const ALL_RUNTIME_IDS: readonly RuntimeId[] = [RUNTIME_ONNX, RUNTIME_REFERENCE]
+
 export interface NativeRuntimeInfo {
-  id: string
+  /** Canonical id — one of [ALL_RUNTIME_IDS]. */
+  id: RuntimeId
   label: string
   /** Measured on this device, not assumed from the build config. */
   available: boolean
@@ -94,7 +114,7 @@ export interface InferenceCapabilities {
 
 /** Result of the deterministic integration test (§8). */
 export interface TestModelResult {
-  runtimeId: string
+  runtimeId: RuntimeId
   runtimeLabel: string
   modelId: string
   modelSizeBytes: number
@@ -137,7 +157,7 @@ export interface TrackMeasurement {
 }
 
 export interface RealAudioResult {
-  runtimeId: string
+  runtimeId: RuntimeId
   runtimeLabel: string
   modelId: string
   modelVersion: string
@@ -151,7 +171,7 @@ export interface RealAudioResult {
 export interface InferencePlugin {
   getCapabilities(): Promise<InferenceCapabilities>
   runTestModel(options: {
-    runtimeId: string
+    runtimeId: RuntimeId
     input?: number[]
     iterations?: number
   }): Promise<TestModelResult>
@@ -161,7 +181,7 @@ export interface InferencePlugin {
    * inference run (§13).
    */
   runRealAudio(options: {
-    runtimeId: string
+    runtimeId: RuntimeId
     modelId: string
     tracks: Array<{ trackId: string, uri: string }>
   }): Promise<RealAudioResult>

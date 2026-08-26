@@ -121,7 +121,7 @@ class InferencePlugin : Plugin() {
      */
     @PluginMethod
     fun runTestModel(call: PluginCall) {
-        val runtimeId = call.getString("runtimeId") ?: "onnx"
+        val runtimeId = call.getString("runtimeId") ?: RuntimeIds.ONNX
         val iterations = call.getInt("iterations") ?: 1
         val inputArray = call.getArray("input", null)
 
@@ -164,7 +164,7 @@ class InferencePlugin : Plugin() {
      */
     @PluginMethod
     fun runRealAudio(call: PluginCall) {
-        val runtimeId = call.getString("runtimeId") ?: "onnx"
+        val runtimeId = call.getString("runtimeId") ?: RuntimeIds.ONNX
         val modelId = call.getString("modelId")
         if (modelId.isNullOrBlank()) {
             call.reject(

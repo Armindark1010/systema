@@ -46,10 +46,31 @@ class InferenceBenchmark(
         const val MAX_TRACKS = 20
     }
 
-    private val runtimes: Map<String, InferenceRuntime> = mapOf(
-        "onnx" to OnnxInferenceRuntime(),
-        "reference" to ReferenceInferenceRuntime(),
-    )
+    /**
+     * The runtime registry, keyed by each runtime's OWN [InferenceRuntime.runtimeId].
+     *
+     * WHY associateBy AND NOT A HAND-WRITTEN mapOf
+     * --------------------------------------------
+     * This used to be `mapOf("onnx" to OnnxInferenceRuntime(), ...)`,
+     * which created two competing sources of truth for one identifier:
+     * the literal map key, and the runtime's own `runtimeId` property
+     * (which is "onnxruntime"). getCapabilities() advertised the
+     * PROPERTY while runtime(id) looked up the KEY, so the web layer
+     * was told to ask for "onnxruntime" and Kotlin only answered to
+     * "onnx". Every ONNX run on device died with:
+     *
+     *   RUNTIME_UNAVAILABLE
+     *   Unknown runtime 'onnxruntime'. Available: onnx, reference
+     *
+     * Deriving the key from the property makes that class of bug
+     * unrepresentable: whatever a runtime calls itself is exactly what
+     * it is registered and looked up under. Renaming a runtime is now
+     * a one-line change that cannot desynchronise.
+     */
+    private val runtimes: Map<String, InferenceRuntime> = listOf(
+        OnnxInferenceRuntime(),
+        ReferenceInferenceRuntime(),
+    ).associateBy { it.runtimeId }
 
     /** One benchmark at a time; they compete for CPU and would skew each other. */
     private val mutex = Mutex()

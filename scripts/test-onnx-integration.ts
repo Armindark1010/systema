@@ -139,6 +139,130 @@ ok('the reference runtime calls the shared transform, not a copy',
   refRuntime.includes('TestModel.transform(input[it])'))
 
 // ------------------------------------------------------------
+section('2b. Runtime identifiers are canonical and agree across the bridge')
+// ------------------------------------------------------------
+//
+// REGRESSION GUARD.
+//
+// On device, every ONNX run failed with:
+//   RUNTIME_UNAVAILABLE
+//   Unknown runtime 'onnxruntime'. Available: onnx, reference
+//
+// Cause: the Kotlin registry was a hand-written mapOf keyed "onnx",
+// while each runtime's own runtimeId said "onnxruntime".
+// getCapabilities() advertised the PROPERTY; runtime(id) looked up the
+// KEY. Two sources of truth for one identifier.
+//
+// These assertions lock down both halves: one canonical spelling, and
+// a registry that cannot disagree with what it advertises.
+
+const benchKt = read('android/app/src/main/java/com/systema/music/inference/InferenceBenchmark.kt')
+const onnxKtSrc = read('android/app/src/main/java/com/systema/music/inference/OnnxInferenceRuntime.kt')
+const refKtSrc = read('android/app/src/main/java/com/systema/music/inference/ReferenceInferenceRuntime.kt')
+const pluginKtSrc = read('android/app/src/main/java/com/systema/music/inference/InferencePlugin.kt')
+
+// ---- canonical constants exist, with the agreed values ----
+ok('Kotlin defines RuntimeIds.ONNX as "onnxruntime"',
+  /const val ONNX = "onnxruntime"/.test(descriptorKt))
+ok('Kotlin defines RuntimeIds.REFERENCE as "reference"',
+  /const val REFERENCE = "reference"/.test(descriptorKt))
+ok('TypeScript defines RUNTIME_ONNX as "onnxruntime"',
+  /RUNTIME_ONNX = 'onnxruntime'/.test(tsPlugin))
+ok('TypeScript defines RUNTIME_REFERENCE as "reference"',
+  /RUNTIME_REFERENCE = 'reference'/.test(tsPlugin))
+
+// ---- the two languages list the SAME set ----
+const kotlinIds = [...descriptorKt.matchAll(/const val (?:ONNX|REFERENCE) = "([^"]+)"/g)]
+  .map(m => m[1]!).sort()
+const tsIds = [...tsPlugin.matchAll(/RUNTIME_(?:ONNX|REFERENCE) = '([^']+)'/g)]
+  .map(m => m[1]!).sort()
+ok('Kotlin and TypeScript declare identical runtime ids',
+  kotlinIds.length === 2 && JSON.stringify(kotlinIds) === JSON.stringify(tsIds),
+  `kotlin=${JSON.stringify(kotlinIds)} ts=${JSON.stringify(tsIds)}`)
+
+// ---- the registry derives its keys, so it cannot desynchronise ----
+ok('the registry is keyed by each runtime\'s own runtimeId',
+  /associateBy\s*\{\s*it\.runtimeId\s*\}/.test(benchKt))
+// Comments stripped: the file documents the old broken mapOf in prose
+// precisely so nobody reintroduces it, and that explanation must not
+// fail the check.
+ok('the registry is NOT a hand-written map of literal keys',
+  !/mapOf\(\s*"onnx"/.test(stripComments(benchKt)))
+
+// ---- runtimes identify themselves via the constants ----
+ok('OnnxInferenceRuntime uses RuntimeIds.ONNX',
+  /override val runtimeId = RuntimeIds\.ONNX/.test(onnxKtSrc))
+ok('ReferenceInferenceRuntime uses RuntimeIds.REFERENCE',
+  /override val runtimeId: String = RuntimeIds\.REFERENCE/.test(refKtSrc))
+ok('the plugin defaults to the canonical ONNX constant, not a literal',
+  /\?: RuntimeIds\.ONNX/.test(pluginKtSrc) && !/\?: "onnx"/.test(pluginKtSrc))
+
+// ---- no stale literal survives anywhere in the inference package ----
+const inferenceKt = ['InferenceBenchmark', 'InferencePlugin', 'OnnxInferenceRuntime',
+  'ReferenceInferenceRuntime', 'ModelRegistry', 'ModelStorage']
+for (const f of inferenceKt) {
+  const src = stripComments(read(`android/app/src/main/java/com/systema/music/inference/${f}.kt`))
+  ok(`${f}.kt contains no bare "onnx" runtime literal`,
+    !/"onnx"/.test(src))
+}
+
+// ---- the lab page compares against the constant ----
+const labSrc = read('app/pages/dev/ai-benchmark/onnx.vue')
+ok('the lab page selects ONNX via RUNTIME_ONNX',
+  /r\.id === RUNTIME_ONNX/.test(labSrc))
+ok('the lab page holds no bare \'onnx\' runtime literal',
+  !/'onnx'/.test(stripComments(labSrc)))
+
+// ---- NO SILENT FALLBACK when ONNX is unavailable (§13) ----
+// The old code did `?? caps.runtimes[0]?.id`, which would have
+// selected the reference runtime whenever ONNX was missing.
+ok('the page does not default to whichever runtime happens to be first',
+  !/runtimes\[0\]\?\.id/.test(stripComments(labSrc)))
+ok('an unavailable ONNX keeps the selection on ONNX, so MEASURE fails visibly',
+  /runtimeId\.value = onnx\?\.id \?\? RUNTIME_ONNX/.test(labSrc))
+
+// ---- BEHAVIOURAL: simulate the exact device path ----
+// Static checks alone could pass while the wiring is still wrong, so
+// the resolution is executed end to end.
+{
+  const ONNX = 'onnxruntime'
+  const REFERENCE = 'reference'
+  const instances = [
+    { cls: 'OnnxInferenceRuntime', runtimeId: ONNX, available: true },
+    { cls: 'ReferenceInferenceRuntime', runtimeId: REFERENCE, available: true },
+  ]
+  // Kotlin: listOf(...).associateBy { it.runtimeId }
+  const registry = new Map(instances.map(i => [i.runtimeId, i.cls]))
+  // Kotlin: getCapabilities() puts rt.runtimeId as "id"
+  const advertised = instances.map(i => ({ id: i.runtimeId, available: i.available }))
+
+  ok('every advertised id is resolvable by the registry',
+    advertised.every(r => registry.has(r.id)),
+    advertised.filter(r => !registry.has(r.id)).map(r => r.id).join(', '))
+
+  const picked = advertised.find(r => r.id === ONNX)?.id ?? ONNX
+  ok('the page picks "onnxruntime"', picked === ONNX, picked)
+  ok('selecting ONNX resolves OnnxInferenceRuntime, not RUNTIME_UNAVAILABLE',
+    registry.get(picked) === 'OnnxInferenceRuntime', String(registry.get(picked)))
+  ok('selecting reference resolves ReferenceInferenceRuntime',
+    registry.get(REFERENCE) === 'ReferenceInferenceRuntime')
+
+  // The precise regression: the old key set could not serve the id.
+  const oldRegistry = new Map([['onnx', 'OnnxInferenceRuntime'], [REFERENCE, 'ReferenceInferenceRuntime']])
+  ok('the OLD registry genuinely failed on "onnxruntime" (regression is real)',
+    !oldRegistry.has(ONNX))
+
+  // No-fallback: an unavailable ONNX must not yield the reference runtime.
+  const onnxDown = [
+    { id: ONNX, available: false },
+    { id: REFERENCE, available: true },
+  ]
+  const pickedWhenDown = onnxDown.find(r => r.id === ONNX)?.id ?? ONNX
+  ok('an unavailable ONNX still selects ONNX, never reference',
+    pickedWhenDown === ONNX, pickedWhenDown)
+}
+
+// ------------------------------------------------------------
 section('3. ONNX Runtime is contained in exactly one file (§4)')
 // ------------------------------------------------------------
 

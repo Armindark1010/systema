@@ -56,6 +56,7 @@ object InferenceContractTest {
         testReferenceLifecycle()
         testErrorCases()
         testDeterminism()
+        testRuntimeIdentifiers()
 
         println("\n" + "=".repeat(60))
         println("  $passed passed, $failed failed")
@@ -362,5 +363,74 @@ object InferenceContractTest {
         }
         check("inference after unload reports MODEL_UNLOADED",
             code == InferenceErrorCode.MODEL_UNLOADED, "$code")
+    }
+
+    // ------------------------------------------------------------
+    private fun testRuntimeIdentifiers() {
+        section("6. Canonical runtime identifiers (regression)")
+
+        // THE BUG THIS LOCKS DOWN
+        // -----------------------
+        // The registry was a hand-written mapOf keyed "onnx", while
+        // OnnxInferenceRuntime.runtimeId said "onnxruntime".
+        // getCapabilities() advertised the property, runtime(id) looked
+        // up the key, so the device reported:
+        //   Unknown runtime 'onnxruntime'. Available: onnx, reference
+
+        check("RuntimeIds.ONNX is \"onnxruntime\"", RuntimeIds.ONNX == "onnxruntime", RuntimeIds.ONNX)
+        check("RuntimeIds.REFERENCE is \"reference\"", RuntimeIds.REFERENCE == "reference")
+        check("ALL lists exactly the two known runtimes",
+            RuntimeIds.ALL.size == 2 && RuntimeIds.ALL.toSet() == setOf("onnxruntime", "reference"))
+        check("runtime ids are distinct", RuntimeIds.ALL.toSet().size == RuntimeIds.ALL.size)
+
+        val reference = ReferenceInferenceRuntime()
+        check("ReferenceInferenceRuntime identifies as the canonical reference id",
+            reference.runtimeId == RuntimeIds.REFERENCE, reference.runtimeId)
+
+        // OnnxInferenceRuntime is NOT instantiated here on purpose: it
+        // loads ONNX Runtime's native library, which exists only in an
+        // Android process, and this suite is deliberately Android-free
+        // so it can run on a plain JVM.
+        //
+        // A tiny stand-in reproduces the ONE property under test - that
+        // the registry keys itself by whatever a runtime calls itself.
+        // The real class's id is asserted statically by
+        // scripts/test-onnx-integration.ts, and proven for real on
+        // device.
+        val onnxLike = object : InferenceRuntime {
+            override val runtimeId = RuntimeIds.ONNX
+            override val label = "ONNX Runtime (CPU)"
+            override fun isAvailable() = true
+            override fun isLoaded() = false
+            override fun loadedModel(): LoadedModelInfo? = null
+            override suspend fun loadModel(model: ModelDescriptor): LoadedModelInfo =
+                throw InferenceException(InferenceErrorCode.RUNTIME_UNAVAILABLE, "stand-in")
+            override suspend fun infer(input: FloatArray): InferenceResult =
+                throw InferenceException(InferenceErrorCode.RUNTIME_UNAVAILABLE, "stand-in")
+            override suspend fun unloadModel() {}
+        }
+        check("the ONNX runtime id differs from the reference id",
+            onnxLike.runtimeId != reference.runtimeId)
+
+        // Registry construction, exactly as InferenceBenchmark does it.
+        // This is the assertion that would have caught the bug: build
+        // the map the same way and confirm every key is the runtime's
+        // own advertised id.
+        val registry = listOf<InferenceRuntime>(onnxLike, reference).associateBy { it.runtimeId }
+        check("the registry contains both runtimes", registry.size == 2)
+        check("looking up the canonical ONNX id resolves the ONNX runtime",
+            registry[RuntimeIds.ONNX] === onnxLike)
+        check("looking up the canonical reference id resolves ReferenceInferenceRuntime",
+            registry[RuntimeIds.REFERENCE] is ReferenceInferenceRuntime)
+        check("every registry key equals its runtime's advertised runtimeId",
+            registry.all { (key, rt) -> key == rt.runtimeId })
+        check("the stale \"onnx\" key is gone", !registry.containsKey("onnx"))
+
+        // An unknown id must fail loudly rather than resolve to
+        // anything - especially not the reference runtime (§13).
+        check("an unknown runtime id resolves to nothing",
+            registry["totally-unknown"] == null)
+        check("a misspelled ONNX id does NOT silently yield the reference runtime",
+            registry["onnx"] !is ReferenceInferenceRuntime)
     }
 }

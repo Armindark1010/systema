@@ -29,7 +29,7 @@ import java.io.File
  */
 class ReferenceInferenceRuntime : InferenceRuntime {
 
-    override val runtimeId: String = "reference"
+    override val runtimeId: String = RuntimeIds.REFERENCE
     override val label: String = "Reference (pure Kotlin)"
 
     private val mutex = Mutex()

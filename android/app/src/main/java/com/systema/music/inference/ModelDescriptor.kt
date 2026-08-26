@@ -64,6 +64,46 @@ data class ModelDescriptor(
 }
 
 /**
+ * Canonical runtime identifiers.
+ *
+ * THE CONTRACT
+ * ------------
+ * These strings cross the Capacitor bridge. They are what
+ * getCapabilities() advertises, what the benchmark lab sends back in
+ * `runtimeId`, and what the registry is keyed by. TypeScript mirrors
+ * them in `RuntimeId` (app/services/native/inferencePlugin.ts) and a
+ * test asserts the two lists match.
+ *
+ * WHY "onnxruntime" AND NOT "onnx"
+ * --------------------------------
+ * Two reasons, both pre-existing rather than invented here:
+ *
+ *  1. Phase 14 already established `RuntimeId = 'reference' |
+ *     'onnxruntime'` in app/services/ai-lab/types.ts, and the
+ *     OnnxRuntimeStub it shipped already identified itself as
+ *     "onnxruntime". Phase 15's job was to make that stub real, not
+ *     to rename the contract around it.
+ *
+ *  2. "onnx" is ALREADY TAKEN, and for a different concept:
+ *     `ModelFormat = 'onnx' | 'tflite' | 'none'` describes a FILE
+ *     FORMAT. A runtime and a file format are not the same thing —
+ *     a future TFLite runtime could load an .onnx-converted model,
+ *     and reusing one token for both would make that ambiguous.
+ *
+ * So "onnxruntime" names the ENGINE, "onnx" names the FORMAT.
+ */
+object RuntimeIds {
+    /** Real ONNX Runtime, CPU execution provider. */
+    const val ONNX = "onnxruntime"
+
+    /** Pure-Kotlin control. Never a fallback for [ONNX]. */
+    const val REFERENCE = "reference"
+
+    /** Everything the app knows about, for validation and tests. */
+    val ALL = listOf(ONNX, REFERENCE)
+}
+
+/**
  * Identity of the deterministic test model (§8).
  *
  * Lives here, in the Android-free file, rather than alongside the

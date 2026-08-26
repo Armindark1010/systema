@@ -19,6 +19,7 @@ import {
   type InferenceEnvironment,
   type InferenceErrorCode,
   type RealAudioResult,
+  type RuntimeId,
   type TestModelResult,
 } from './inferencePlugin'
 
@@ -79,7 +80,7 @@ export async function getEnvironment(): Promise<InferenceEnvironment> {
  *   inference and to prove the runtime holds no state between calls
  */
 export async function runTestModel(options: {
-  runtimeId: string
+  runtimeId: RuntimeId
   input?: number[]
   iterations?: number
 }): Promise<TestModelResult> {
@@ -99,7 +100,7 @@ export async function runTestModel(options: {
  * becoming a library-wide scan.
  */
 export async function runRealAudio(options: {
-  runtimeId: string
+  runtimeId: RuntimeId
   modelId: string
   tracks: Array<{ trackId: string, uri: string }>
 }): Promise<RealAudioResult> {

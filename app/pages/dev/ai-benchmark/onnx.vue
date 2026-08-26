@@ -38,6 +38,9 @@ import {
   expectedTestOutput,
   TEST_MODEL_INPUT,
   TEST_MODEL_EXPECTED_OUTPUT,
+  RUNTIME_ONNX,
+  RUNTIME_REFERENCE,
+  type RuntimeId,
   type InferenceCapabilities,
   type RealAudioResult,
   type TestModelResult,
@@ -59,9 +62,22 @@ async function loadCapabilities() {
   if (!available) return
   try {
     caps.value = await getCapabilities()
-    // Default to ONNX when it is actually available, never silently.
-    const onnx = caps.value.runtimes.find(r => r.id === 'onnx' && r.available)
-    runtimeId.value = onnx?.id ?? caps.value.runtimes[0]?.id ?? 'onnx'
+
+    // Default to ONNX using the CANONICAL id, not a literal.
+    //
+    // This line previously compared against 'onnx' while native
+    // advertised 'onnxruntime', so the match silently failed and the
+    // page fell through to `runtimes[0]`. Using the shared constant
+    // means a rename cannot reintroduce that.
+    const onnx = caps.value.runtimes.find(r => r.id === RUNTIME_ONNX)
+    runtimeId.value = onnx?.id ?? RUNTIME_ONNX
+
+    // NOTE: deliberately no `?? runtimes[0]?.id`. Picking whatever
+    // runtime happens to be first would quietly select the reference
+    // runtime when ONNX is unavailable — precisely the silent fallback
+    // §13 forbids. If ONNX is missing, the selection stays on ONNX,
+    // its button renders as UNAVAILABLE, and pressing MEASURE fails
+    // with RUNTIME_UNAVAILABLE. Visible failure beats a quiet swap.
     modelId.value = caps.value.models[0]?.id ?? ''
   } catch (e) {
     capsError.value = (e as Error).message
@@ -74,7 +90,7 @@ onMounted(() => {
 })
 
 // ---- Explicit selection (§9) --------------------------------------
-const runtimeId = ref('onnx')
+const runtimeId = ref<RuntimeId>(RUNTIME_ONNX)
 const modelId = ref('')
 
 const selectedRuntime = computed(() =>
@@ -89,7 +105,7 @@ const selectedModel = computed(() =>
  * error.
  */
 const pairingWarning = computed(() => {
-  if (runtimeId.value !== 'reference') return null
+  if (runtimeId.value !== RUNTIME_REFERENCE) return null
   if (!selectedModel.value || selectedModel.value.kind === 'test') return null
   return 'The reference runtime only computes the deterministic test transform. '
     + 'It cannot execute a side-loaded model, and it will refuse rather than '

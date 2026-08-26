@@ -51,7 +51,7 @@ class OnnxInferenceRuntime : InferenceRuntime {
         const val TAG = "SystemaOnnx"
     }
 
-    override val runtimeId = "onnxruntime"
+    override val runtimeId = RuntimeIds.ONNX
     override val label = "ONNX Runtime (CPU)"
 
     private val mutex = Mutex()
