@@ -29,6 +29,7 @@
 // ============================================================
 
 import { usePlayerStore } from '~/stores/player'
+import { useLibraryStore } from '~/stores/library'
 import {
   addPlayerListeners,
   addToQueueNative,
@@ -84,6 +85,8 @@ export function useNativePlayer() {
   let disposeListeners: (() => void) | null = null
   let disposeActions: (() => void) | null = null
 
+  /** Last track id Media3 reported. Guards against stale events. */
+  let nativeTrackId: string | null = null
   let lastResyncAt = 0
   let seekTimer: ReturnType<typeof setTimeout> | null = null
   let pendingSeekMs: number | null = null
@@ -107,6 +110,18 @@ export function useNativePlayer() {
   // ---- Native -> store ---------------------------------------
 
   function applySnapshot(snapshot: PlayerSnapshot) {
+    // A snapshot naming a track the engine has already moved past is
+    // stale — apply only its transport fields, never let it drag the
+    // UI back to a superseded track.
+    const stale = Boolean(
+      snapshot.currentTrackId
+      && nativeTrackId
+      && snapshot.currentTrackId !== nativeTrackId,
+    )
+    if (!stale && snapshot.currentTrackId) {
+      applyTrackChange(snapshot.currentTrackId)
+    }
+
     applyNative(() => {
       player.isPlaying = snapshot.isPlaying
       player.buffering = snapshot.state === 'buffering'
@@ -137,14 +152,35 @@ export function useNativePlayer() {
    * The store already moved itself optimistically when the user acted;
    * this corrects the cases it cannot know about — a track ending on
    * its own, or an unplayable file being skipped by the engine.
+   *
+   * Media3's current MediaItem is authoritative. `nativeTrackId` below
+   * records the last id the engine reported so that a late-arriving
+   * snapshot for a superseded track (Next pressed three times quickly)
+   * cannot resurrect it.
    */
   function applyTrackChange(trackId: string | null) {
-    if (!trackId || player.currentTrack?.id === trackId) return
+    if (!trackId) return
+    nativeTrackId = trackId
+    if (player.currentTrack?.id === trackId) return
 
     const fromQueue = player.queue.find(t => t.id === trackId)
     const fromHistory = player.history.find(t => t.id === trackId)
     const next = fromQueue ?? fromHistory
-    if (!next) return
+
+    // The engine is playing something the local queue does not know
+    // about. Rather than leaving the UI stale, resolve it from the
+    // library store — the native queue is the truth, not our mirror.
+    if (!next) {
+      const resolved = useLibraryStore().tracks.find(t => t.id === trackId)
+      if (!resolved) return
+      applyNative(() => {
+        if (player.currentTrack) player.history.push(player.currentTrack)
+        player.currentTrack = resolved
+        player.currentTime = 0
+        player.duration = resolved.duration
+      })
+      return
+    }
 
     applyNative(() => {
       if (fromQueue) {
@@ -401,6 +437,7 @@ export function useNativePlayer() {
 
   function dispose() {
     stopClock()
+    nativeTrackId = null
     if (seekTimer) clearTimeout(seekTimer)
     seekTimer = null
     disposeListeners?.()

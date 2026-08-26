@@ -6,10 +6,11 @@
 // ============================================================
 
 const { currentTrack, isPlaying, togglePlay, progressPct, openFullPlayer, favorites, toggleFavorite } = usePlayer()
-const { getAlbum, getArtist } = useMusicLibrary()
 
-const cover = computed(() => (currentTrack.value ? getAlbum(currentTrack.value.albumId)?.cover : undefined))
-const artistName = computed(() => (currentTrack.value ? getArtist(currentTrack.value.artistId)?.name : ''))
+// Canonical projection of the globally current track. Resolving
+// artwork here via the mock catalog used to return undefined for
+// device tracks, whose album ids only exist in the library store.
+const { artwork: cover, artist: artistName, seed: artSeed } = useNowPlaying()
 </script>
 
 <template>
@@ -26,7 +27,7 @@ const artistName = computed(() => (currentTrack.value ? getArtist(currentTrack.v
         :aria-label="`Now playing: ${currentTrack.title} by ${artistName}`"
         @click="openFullPlayer()"
       >
-        <Artwork :src="cover" :alt="currentTrack.title" class="w-10 h-10 shrink-0" seed="mini" />
+        <Artwork :key="currentTrack.id" :src="cover" :alt="currentTrack.title" class="w-10 h-10 shrink-0" :seed="artSeed" />
         <span class="min-w-0">
           <span class="flex items-center gap-2">
             <span class="flex gap-[2px] items-end h-3 shrink-0" aria-hidden="true">

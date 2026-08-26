@@ -17,13 +17,14 @@ import { usePlayerStore } from '~/stores/player'
 const search = useSearchStore()
 const player = usePlayerStore()
 const { getAlbum, getArtist, formatDuration } = useMusicLibrary()
+const { coverFor } = useTrackFields()
 const toast = useToast()
 const router = useRouter()
 
 const selectedAction = ref<ActionItem | null>(null)
 
 function trackCover(track: Track) {
-  return track.artwork || getAlbum(track.albumId)?.cover
+  return coverFor(track)
 }
 
 function trackArtist(track: Track) {

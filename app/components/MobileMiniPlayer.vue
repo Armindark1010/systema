@@ -12,14 +12,10 @@ const {
   next,
   prev,
 } = usePlayer()
-const { getAlbum, getArtist } = useMusicLibrary()
-
-const cover = computed(() =>
-  currentTrack.value ? getAlbum(currentTrack.value.albumId)?.cover : undefined,
-)
-const artistName = computed(() =>
-  currentTrack.value ? getArtist(currentTrack.value.artistId)?.name ?? '' : '',
-)
+// Canonical projection of the globally current track: artwork and
+// artist resolve identically here, in the Full Player and in the
+// Library, so all three can never disagree.
+const { artwork: cover, artist: artistName } = useNowPlaying()
 
 let gestureStart: { x: number; y: number } | null = null
 

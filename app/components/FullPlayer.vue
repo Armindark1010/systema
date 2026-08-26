@@ -28,16 +28,17 @@ const {
   ensureFullPlayerNavigation,
 } = player
 
-const { getAlbum, getArtist } = useMusicLibrary()
 const { playlists, addTracks, createPlaylist } = usePlaylists()
 const sleepTimer = useSleepTimer()
 const lyrics = useLyrics()
 const analysis = useTrackAnalysis()
 const ai = usePlayerAI()
 
-const cover = computed(() => currentTrack.value ? getAlbum(currentTrack.value.albumId)?.cover : undefined)
-const artistName = computed(() => currentTrack.value ? getArtist(currentTrack.value.artistId)?.name ?? 'SYSTEMA' : '')
-const albumTitle = computed(() => currentTrack.value ? getAlbum(currentTrack.value.albumId)?.title : undefined)
+// Canonical projection of the globally current track. These are
+// computeds over the player store, so pressing Next swaps artwork,
+// title and artist in place — the fullscreen surface stays mounted
+// and `fullPlayerOpen` is never touched.
+const { artwork: cover, artist: artistName, album: albumTitle } = useNowPlaying()
 const isLiked = computed(() => currentTrack.value ? favorites.value.has(currentTrack.value.id) : false)
 
 const showSleepSheet = ref(false)

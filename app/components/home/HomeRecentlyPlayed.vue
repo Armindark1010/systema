@@ -2,6 +2,8 @@
 import type { Track } from '~/types'
 
 const { recentlyPlayed, getAlbum, getArtist, formatDuration } = useMusicLibrary()
+// Canonical artwork resolution, shared with every player surface.
+const { coverFor } = useTrackFields()
 const player = usePlayer()
 
 const tracks = computed(() => recentlyPlayed(8))
@@ -40,7 +42,7 @@ function playFromHistory(track: Track) {
 
           <span class="col-span-2 md:col-span-1">
             <Artwork
-              :src="getAlbum(track.albumId)?.cover"
+              :src="coverFor(track)"
               :alt="track.title"
               :seed="track.id"
               class="w-6 h-6"

@@ -6,10 +6,11 @@
 import { usePlayerStore } from '~/stores/player'
 
 const player = usePlayerStore()
-const { getAlbum, getArtist, formatDuration } = useMusicLibrary()
+const { formatDuration } = useMusicLibrary()
 
-const nowPlayingCover = computed(() => (player.currentTrack ? (player.currentTrack.artwork || getAlbum(player.currentTrack.albumId)?.cover) : undefined))
-const artistName = (id?: string) => (id ? getArtist(id)?.name ?? '' : '')
+// Canonical resolution shared with every other player surface.
+const { artwork: nowPlayingCover } = useNowPlaying()
+const { coverFor, artistFor } = useTrackFields()
 
 const upNext = computed(() => player.queue)
 </script>
@@ -47,7 +48,7 @@ const upNext = computed(() => player.queue)
               <Artwork :src="nowPlayingCover" :alt="player.currentTrack.title" class="w-14 h-14 shrink-0" seed="qnp" />
               <div class="min-w-0 flex-1">
                 <p class="text-small font-semibold text-fg truncate">{{ player.currentTrack.title }}</p>
-                <p class="text-[12px] text-fg-muted truncate">{{ player.currentTrack.artist || artistName(player.currentTrack.artistId) }}</p>
+                <p class="text-[12px] text-fg-muted truncate">{{ artistFor(player.currentTrack) }}</p>
               </div>
               <span class="flex gap-[2px] items-end h-3 shrink-0" aria-hidden="true">
                 <span v-if="player.isPlaying" class="sys-eq-bar w-[2px] h-full bg-primary" style="animation-delay: 0ms" />
@@ -73,10 +74,10 @@ const upNext = computed(() => player.queue)
               >
                 <UIcon name="lucide:grip-vertical" class="w-3.5 h-3.5 text-fg-faint shrink-0" aria-hidden="true" />
                 <span class="tnum text-[11px] text-fg-faint w-5 shrink-0 text-right">{{ String(i + 1).padStart(2, '0') }}</span>
-                <Artwork :src="item.artwork || getAlbum(item.albumId)?.cover" :alt="item.title" class="w-8 h-8 shrink-0" seed="qup" />
+                <Artwork :src="coverFor(item)" :alt="item.title" class="w-8 h-8 shrink-0" :seed="item.id" />
                 <div class="min-w-0 flex-1">
                   <p class="text-[13px] font-medium text-fg truncate">{{ item.title }}</p>
-                  <p class="text-[11px] text-fg-muted truncate">{{ item.artist || artistName(item.artistId) }}</p>
+                  <p class="text-[11px] text-fg-muted truncate">{{ artistFor(item) }}</p>
                 </div>
                 <span class="tnum text-[11px] text-fg-faint hidden sm:inline">{{ formatDuration(item.duration) }}</span>
                 <button

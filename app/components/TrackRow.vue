@@ -20,12 +20,17 @@ const emit = defineEmits<{
 }>()
 
 const player = usePlayer()
-const { getAlbum, getArtist, formatDuration } = useMusicLibrary()
+const { formatDuration } = useMusicLibrary()
+// Canonical field resolution: device tracks carry their own artwork
+// and names, which the mock catalog cannot resolve.
+const { coverFor, artistFor, albumFor } = useTrackFields()
 
+// Compared by stable id, never by object reference.
 const isCurrent = computed(() => player.currentTrack.value?.id === props.track.id)
 const isFavorite = computed(() => player.isFavorite(props.track.id))
-const albumTitle = computed(() => getAlbum(props.track.albumId)?.title ?? '')
-const artistName = computed(() => getArtist(props.track.artistId)?.name ?? '')
+const cover = computed(() => coverFor(props.track))
+const albumTitle = computed(() => albumFor(props.track) ?? '')
+const artistName = computed(() => artistFor(props.track))
 
 const dragOver = ref(false)
 
@@ -76,7 +81,7 @@ function onDrop(e: DragEvent) {
       :aria-label="`Play ${track.title} by ${artistName}`"
       @click="emit('play', track)"
     >
-      <Artwork :src="getAlbum(track.albumId)?.cover" :alt="track.title" class="w-8 h-8 shrink-0" :seed="track.id" />
+      <Artwork :src="cover" :alt="track.title" class="w-8 h-8 shrink-0" :seed="track.id" />
       <span class="min-w-0">
         <span class="block text-[13px] font-medium truncate" :class="isCurrent ? 'text-primary' : 'text-fg'">{{ track.title }}</span>
         <span class="block text-[11.5px] text-fg-muted truncate">{{ artistName }}</span>

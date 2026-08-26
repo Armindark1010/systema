@@ -22,20 +22,13 @@ const emit = defineEmits<{
 }>()
 
 const player = usePlayerStore()
-const { getAlbum, getArtist, formatDuration } = useMusicLibrary()
+const { formatDuration } = useMusicLibrary()
 const toast = useToast()
 
-const currentCover = computed(() =>
-  player.currentTrack ? (player.currentTrack.artwork || getAlbum(player.currentTrack.albumId)?.cover) : undefined
-)
-
-function trackCover(track: Track) {
-  return track.artwork || getAlbum(track.albumId)?.cover
-}
-
-function trackArtist(track: Track) {
-  return track.artist || getArtist(track.artistId)?.name || 'SYSTEMA'
-}
+// Same canonical resolution the Mini and Full players use, so a queue
+// row and the now-playing header can never disagree about a track.
+const { artwork: currentCover } = useNowPlaying()
+const { coverFor: trackCover, artistFor: trackArtist } = useTrackFields()
 
 // Queue reorder controller
 const reorder = useQueueReorder({

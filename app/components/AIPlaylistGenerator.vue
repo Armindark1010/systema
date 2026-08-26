@@ -11,6 +11,8 @@ const route = useRoute()
 const ai = useAI()
 const { generation } = ai
 const { getAlbum, getArtist, formatDuration } = useMusicLibrary()
+// Canonical artwork resolution, shared with every player surface.
+const { coverFor } = useTrackFields()
 const player = usePlayer()
 const playlists = usePlaylists()
 const toast = useToast()
@@ -210,7 +212,7 @@ function playResult() {
             :class="player.currentTrack.value?.id === r.track.id ? 'bg-ai-muted' : ''"
           >
             <span class="tnum text-[11px] text-ai-fg-faint w-5 shrink-0 text-right">{{ String(i + 1).padStart(2, '0') }}</span>
-            <Artwork :src="getAlbum(r.track.albumId)?.cover" :alt="r.track.title" class="w-9 h-9 shrink-0" :seed="r.track.id" />
+            <Artwork :src="coverFor(r.track)" :alt="r.track.title" class="w-9 h-9 shrink-0" :seed="r.track.id" />
             <div class="min-w-0 flex-1">
               <p class="text-[13px] font-semibold text-ai-fg truncate">{{ r.track.title }}</p>
               <p class="text-[11px] text-ai-fg-muted truncate">{{ getArtist(r.track.artistId)?.name }}</p>
