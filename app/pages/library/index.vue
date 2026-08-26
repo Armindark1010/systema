@@ -44,7 +44,60 @@ const {
   playTracks,
   shuffleLibrary,
   setSection,
+  // Native device library. All inert on the web, where the mock
+  // catalog keeps rendering exactly as before.
+  isNativeLibrary,
+  isScanning,
+  needsPermission,
+  scanLabel,
+  libraryError,
+  permissionStatus,
+  requestLibraryPermission,
+  scanLibrary,
 } = library
+
+/**
+ * On Android an empty track list is meaningful: it means we are still
+ * scanning, or the user has not granted audio access. Surfacing that
+ * beats the generic "NO TRACKS YET" empty state.
+ */
+const nativeNotice = computed(() => {
+  if (!isNativeLibrary.value || sortedTracks.value.length > 0) return null
+
+  if (needsPermission.value) {
+    return {
+      title: 'PERMISSION REQUIRED',
+      body: permissionStatus.value === 'denied'
+        ? 'SYSTEMA cannot read your audio files. Grant music access in Android settings, then scan again.'
+        : 'SYSTEMA needs access to the audio on this device to build your library.',
+      action: 'GRANT ACCESS',
+    }
+  }
+  if (isScanning.value) {
+    return {
+      title: 'SCANNING DEVICE',
+      body: scanLabel.value || 'Reading the device media index…',
+      action: null,
+    }
+  }
+  if (libraryError.value) {
+    return { title: 'LIBRARY ERROR', body: libraryError.value.message, action: 'RETRY' }
+  }
+  return {
+    title: 'NO MUSIC FOUND',
+    body: 'No audio files were found on this device.',
+    action: 'SCAN AGAIN',
+  }
+})
+
+async function onNativeNoticeAction() {
+  if (needsPermission.value) {
+    const granted = await requestLibraryPermission()
+    if (granted) await scanLibrary()
+    return
+  }
+  await scanLibrary()
+}
 
 const emoExpression = ref<EmoExpression>('idle')
 const emoMessage = ref('LIBRARY READY')
@@ -338,7 +391,19 @@ function isPaneVisible(paneIndex: number) {
               }"
               :aria-hidden="activeIndex !== 0"
             >
+              <LibraryEmptyState v-if="nativeNotice" :title="nativeNotice.title">
+                {{ nativeNotice.body }}
+                <template v-if="nativeNotice.action">
+                  <button
+                    class="sys-btn-outline !h-8 mt-3"
+                    @click="onNativeNoticeAction"
+                  >
+                    {{ nativeNotice.action }}
+                  </button>
+                </template>
+              </LibraryEmptyState>
               <LibraryTracks
+                v-else
                 :tracks="sortedTracks"
                 :get-artist="getArtist"
                 :get-album="getAlbum"

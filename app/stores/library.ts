@@ -26,6 +26,8 @@ import {
   type ScanProgress,
   type TrackSortKey as NativeSortKey,
 } from '~/services/native/musicLibraryService'
+import { libLog, libWarn } from '~/services/native/musicLibraryDebug'
+import { nativePlatform } from '~/services/native/musicLibraryPlugin'
 
 export type LibrarySection = 'tracks' | 'albums' | 'artists' | 'playlists'
 export type LibrarySortKey =
@@ -102,6 +104,12 @@ export const useLibraryStore = defineStore('library', () => {
   const nativeTotal = ref(0)
   const hasMoreTracks = ref(false)
   const isLoadingMore = ref(false)
+
+  /**
+   * True once a native page has actually been written into `tracks`.
+   * Guards the mock-catalog purge so a re-init never wipes real data.
+   */
+  const nativeDataLoaded = ref(false)
 
   let disposeScanListeners: (() => void) | null = null
 
@@ -292,33 +300,74 @@ export const useLibraryStore = defineStore('library', () => {
    * returns immediately and the mock catalog stays untouched.
    */
   async function initNativeLibrary(): Promise<void> {
-    if (!isNativeLibraryAvailable()) {
+    const available = isNativeLibraryAvailable()
+    libLog('init: isNativeLibraryAvailable', {
+      available,
+      platform: nativePlatform(),
+    })
+
+    if (!available) {
+      // WEB PATH — keep the mock catalog exactly as it is.
       isNativeLibrary.value = false
       return
     }
+
     isNativeLibrary.value = true
+
+    // ANDROID PATH — the device is the only source of truth from here
+    // on. Drop the mock catalog immediately so a permission prompt or
+    // an empty device can never be mistaken for a real library.
+    if (!nativeDataLoaded.value) {
+      tracks.value = []
+      albums.value = []
+      artists.value = []
+      libLog('init: cleared mock catalog for native platform')
+    }
 
     await attachScanListeners()
 
     try {
       const permission = await nativeHasPermission()
       permissionStatus.value = permission.status
+      libLog('init: hasPermission', permission)
 
       const status = await nativeGetScanStatus()
       if (status) {
         scanState.value = status.state
         scanProgress.value = status
+        libLog('init: getScanStatus', status)
       }
 
-      if (permission.granted) {
-        const count = await nativeGetLibraryCount()
-        // A fresh install has an empty index — scan once so the user
-        // sees their music without having to find the Settings action.
-        if (count === 0) await scanLibrary()
-        else await loadFirstPage()
+      // A missing grant is the normal first-launch state, not a dead
+      // end: ask for it. Previously this branch was gated behind
+      // `permission.granted`, so a fresh install never requested
+      // access, never scanned, and silently kept the mock data.
+      if (!permission.granted) {
+        libLog('init: permission not granted, requesting')
+        const granted = await requestLibraryPermission()
+        libLog('init: requestPermission result', { granted })
+        if (!granted) {
+          // Leave the library empty and let the UI explain why.
+          libWarn('init: permission denied, library stays empty')
+          return
+        }
+      }
+
+      const count = await nativeGetLibraryCount()
+      libLog('init: getLibraryCount', { count })
+
+      // A fresh install has an empty index — scan once so the user
+      // sees their music without having to find the Settings action.
+      if (count === 0) {
+        libLog('init: empty index, starting first scan')
+        await scanLibrary()
+      } else {
+        await loadFirstPage()
       }
     } catch (error) {
-      libraryError.value = toLibraryError(error)
+      const failure = toLibraryError(error)
+      libWarn('init: failed', failure)
+      libraryError.value = failure
     }
   }
 
@@ -329,6 +378,7 @@ export const useLibraryStore = defineStore('library', () => {
         scanState.value = progress.state
         scanProgress.value = progress
         libraryError.value = null
+        libLog('scanStarted', { total: progress.total })
       },
       onProgress: (progress) => {
         scanState.value = progress.state
@@ -337,12 +387,23 @@ export const useLibraryStore = defineStore('library', () => {
       onCompleted: (progress) => {
         scanState.value = 'COMPLETED'
         scanProgress.value = progress
+        libLog('scanCompleted: native scan result', {
+          discovered: progress.discovered,
+          inserted: progress.inserted,
+          updated: progress.updated,
+          removed: progress.removed,
+          unchanged: progress.unchanged,
+        })
         // Re-read page one so the UI reflects the new index.
         void loadFirstPage()
       },
       onError: (progress) => {
         scanState.value = 'ERROR'
         scanProgress.value = progress
+        libWarn('scanError', {
+          code: progress.errorCode,
+          message: progress.errorMessage,
+        })
         libraryError.value = {
           code: progress.errorCode ?? 'UNKNOWN',
           message: progress.errorMessage ?? 'The library scan failed.',
@@ -389,6 +450,7 @@ export const useLibraryStore = defineStore('library', () => {
 
     libraryError.value = null
     try {
+      libLog('scanLibrary: invoking native scan()')
       await nativeStartScan()
       scanState.value = 'SCANNING'
     } catch (error) {
@@ -430,7 +492,19 @@ export const useLibraryStore = defineStore('library', () => {
       nativeTotal.value = page.total
       loadedOffset.value = page.tracks.length
       hasMoreTracks.value = page.hasMore
+      nativeDataLoaded.value = true
       libraryError.value = null
+
+      libLog('loadFirstPage: bridge returned', {
+        received: page.tracks.length,
+        totalInIndex: page.total,
+        hasMore: page.hasMore,
+      })
+      libLog('loadFirstPage: pinia store now holds', {
+        tracks: tracks.value.length,
+        albums: albums.value.length,
+        artists: artists.value.length,
+      })
     } catch (error) {
       libraryError.value = toLibraryError(error)
     } finally {
@@ -490,6 +564,7 @@ export const useLibraryStore = defineStore('library', () => {
     nativeTotal,
     hasMoreTracks,
     isLoadingMore,
+    nativeDataLoaded,
 
     // getters
     totalTracks,

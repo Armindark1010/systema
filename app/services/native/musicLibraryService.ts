@@ -23,6 +23,7 @@ import {
   type ScanProgress,
   type ScanStatus,
 } from './musicLibraryPlugin'
+import { libLog } from './musicLibraryDebug'
 
 export type {
   GetTracksOptions,
@@ -35,7 +36,7 @@ export type {
   TrackSortKey,
 } from './musicLibraryPlugin'
 
-export { isNativeLibraryAvailable, toArtworkSrc }
+export { isNativeLibraryAvailable, toArtworkSrc, nativePlatform } from './musicLibraryPlugin'
 
 /** A page of catalog entities derived from one native page. */
 export interface LibraryPage {
@@ -199,12 +200,15 @@ export async function hasPermission(): Promise<PermissionStatus> {
 
 export async function requestPermission(): Promise<PermissionStatus> {
   if (!isNativeLibraryAvailable()) return { granted: false, status: 'denied' }
-  return MusicLibrary.requestPermission()
+  const result = await MusicLibrary.requestPermission()
+  libLog('bridge requestPermission', result)
+  return result
 }
 
 export async function getLibraryCount(): Promise<number> {
   if (!isNativeLibraryAvailable()) return 0
   const { count } = await MusicLibrary.getLibraryCount()
+  libLog('bridge getLibraryCount', { count })
   return count
 }
 
@@ -215,8 +219,12 @@ export async function getScanStatus(): Promise<ScanStatus | null> {
 
 /** Starts a scan. Results arrive through the listeners below. */
 export async function startScan(): Promise<void> {
-  if (!isNativeLibraryAvailable()) return
-  await MusicLibrary.scan()
+  if (!isNativeLibraryAvailable()) {
+    libLog('startScan skipped: not a native platform')
+    return
+  }
+  const result = await MusicLibrary.scan()
+  libLog('bridge scan() accepted', result)
 }
 
 export async function cancelScan(): Promise<void> {
@@ -242,6 +250,12 @@ export async function getTracksPage(options: GetTracksOptions = {}): Promise<Lib
   }
 
   const result = await MusicLibrary.getTracks(options)
+  libLog('bridge getTracks', {
+    requested: options,
+    receivedFromNative: result.tracks?.length ?? 0,
+    totalInIndex: result.total,
+  })
+
   return {
     tracks: result.tracks.map(toUiTrack),
     albums: toUiAlbums(result.tracks),

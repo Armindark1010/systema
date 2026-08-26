@@ -153,16 +153,48 @@ export interface MusicLibraryPlugin {
  * never reach the plugin at all — `isNativeLibraryAvailable()` gates
  * every call, and the store falls back to the existing mock catalog.
  */
-export const MusicLibrary = registerPlugin<MusicLibraryPlugin>('MusicLibrary')
+/**
+ * Must match `@CapacitorPlugin(name = "MusicLibrary")` in
+ * MusicLibraryPlugin.kt exactly — the bridge resolves plugins by this
+ * string.
+ */
+export const PLUGIN_NAME = 'MusicLibrary'
 
-/** True only on a native Android build that actually registered the plugin. */
+export const MusicLibrary = registerPlugin<MusicLibraryPlugin>(PLUGIN_NAME)
+
+/** Current Capacitor platform, or 'unknown' when Capacitor is absent. */
+export function nativePlatform(): string {
+  try {
+    return Capacitor.getPlatform()
+  } catch {
+    return 'unknown'
+  }
+}
+
+/**
+ * True only on a native Android build that actually registered the
+ * plugin.
+ *
+ * `isPluginAvailable` checks `window.Capacitor.PluginHeaders`, which
+ * the native bridge injects from the plugins registered on the
+ * Bridge.Builder. If MainActivity ever stops calling
+ * `registerPlugin(MusicLibraryPlugin.class)` this returns false and
+ * the app silently falls back to mock data — so the result is logged.
+ */
 export function isNativeLibraryAvailable(): boolean {
   try {
-    return (
-      Capacitor.isNativePlatform()
-      && Capacitor.getPlatform() === 'android'
-      && Capacitor.isPluginAvailable('MusicLibrary')
-    )
+    const native = Capacitor.isNativePlatform()
+    const platform = Capacitor.getPlatform()
+    const registered = Capacitor.isPluginAvailable(PLUGIN_NAME)
+
+    if (native && platform === 'android' && !registered) {
+      console.warn(
+        `[SYSTEMA/LIB] Running on Android but the "${PLUGIN_NAME}" plugin is not `
+        + 'registered. Check registerPlugin(MusicLibraryPlugin.class) in MainActivity.',
+      )
+    }
+
+    return native && platform === 'android' && registered
   } catch {
     // Capacitor absent entirely (SSR, plain browser).
     return false

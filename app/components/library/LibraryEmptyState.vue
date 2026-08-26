@@ -5,7 +5,7 @@ defineProps<{ title: string }>()
 <template>
   <section class="library-empty" role="status">
     <p class="label-muted">{{ title }}</p>
-    <p class="text-small text-fg-muted"><slot /></p>
+    <div class="text-small text-fg-muted max-w-[44ch]"><slot /></div>
   </section>
 </template>
 

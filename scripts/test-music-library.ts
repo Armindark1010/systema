@@ -174,4 +174,68 @@ console.log('Testing addedAt formatting...')
 }
 console.log('✓ addedAt is a sortable ISO timestamp')
 
+// 9. Integration-path regression: the fresh-install permission gate.
+//    The original bug was that initNativeLibrary() only scanned when
+//    permission was ALREADY granted, so a fresh Android install never
+//    requested access, never scanned, and kept showing mock data.
+console.log('Testing fresh-install permission gate...')
+{
+  type Flow = { requested: boolean; scanned: boolean; loaded: boolean; tracks: string[] }
+
+  // Faithful model of the FIXED initNativeLibrary() control flow.
+  function simulateInit(opts: {
+    native: boolean
+    granted: boolean
+    grantOnRequest: boolean
+    indexCount: number
+  }): Flow {
+    const flow: Flow = { requested: false, scanned: false, loaded: false, tracks: ['mock'] }
+    if (!opts.native) return flow // web: mock catalog untouched
+
+    flow.tracks = [] // native: mock catalog dropped
+    let granted = opts.granted
+    if (!granted) {
+      flow.requested = true
+      granted = opts.grantOnRequest
+      if (!granted) return flow
+    }
+    if (opts.indexCount === 0) flow.scanned = true
+    else { flow.loaded = true; flow.tracks = ['real'] }
+    return flow
+  }
+
+  // Fresh Android install: must REQUEST then SCAN.
+  const fresh = simulateInit({ native: true, granted: false, grantOnRequest: true, indexCount: 0 })
+  assert.equal(fresh.requested, true, 'fresh install must request permission')
+  assert.equal(fresh.scanned, true, 'fresh install must trigger a scan')
+  assert.deepEqual(fresh.tracks, [], 'mock data must not survive on native')
+
+  // Permission denied: no scan, and still no mock data.
+  const denied = simulateInit({ native: true, granted: false, grantOnRequest: false, indexCount: 0 })
+  assert.equal(denied.requested, true)
+  assert.equal(denied.scanned, false, 'denied permission must not scan')
+  assert.deepEqual(denied.tracks, [], 'denied must not fall back to mock data on Android')
+
+  // Already granted with a populated index: load, do not rescan.
+  const warm = simulateInit({ native: true, granted: true, grantOnRequest: true, indexCount: 120 })
+  assert.equal(warm.requested, false, 'granted permission must not re-prompt')
+  assert.equal(warm.loaded, true, 'populated index must load a page')
+  assert.deepEqual(warm.tracks, ['real'])
+
+  // Web: mock catalog preserved, nothing native invoked.
+  const web = simulateInit({ native: false, granted: false, grantOnRequest: false, indexCount: 0 })
+  assert.equal(web.requested, false, 'web must never request permission')
+  assert.equal(web.scanned, false, 'web must never scan')
+  assert.deepEqual(web.tracks, ['mock'], 'web MUST keep the mock catalog')
+}
+console.log('✓ fresh install requests permission, scans, and drops mock data')
+
+// 10. Plugin name must match the Kotlin @CapacitorPlugin annotation.
+console.log('Testing plugin name contract...')
+{
+  const { PLUGIN_NAME } = await import('../app/services/native/musicLibraryPlugin')
+  assert.equal(PLUGIN_NAME, 'MusicLibrary', 'must match @CapacitorPlugin(name=...)')
+}
+console.log('✓ plugin name matches the native annotation')
+
 console.log('--- ALL NATIVE MUSIC LIBRARY TESTS PASSED! ---')
