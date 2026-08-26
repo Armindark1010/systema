@@ -230,16 +230,68 @@ properties they were actually protecting:
 
 ---
 
+## 8b. Runtime identifier contract (fixed after device testing)
+
+Device testing surfaced a real blocker:
+
+```
+RUNTIME_UNAVAILABLE
+Unknown runtime 'onnxruntime'. Available: onnx, reference
+```
+
+**Root cause.** Kotlin held two competing sources of truth for one
+identifier. The registry was hand-written and keyed `"onnx"`, while
+each runtime's own `runtimeId` property said `"onnxruntime"`.
+`getCapabilities()` advertised the *property*; `runtime(id)` looked up
+the *key*. The web layer was therefore told to request a name the
+registry could not answer to.
+
+The lab page made it worse: it searched for the literal `'onnx'`,
+missed silently, then fell through to `runtimes[0]?.id` — which would
+have quietly selected the **reference** runtime whenever ONNX was
+unavailable, exactly the silent substitution §13 forbids.
+
+**Canonical id: `onnxruntime`.** Two pre-existing reasons, not a
+preference:
+
+1. Phase 14 already defined `RuntimeId = 'reference' | 'onnxruntime'`
+   and its `OnnxRuntimeStub` already used that spelling. Phase 15's job
+   was to make that stub real, not to rename the contract around it.
+2. `'onnx'` is **already taken** for a different concept:
+   `ModelFormat = 'onnx' | 'tflite' | 'none'` names a **file format**.
+   A runtime is not a format — a future TFLite runtime could load a
+   converted `.onnx`, and one token for both would be ambiguous.
+
+**Structural fix.** The registry now derives keys from the runtimes
+themselves:
+
+```kotlin
+listOf(OnnxInferenceRuntime(), ReferenceInferenceRuntime())
+    .associateBy { it.runtimeId }
+```
+
+A key can no longer disagree with what is advertised. Both languages
+reference shared constants (`RuntimeIds` / `RUNTIME_ONNX`), bridge
+fields are typed `RuntimeId` rather than `string`, and the page's
+first-available fallback is gone: if ONNX is unavailable the selection
+stays on ONNX, the button reads UNAVAILABLE, and MEASURE fails
+explicitly.
+
+---
+
 ## 9. Verification honesty table
 
 | Claim | Status |
 |---|---|
-| Test model is a real ONNX file with the intended graph | **TEST VERIFIED** (76 assertions) |
+| Test model is a real ONNX file with the intended graph | **TEST VERIFIED** (102 assertions) |
 | ONNX Runtime executes it → `[9,25,49,81]`, dynamic shapes, 50-run determinism | **DESKTOP VERIFIED** (onnxruntime 1.29.0, Python) |
 | `ai.onnxruntime` confined to one file | **TEST VERIFIED** |
 | No fallback, no fabrication, no weights committed | **TEST VERIFIED** (82 assertions) |
 | 20-track cap, no library scan, Phase 13 untouched | **TEST VERIFIED** |
 | Nuxt builds; Capacitor syncs | **DESKTOP VERIFIED** |
+| Runtime id is canonical and agrees across the bridge | **ANDROID CODE VERIFIED** (26 assertions; static + behavioural replay) |
+| Selecting ONNX resolves `OnnxInferenceRuntime` | **ANDROID CODE VERIFIED** — resolution logic replayed in tests, not executed on device |
+| APK builds (`./gradlew assembleDebug`) | **NOT RUN HERE** — no JVM in this sandbox; JDK download blocked by TLS |
 | Kotlin contract suite (descriptor, preprocessing, reference lifecycle) | **NOT RUN HERE** — no JVM/kotlinc in this environment. Runs via `./gradlew testDebugUnitTest` |
 | **ONNX Runtime loads and executes on the Poco X7 Pro** | **NOT VERIFIED ON HARDWARE** |
 | Real-audio pipeline end to end on device | **NOT VERIFIED ON HARDWARE** |
@@ -253,9 +305,16 @@ Only running it establishes that.
 
 1. Build and install the Android app.
 2. Settings → **AI BENCHMARK LAB** → **ONNX RUNTIME LAB**.
-3. Runtime **ONNX**, model **Deterministic Test Model**, iterations 10
-   → **RUN TEST MODEL**. Expect `[9, 25, 49, 81]` and
+3. Runtime **ONNX Runtime (CPU)**, model **Deterministic Test Model**,
+   iterations 10 → **RUN TEST MODEL**. Expect `[9, 25, 49, 81]` and
    `deterministic: YES`.
+
+   If it instead reports `RUNTIME_UNAVAILABLE`, the id contract has
+   regressed — check that the registry still uses
+   `associateBy { it.runtimeId }` and that both sides use the shared
+   constants. If it reports `MODEL_LOAD_FAILED`, the runtime resolved
+   correctly but the native AAR could not open the file, which is a
+   genuinely different problem.
 4. Select 1–3 tracks → **MEASURE**. Note that the test model accepts a
    waveform only because its shape is dynamic; the useful figures are
    decode and preprocessing cost.
