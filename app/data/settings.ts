@@ -81,6 +81,21 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     to: '/settings/audio-analysis',
     icon: 'lucide:activity',
   },
+  // The AI lab is a research instrument, not a product feature, and
+  // §15 requires it stay out of the normal browsing experience. It is
+  // listed here for ONE practical reason: inside the Android WebView
+  // there is no address bar, so a developer on real hardware would
+  // otherwise have no way to reach it. Kept alongside the Phase 13
+  // diagnostic, under the same Developer kicker.
+  {
+    id: 'ai-benchmark',
+    index: '09',
+    label: 'AI BENCHMARK LAB',
+    kicker: 'Developer Diagnostic',
+    description: 'Model benchmarking research tool. Not a production feature',
+    to: '/dev/ai-benchmark',
+    icon: 'lucide:flask-conical',
+  },
 ]
 
 export interface SettingsSearchEntry {

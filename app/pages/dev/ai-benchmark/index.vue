@@ -126,6 +126,29 @@ const sustainedIterations = ref(20)
         built here.
       </LabBanner>
 
+      <!-- ---- Real-audio shortcut ------------------------ -->
+      <section class="border border-line bg-surface">
+        <div class="border-b border-line px-5 py-3">
+          <p class="label text-fg-muted">
+            TEST WITH YOUR OWN MUSIC
+          </p>
+        </div>
+        <div class="px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+          <p class="text-small text-fg-muted max-w-[64ch] leading-relaxed">
+            Pick real tracks and measure what they actually cost to decode and
+            analyse on this device. Measures decode + DSP, not model inference —
+            no model weights ship in Phase 14.
+          </p>
+          <button
+            type="button"
+            class="sys-btn-outline shrink-0"
+            @click="router.push('/dev/ai-benchmark/real-audio')"
+          >
+            REAL AUDIO TEST →
+          </button>
+        </div>
+      </section>
+
       <!-- ---- Environment -------------------------------- -->
       <LabBanner
         v-if="lab.environmentWarning"

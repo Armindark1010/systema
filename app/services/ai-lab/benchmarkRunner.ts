@@ -32,6 +32,7 @@
 import type {
   BenchmarkDataset,
   BenchmarkRun,
+  BenchmarkSample,
   DeviceInfo,
   ExecutionProviderId,
   Metric,
@@ -80,6 +81,18 @@ export interface BenchmarkOptions {
    * crashes on demand. Production callers omit it.
    */
   runtime?: InferenceRuntime
+  /**
+   * Supplies decoded PCM for `device-track` samples.
+   *
+   * Required whenever the dataset contains real tracks. Without it
+   * those samples FAIL rather than falling back to synthetic audio —
+   * substituting generated signals for a user's music would produce
+   * a number that looks real and means nothing.
+   */
+  realAudioProvider?: (
+    sample: BenchmarkSample,
+    preprocessing: PreprocessingConfig,
+  ) => Promise<Float32Array>
 }
 
 /** Sustained/thermal stability options (§14). */
@@ -279,7 +292,56 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   for (const sample of dataset.samples) {
     onProgress?.(completed, dataset.samples.length, sample.label)
 
-    const audio = synthesiseAudio(sample, preprocessing)
+    // A real track must never be silently replaced by synthetic audio.
+    //
+    // This guard fixes a bug where `device-track` samples were fed
+    // generated signals: the run produced real-looking numbers that
+    // had nothing to do with the selected music. Measuring the wrong
+    // thing invisibly is worse than refusing to measure, so a real
+    // sample that cannot be decoded fails loudly instead.
+    let audio: Float32Array
+    if (sample.kind === 'device-track') {
+      const provided = options.realAudioProvider
+      if (!provided) {
+        sampleResults.push({
+          sampleId: sample.sampleId,
+          status: 'UNSUPPORTED_INPUT',
+          inferenceMs: null,
+          audioSec: sample.durationSec,
+          errorCode: 'NO_REAL_AUDIO_SOURCE',
+          errorMessage:
+            'This sample references a real track, but no decoder was supplied. '
+            + 'Refusing to substitute synthetic audio, which would produce a '
+            + 'measurement that is not about this track.',
+        })
+        completed++
+        continue
+      }
+      try {
+        audio = await provided(sample, preprocessing)
+      } catch (error) {
+        const mapped = mapErrorToStatus(error)
+        sampleResults.push({
+          sampleId: sample.sampleId,
+          status: mapped.status,
+          inferenceMs: null,
+          audioSec: sample.durationSec,
+          errorCode: mapped.code,
+          errorMessage: mapped.message,
+        })
+        log(logLine({
+          model: model.modelId,
+          sample: sample.sampleId,
+          status: mapped.status,
+          error: mapped.code,
+        }))
+        completed++
+        continue
+      }
+    } else {
+      audio = synthesiseAudio(sample, preprocessing)
+    }
+
     const frames = frameAudio(audio, preprocessing)
     const sampleTimings: number[] = []
     let lastEmbedding: Float32Array | null = null

@@ -116,6 +116,10 @@ export type SettingsCategoryId =
   // developer tool, so it reads as an instrument rather than a
   // feature the user is expected to operate.
   | 'audio-analysis'
+  // Phase 14 research instrument. Present only because the Android
+  // WebView has no address bar, so an unlinked route would be
+  // unreachable on the hardware it exists to measure.
+  | 'ai-benchmark'
 
 export interface SettingsCategory {
   id: SettingsCategoryId

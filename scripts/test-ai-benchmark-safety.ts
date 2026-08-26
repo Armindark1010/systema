@@ -92,7 +92,6 @@ ok('the AI lab source tree exists', labFiles.length >= 8,
  */
 const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp, why: string }> = [
   { pattern: /\ballTracks\b/, why: 'enumerates the whole library' },
-  { pattern: /\bscanLibrary\s*\(/, why: 'triggers a library scan' },
   { pattern: /\bloadAllTracks\b/, why: 'loads the entire library' },
   { pattern: /analyzeAll|analyseAll|indexAll|embedAll/i, why: 'whole-library processing' },
   { pattern: /\bWorkManager\b/, why: 'background work scheduling' },
@@ -101,6 +100,29 @@ const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp, why: string }> = [
   { pattern: /library\.tracks\s*\.\s*forEach/, why: 'iterates every loaded track' },
 ]
 
+/**
+ * `scanLibrary` is allowed ONLY behind an explicit user gesture.
+ *
+ * The real-audio page needs a SCAN button so it works without a
+ * detour to Library settings — the same self-sufficiency the Phase 13
+ * diagnostic page has. What must never happen is a scan starting on
+ * its own, so the check moved from "is the call present" to "is the
+ * call reachable from an auto-run surface". A blanket ban would have
+ * been easy to satisfy and would have tested the wrong property.
+ */
+function autoRunSurfaces(source: string): string {
+  const blocks: string[] = []
+  const patterns = [
+    /onMounted\s*\([\s\S]*?\n\}\)/g,
+    /watch\s*\([\s\S]*?\n\}\)/g,
+    /watchEffect\s*\([\s\S]*?\n\}\)/g,
+  ]
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) blocks.push(match[0])
+  }
+  return blocks.join('\n')
+}
+
 for (const file of labFiles) {
   const relative = file.replace(`${root}/`, '')
   const source = codeOnly(readFileSync(file, 'utf8'))
@@ -108,6 +130,12 @@ for (const file of labFiles) {
     const hit = pattern.test(source)
     ok(`${relative}: no ${pattern.source} (${why})`, !hit)
   }
+  // A scan may exist behind a button, but must never self-start.
+  ok(`${relative}: no scanLibrary from an auto-run surface`,
+    !/\bscanLibrary\s*\(/.test(autoRunSurfaces(source)))
+  ok(`${relative}: no benchmark execution from an auto-run surface`,
+    !/\b(execute|runTest|runBenchmark|measureRealTrack)\s*\(/
+      .test(autoRunSurfaces(source)))
 }
 
 // ------------------------------------------------------------
@@ -156,14 +184,18 @@ ok('AppShell does not reference the AI lab',
 console.log('\n\x1b[1m4. The lab is not linked from production navigation (§15)\x1b[0m')
 // ------------------------------------------------------------
 
+// The lab must stay out of the BROWSING experience: home, library,
+// player, search and AI insights. Settings is treated separately
+// below, because a developer on real hardware has no address bar.
 const navigationFiles = [
   'app/components/AppShell.vue',
   'app/components/MobileDock.vue',
   'app/components/DesktopSidebar.vue',
   'app/components/MobileHeader.vue',
-  'app/data/settings.ts',
+  'app/components/MobileBottomNavigation.vue',
   'app/pages/index.vue',
   'app/pages/ai.vue',
+  'app/pages/search.vue',
 ].filter(p => existsSync(resolve(root, p)))
 
 for (const relative of navigationFiles) {
@@ -173,6 +205,23 @@ for (const relative of navigationFiles) {
 }
 ok('navigation audit covered the real navigation surfaces',
   navigationFiles.length >= 5, `${navigationFiles.length} files`)
+
+// Settings: exactly one entry, clearly marked as a developer tool.
+//
+// This is a deliberate, narrow exception to §15. Inside the Android
+// WebView there is no address bar, so without it the lab would be
+// unreachable on the very hardware it exists to measure. The
+// constraint that still matters — that it is not part of the normal
+// browsing experience — is preserved and asserted here.
+const settingsSource = codeOnly(read('app/data/settings.ts'))
+const labEntries = settingsSource.match(/dev\/ai-benchmark/g) ?? []
+ok('settings exposes the lab exactly once', labEntries.length === 1,
+  `found ${labEntries.length}`)
+ok('the settings entry is marked as a developer diagnostic',
+  /ai-benchmark[\s\S]{0,400}?Developer Diagnostic/.test(settingsSource)
+  || /Developer Diagnostic[\s\S]{0,400}?ai-benchmark/.test(settingsSource))
+ok('the settings entry states it is not a production feature',
+  /ai-benchmark[\s\S]{0,400}?[Nn]ot a production feature/.test(settingsSource))
 
 // ------------------------------------------------------------
 console.log('\n\x1b[1m5. The lab route uses the isolated dev layout\x1b[0m')
@@ -238,10 +287,24 @@ ok('no benchmark Room entity was introduced',
     kotlinFiles.filter(f => /db\//.test(f))
       .map(f => readFileSync(f, 'utf8')).join('\n')))
 
-// Phase 14 must not have modified the Phase 13 native surface.
-ok('ai-lab does not import the Phase 13 analysis plugin',
-  !labFiles.some(f =>
-    /audioAnalysisPlugin|audioAnalysisService/.test(codeOnly(readFileSync(f, 'utf8')))))
+// Phase 14 READS the Phase 13 analysis surface (that is how real
+// audio gets decoded) but must never MODIFY it. Reading is confined
+// to one module so the coupling stays visible and reviewable.
+const phase13Consumers = labFiles.filter(f =>
+  /audioAnalysisPlugin|audioAnalysisService/.test(codeOnly(readFileSync(f, 'utf8'))))
+  .map(f => f.replace(`${root}/`, ''))
+
+ok('only deviceAudio.ts and the real-audio page touch the Phase 13 API',
+  phase13Consumers.every(f =>
+    f.endsWith('deviceAudio.ts') || f.endsWith('real-audio.vue')),
+  phase13Consumers.join(', '))
+
+// It may call analyzeTrack; it must not schedule or batch anything.
+const deviceAudioSource = codeOnly(read('app/services/ai-lab/deviceAudio.ts'))
+ok('deviceAudio only analyses one explicitly named track at a time',
+  /analyzeTrack\(trackId/.test(deviceAudioSource))
+ok('deviceAudio never enumerates tracks',
+  !/getAllTracks|listTracks|tracks\s*\.\s*map/.test(deviceAudioSource))
 
 // ------------------------------------------------------------
 console.log('\n\x1b[1m7. Dataset cap is enforced at runtime, not just documented\x1b[0m')

@@ -595,6 +595,82 @@ ok('post-load metrics are NOT_APPLICABLE rather than zero',
   unloadable.performance.averageInferenceMs.confidence === 'NOT_APPLICABLE')
 ok('the failure appears in run warnings', unloadable.warnings.length > 0)
 
+// ---- Real tracks must never get synthetic audio -----------------
+// Regression guard for a genuine bug: the runner synthesised audio
+// for EVERY sample, so selecting real music produced real-looking
+// numbers that had nothing to do with that music. Silently measuring
+// the wrong thing is worse than refusing to measure.
+
+const realDataset = datasets.buildDeviceDataset([
+  { id: 'track-1', title: 'Real Song One', durationMs: 200_000 },
+  { id: 'track-2', title: 'Real Song Two', durationMs: 180_000 },
+])
+
+const withoutProvider = await runner.runBenchmark({
+  model: refModel,
+  dataset: realDataset,
+  preprocessing: config,
+  executionProvider: 'cpu',
+  device,
+  warmupRuns: 0,
+  measuredRuns: 1,
+  log: () => {},
+})
+
+ok('a real-track dataset with no decoder does NOT silently synthesise',
+  withoutProvider.reliability.successfulSamples === 0)
+ok('each real sample fails as UNSUPPORTED_INPUT',
+  withoutProvider.samples.every(s => s.status === 'UNSUPPORTED_INPUT'))
+ok('the failure names the missing decoder',
+  withoutProvider.samples.every(s => s.errorCode === 'NO_REAL_AUDIO_SOURCE'))
+ok('the failure explains why substitution was refused',
+  /synthetic/i.test(withoutProvider.samples[0]?.errorMessage ?? ''))
+
+// With a provider, real samples run normally.
+let providerCalls = 0
+const withProvider = await runner.runBenchmark({
+  model: refModel,
+  dataset: realDataset,
+  preprocessing: config,
+  executionProvider: 'cpu',
+  device,
+  warmupRuns: 0,
+  measuredRuns: 1,
+  realAudioProvider: async (sample, cfg) => {
+    providerCalls++
+    // Distinct per track, as real decoded audio would be.
+    return preprocessing.synthesiseAudio(
+      { ...sample, kind: 'synthetic', characteristics: [sample.sampleId] }, cfg)
+  },
+  log: () => {},
+})
+
+ok('a supplied decoder is used for every real sample', providerCalls === 2)
+ok('real samples succeed once audio is available',
+  withProvider.reliability.successfulSamples === 2)
+
+// A decoder failure on one track must not kill the batch.
+const partialReal = await runner.runBenchmark({
+  model: refModel,
+  dataset: realDataset,
+  preprocessing: config,
+  executionProvider: 'cpu',
+  device,
+  warmupRuns: 0,
+  measuredRuns: 1,
+  realAudioProvider: async (sample, cfg) => {
+    if (sample.sampleId.includes('track-2')) {
+      throw new runtimes.InferenceError('UNSUPPORTED_INPUT', 'Corrupt codec header.')
+    }
+    return preprocessing.synthesiseAudio({ ...sample, kind: 'synthetic' }, cfg)
+  },
+  log: () => {},
+})
+ok('one undecodable track does not abort the batch',
+  partialReal.status === 'PARTIAL_SUCCESS')
+ok('the undecodable track keeps its reason',
+  partialReal.samples.some(s => /Corrupt codec/.test(s.errorMessage ?? '')))
+
 // ---- An invalid dataset must be refused up front ----------------
 let rejected = false
 try {
