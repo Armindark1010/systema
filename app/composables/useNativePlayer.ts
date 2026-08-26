@@ -96,6 +96,8 @@ export function useNativePlayer() {
   let recordedTrackId: string | null = null
   /** One-shot latch for the notification permission prompt. */
   let notificationPermissionAsked = false
+  /** Ensures a denial is reported once, not on every native event. */
+  let notificationPermissionLogged = false
   let lastResyncAt = 0
   let seekTimer: ReturnType<typeof setTimeout> | null = null
   let pendingSeekMs: number | null = null
@@ -510,6 +512,24 @@ export function useNativePlayer() {
       onDuration: (event) => {
         if (event.durationMs > 0) {
           applyNative(() => { player.duration = event.durationMs / 1000 })
+        }
+      },
+      onNotificationPermission: (event) => {
+        // The native layer resolved POST_NOTIFICATIONS (MainActivity
+        // asks at startup). Record it so the JS-side request below is
+        // skipped when the answer is already known, and surface a
+        // denial once so it is diagnosable from the console.
+        if (event.granted || !event.required) {
+          notificationPermissionAsked = true
+          return
+        }
+        if (!notificationPermissionLogged) {
+          notificationPermissionLogged = true
+          console.info(
+            '[SYSTEMA/PLAYER] Notification permission not granted; audio, '
+            + 'lock-screen controls and Bluetooth buttons still work, but '
+            + 'the media notification stays hidden.',
+          )
         }
       },
       onError: (error) => {

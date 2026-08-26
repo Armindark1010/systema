@@ -124,6 +124,12 @@ export interface NotificationPermissionState {
   required: boolean
 }
 
+/** Emitted by the native layer when the permission state is known. */
+export interface NotificationPermissionEvent {
+  granted: boolean
+  required: boolean
+}
+
 export interface PlayerPlugin {
   play(options?: { track?: NativePlayerTrack }): Promise<void>
   pause(): Promise<void>
@@ -163,6 +169,7 @@ export interface PlayerPlugin {
   addListener(eventName: 'bufferingChanged', handler: (event: BufferingEvent) => void): Promise<PluginListenerHandle>
   addListener(eventName: 'queueChanged', handler: (event: QueueChangedEvent) => void): Promise<PluginListenerHandle>
   addListener(eventName: 'playerError', handler: (event: PlayerErrorEvent) => void): Promise<PluginListenerHandle>
+  addListener(eventName: 'notificationPermissionChanged', handler: (event: NotificationPermissionEvent) => void): Promise<PluginListenerHandle>
   removeAllListeners(): Promise<void>
 }
 

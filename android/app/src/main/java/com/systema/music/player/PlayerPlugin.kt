@@ -58,6 +58,7 @@ class PlayerPlugin : Plugin() {
         private const val EVENT_BUFFERING = "bufferingChanged"
         private const val EVENT_QUEUE = "queueChanged"
         private const val EVENT_ERROR = "playerError"
+        private const val EVENT_NOTIFICATION_PERMISSION = "notificationPermissionChanged"
     }
 
     private val engine: PlayerEngine by lazy { PlayerEngine.get(context) }
@@ -117,6 +118,24 @@ class PlayerPlugin : Plugin() {
     override fun load() {
         super.load()
         engine.addListener(engineListener)
+
+        // Tell the WebView where the notification permission stands as
+        // soon as the bridge exists. MainActivity requests it natively
+        // at startup, so by the time the frontend is listening the
+        // answer is usually already known — this is how it finds out
+        // without having to poll.
+        notifyNotificationPermission()
+    }
+
+    /** Pushes the live POST_NOTIFICATIONS state to the frontend. */
+    private fun notifyNotificationPermission() {
+        val granted = hasNotificationPermission()
+        val required = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+        Log.i(TAG, "Notification permission -> granted=$granted required=$required")
+        notifyListeners(
+            EVENT_NOTIFICATION_PERMISSION,
+            JSObject().put("granted", granted).put("required", required),
+        )
     }
 
     override fun handleOnDestroy() {
@@ -265,6 +284,7 @@ class PlayerPlugin : Plugin() {
 
     @PermissionCallback
     private fun notificationResult(call: PluginCall) {
+        notifyNotificationPermission()
         call.resolve(
             JSObject()
                 .put("granted", hasNotificationPermission())

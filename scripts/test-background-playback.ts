@@ -26,6 +26,17 @@ import { join } from 'node:path'
 const root = process.cwd()
 const read = (p: string) => readFileSync(join(root, p), 'utf8')
 
+/**
+ * File contents with comments removed.
+ *
+ * Assertions about what the code DOES NOT contain must not be fooled by
+ * a comment explaining why that thing was removed.
+ */
+const readCode = (p: string) =>
+  read(p)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+
 const MANIFEST = 'android/app/src/main/AndroidManifest.xml'
 const SERVICE = 'android/app/src/main/java/com/systema/music/player/PlaybackService.kt'
 const ENGINE = 'android/app/src/main/java/com/systema/music/player/PlayerEngine.kt'
@@ -394,20 +405,23 @@ group('17. Seek commands are advertised and executable')
   check('increment matches the in-app +/-15s controls',
     /SEEK_INCREMENT_MS = 15_000L/.test(engine))
 
-  check('session declares a callback', svc.includes('setCallback(SessionCallback())'))
-  check('scrubber command requested',
-    svc.includes('Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM'))
-  check('seek-to-item command requested', svc.includes('Player.COMMAND_SEEK_TO_MEDIA_ITEM'))
-  check('seek back/forward commands requested',
-    svc.includes('Player.COMMAND_SEEK_BACK') && svc.includes('Player.COMMAND_SEEK_FORWARD'))
-  check('next/previous commands requested',
-    svc.includes('Player.COMMAND_SEEK_TO_NEXT') && svc.includes('Player.COMMAND_SEEK_TO_PREVIOUS'))
-
-  // Must never advertise a command the player cannot execute.
-  check('commands intersected with player.isCommandAvailable',
-    svc.includes('player.isCommandAvailable(command)'))
-  check('unavailable commands are removed, not force-added',
-    /if \(player\.isCommandAvailable\(command\)\) add\(command\) else remove\(command\)/.test(svc))
+  // REGRESSION GUARD.
+  //
+  // A custom MediaSession.Callback that intersected available commands
+  // with player.isCommandAvailable() at connect time broke the
+  // notification outright: onConnect fires for the notification's own
+  // controller while the player is still empty, so COMMAND_PLAY_PAUSE
+  // evaluated false and was stripped permanently (the command set is
+  // fixed at connect). Media3 will not build a media notification
+  // without a play/pause action. Media3's default handles availability
+  // dynamically, so the correct fix was to remove the callback.
+  const svcCode = readCode(SERVICE)
+  check('no custom session callback overriding commands',
+    !svcCode.includes('MediaSession.Callback'))
+  check('play/pause is never stripped at connect time',
+    !svcCode.includes('isCommandAvailable'))
+  check('seek capability comes from the player, not a hand-built set',
+    engine.includes('setSeekBackIncrementMs') && engine.includes('setSeekForwardIncrementMs'))
 }
 
 // ------------------------------------------------------------
@@ -530,6 +544,63 @@ group('23. Bottom navigation')
     /\.mobile-bottom-nav__icon,\s*\n\.mobile-bottom-nav__label \{[\s\S]*?z-index: 1/.test(css))
   check('reduced-motion respected',
     /@media \(prefers-reduced-motion: reduce\)[\s\S]*?mobile-bottom-nav__indicator/.test(css))
+}
+
+// ------------------------------------------------------------
+group('24. POST_NOTIFICATIONS requested natively at startup')
+// ------------------------------------------------------------
+{
+  const main = read('android/app/src/main/java/com/systema/music/MainActivity.java')
+
+  // The JS path alone was not enough: it only runs once the bridge is
+  // up and the player composable has initialised — later than the first
+  // track can start — and never at all if the plugin fails to register.
+  check('MainActivity requests the permission',
+    main.includes('requestNotificationPermissionIfNeeded()'))
+  check('uses ActivityCompat.requestPermissions',
+    main.includes('ActivityCompat.requestPermissions'))
+  check('gated to API 33+', main.includes('Build.VERSION_CODES.TIRAMISU'))
+  check('skips the request when already granted',
+    /PERMISSION_GRANTED[\s\S]*?if \(granted\)[\s\S]*?return/.test(main))
+  check('result is handled', main.includes('onRequestPermissionsResult'))
+  check('request failure is caught, never fatal',
+    /requestPermissions\([\s\S]*?catch \(Throwable/.test(main))
+  check('denial does not stop playback',
+    main.includes('playback continues normally'))
+  check('unrelated permission results still reach Capacitor',
+    main.includes('super.onRequestPermissionsResult'))
+}
+
+// ------------------------------------------------------------
+group('25. Permission state is pushed to the frontend')
+// ------------------------------------------------------------
+{
+  const plugin = read(PLUGIN)
+  check('native emits a permission event',
+    plugin.includes('EVENT_NOTIFICATION_PERMISSION'))
+  check('event name is stable',
+    plugin.includes('"notificationPermissionChanged"'))
+  check('emitted when the bridge loads',
+    /override fun load\(\)[\s\S]*?notifyNotificationPermission\(\)/.test(plugin))
+  check('emitted after an in-app request resolves',
+    /notificationResult\(call: PluginCall\)[\s\S]*?notifyNotificationPermission\(\)/.test(plugin))
+  check('payload carries granted + required',
+    /put\("granted", granted\)[\s\S]{0,60}put\("required", required\)/.test(plugin))
+
+  const ts = read(PLUGIN_TS)
+  check('event typed in the plugin contract',
+    ts.includes("addListener(eventName: 'notificationPermissionChanged'"))
+  check('event payload interface declared',
+    ts.includes('export interface NotificationPermissionEvent'))
+  check('still no `any` in the contract', !/\bany\b/.test(ts))
+
+  const c = read(NATIVE_COMPOSABLE)
+  check('frontend subscribes to the event',
+    c.includes('onNotificationPermission:'))
+  check('a native grant suppresses the duplicate JS request',
+    /onNotificationPermission[\s\S]*?notificationPermissionAsked = true/.test(c))
+  check('denial is reported once, not per event',
+    c.includes('notificationPermissionLogged'))
 }
 
 // ------------------------------------------------------------

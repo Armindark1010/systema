@@ -3,7 +3,6 @@ package com.systema.music.player
 import android.app.PendingIntent
 import android.content.Intent
 import android.util.Log
-import androidx.media3.common.Player
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 
@@ -81,7 +80,21 @@ class PlaybackService : MediaSessionService() {
         mediaSession = try {
             MediaSession.Builder(this, player)
                 .apply { sessionActivity?.let(::setSessionActivity) }
-                .setCallback(SessionCallback())
+                // No custom MediaSession.Callback.
+                //
+                // An earlier version installed one that intersected the
+                // available commands with player.isCommandAvailable() at
+                // connect time. onConnect fires for the notification's
+                // own controller while the player is still empty, so
+                // COMMAND_PLAY_PAUSE was evaluated as unavailable and
+                // stripped — permanently, because the command set is
+                // fixed at connect. Media3 will not build a media
+                // notification without a play/pause action, so no
+                // notification ever appeared.
+                //
+                // Media3's default already tracks command availability
+                // dynamically and notifies controllers as it changes,
+                // which is exactly the behaviour we want.
                 .build()
         } catch (t: Throwable) {
             // A session failure must not crash the app; in-app playback
@@ -108,44 +121,6 @@ class PlaybackService : MediaSessionService() {
      * seeking an unseekable or still-unknown-duration item stays
      * correctly unavailable until the duration resolves.
      */
-    private inner class SessionCallback : MediaSession.Callback {
-        override fun onConnect(
-            session: MediaSession,
-            controller: MediaSession.ControllerInfo,
-        ): MediaSession.ConnectionResult {
-            val default = MediaSession.ConnectionResult.AcceptedResultBuilder(session).build()
-            val player = session.player
-
-            val available = Player.Commands.Builder()
-                .addAll(default.availablePlayerCommands)
-                // Intersect with reality: only keep what the player says
-                // it can execute right now.
-                .apply {
-                    listOf(
-                        Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
-                        Player.COMMAND_SEEK_TO_MEDIA_ITEM,
-                        Player.COMMAND_SEEK_BACK,
-                        Player.COMMAND_SEEK_FORWARD,
-                        Player.COMMAND_SEEK_TO_NEXT,
-                        Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
-                        Player.COMMAND_SEEK_TO_PREVIOUS,
-                        Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
-                        Player.COMMAND_GET_CURRENT_MEDIA_ITEM,
-                        Player.COMMAND_GET_TIMELINE,
-                        Player.COMMAND_GET_METADATA,
-                        Player.COMMAND_PLAY_PAUSE,
-                    ).forEach { command ->
-                        if (player.isCommandAvailable(command)) add(command) else remove(command)
-                    }
-                }
-                .build()
-
-            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                .setAvailablePlayerCommands(available)
-                .build()
-        }
-    }
-
     /**
      * Hands the session to controllers: the system media button
      * receiver, the notification, Android Auto, Wear, and so on.

@@ -25,6 +25,7 @@ import {
   type BufferingEvent,
   type DurationEvent,
   type NotificationPermissionState,
+  type NotificationPermissionEvent,
 } from './playerPlugin'
 
 export type {
@@ -34,6 +35,7 @@ export type {
   NativePlaybackState,
   QueueChangedEvent,
   NotificationPermissionState,
+  NotificationPermissionEvent,
 } from './playerPlugin'
 
 /** Structured playback failure, shaped like LibraryError. */
@@ -212,6 +214,7 @@ export interface NativePlayerHandlers {
   onDuration?: (event: DurationEvent) => void
   onQueueChanged?: (event: QueueChangedEvent) => void
   onError?: (error: PlayerError) => void
+  onNotificationPermission?: (event: NotificationPermissionEvent) => void
 }
 
 /**
@@ -237,6 +240,14 @@ export function addPlayerListeners(handlers: NativePlayerHandlers): () => void {
   }
   if (handlers.onQueueChanged) {
     pending.push(NativePlayer.addListener('queueChanged', handlers.onQueueChanged))
+  }
+  if (handlers.onNotificationPermission) {
+    pending.push(
+      NativePlayer.addListener(
+        'notificationPermissionChanged',
+        handlers.onNotificationPermission,
+      ),
+    )
   }
   if (handlers.onError) {
     const onError = handlers.onError
