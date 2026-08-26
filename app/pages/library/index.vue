@@ -134,6 +134,19 @@ const canLoadMore = computed(
 
 useInfiniteScroll(loadMoreSentinel, () => loadMoreTracks(), canLoadMore, { rootMargin: 400 })
 
+// ---- Fast scroll + scroll-to-top ---------------------------
+// One shared, rAF-throttled scroll reader drives both controls, so
+// there is a single passive listener rather than one per control.
+const { scrollY, maxScroll, measure: measureScroll } = useDocumentScroll()
+
+// Both controls belong to the tracks pane only; the album/artist/
+// playlist panes keep their existing behaviour untouched.
+const showScrollTools = computed(() => activeIndex.value === 0 && sortedTracks.value.length > 0)
+
+// Appending a page makes the document taller, which changes the
+// fast-scroll mapping. Re-measure after the DOM has grown.
+watch(() => sortedTracks.value.length, () => nextTick(measureScroll))
+
 let emoTimer: ReturnType<typeof setTimeout> | undefined
 function react(expression: EmoExpression, message: string, resetAfter = 700) {
   if (emoTimer) clearTimeout(emoTimer)
@@ -514,6 +527,21 @@ function isPaneVisible(paneIndex: number) {
             </div>
           </div>
         </section>
+        <!--
+          Overlay controls for the track list. Both are fixed-position
+          and only the fast-scroll thumb is interactive, so neither can
+          block normal scrolling or the row action menus.
+        -->
+        <LibraryFastScroll
+          v-if="showScrollTools"
+          :scroll-y="scrollY"
+          :max-scroll="maxScroll"
+        />
+        <LibraryScrollTop
+          v-if="showScrollTools"
+          :scroll-y="scrollY"
+        />
+
       </div>
     </div>
 

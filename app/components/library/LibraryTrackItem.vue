@@ -78,6 +78,16 @@ function onPlayClick() {
   display: grid;
   min-width: 0;
   min-height: var(--library-row-height);
+  /*
+    Large libraries render many rows at once. `content-visibility`
+    lets the browser skip layout/paint for rows outside the viewport,
+    and `contain-intrinsic-size` supplies the row height up front so
+    the scrollbar and fast-scroll mapping stay stable while skipped.
+    Purely a rendering optimisation: nothing about the markup, the
+    design, or the DOM order changes.
+  */
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--library-row-height);
   grid-template-columns: var(--library-number-column) minmax(0, 1fr) var(--library-duration-column) var(--library-menu-size);
   gap: var(--library-row-gap);
   align-items: center;
