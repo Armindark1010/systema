@@ -24,4 +24,7 @@ ext {
     // 1.10.1 is the newest stable line built against Kotlin 2.1.x.
     // 1.11.0 moved to Kotlin 2.2.0 and would force a toolchain bump.
     media3Version = '1.10.1'
+    
+    // ---- SYSTEMA audio analysis (Phase 13) ----
+    workVersion = '2.12.0'
 }

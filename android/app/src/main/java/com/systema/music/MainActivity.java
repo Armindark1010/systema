@@ -10,6 +10,7 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.getcapacitor.BridgeActivity;
+import com.systema.music.analysis.AudioAnalysisPlugin;
 import com.systema.music.library.MusicLibraryPlugin;
 import com.systema.music.player.PlayerPlugin;
 
@@ -45,6 +46,13 @@ public class MainActivity extends BridgeActivity {
             Log.e(TAG, "Failed to register PlayerPlugin", t);
         }
 
+        Log.i(TAG, "Registering AudioAnalysisPlugin");
+        try {
+            registerPlugin(AudioAnalysisPlugin.class);
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to register AudioAnalysisPlugin", t);
+        }
+
         super.onCreate(savedInstanceState);
 
         // Ask for POST_NOTIFICATIONS natively, right at startup.
@@ -70,10 +78,19 @@ public class MainActivity extends BridgeActivity {
             Log.i(TAG, "MusicLibrary plugin registered with bridge: " + present);
             Log.i(TAG, "Player plugin registered with bridge: "
                 + (getBridge().getPlugin("Player") != null));
+            boolean analysisPresent = getBridge().getPlugin("AudioAnalysis") != null;
+            Log.i(TAG, "AudioAnalysis plugin registered with bridge: " + analysisPresent);
             if (!present) {
                 Log.e(
                     TAG,
                     "MusicLibrary is NOT registered. The WebView will fall back to mock data. "
+                        + "Look for an earlier PluginLoadException / InvalidPluginException."
+                );
+            }
+            if (!analysisPresent) {
+                Log.e(
+                    TAG,
+                    "AudioAnalysis is NOT registered. "
                         + "Look for an earlier PluginLoadException / InvalidPluginException."
                 );
             }

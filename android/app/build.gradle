@@ -66,6 +66,10 @@ dependencies {
     // same media3Version as the engine so no second Media3 line can be
     // pulled into the graph.
     implementation "androidx.media3:media3-session:$media3Version"
+    // ---- SYSTEMA audio analysis (Phase 13) ----
+    // WorkManager for background analysis
+    implementation "androidx.work:work-runtime:$workVersion"
+    implementation "androidx.work:work-runtime-ktx:$workVersion"
 
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
