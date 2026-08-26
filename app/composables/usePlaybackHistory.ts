@@ -29,12 +29,13 @@ import { computed, readonly, ref } from 'vue'
 import { tracks as catalog } from '~/data/music'
 import type { Track } from '~/types'
 import { createLocalStorageAdapter } from '~/services/persistence/storageAdapter'
+import { isNativeLibraryAvailable } from '~/services/native/musicLibraryPlugin'
 
 const STORAGE_KEY = 'systema:recents:v1'
 const MAX_RECENTS = 50
 
-// A deterministic mock history keeps SSR and hydration identical. It
-// is replaced the moment real playback is recorded on a device.
+// A deterministic mock history keeps SSR and hydration identical in
+// the BROWSER demo. On a device it is never used: see below.
 const initialHistory = [
   'tr-04',
   'tr-08',
@@ -50,6 +51,19 @@ const initialHistory = [
   'tr-35',
 ]
 
+/**
+ * Recents, newest first.
+ *
+ * Seeded with the mock history only where the mock catalog is what the
+ * user actually sees — the browser demo. On Android the native library
+ * is the real one, so seeding would show twelve tracks the user never
+ * played and, worse, tracks that are not even on their phone. There the
+ * list starts empty and fills from real playback.
+ *
+ * The seed is applied lazily in hydrate() rather than here so the
+ * decision can consult the native bridge, which is unavailable at
+ * module-evaluation time during SSR.
+ */
 const recentTrackIds = ref<string[]>(initialHistory)
 
 /**
@@ -75,6 +89,14 @@ let hydrated = false
 function hydrate() {
   if (hydrated || !import.meta.client) return
   hydrated = true
+
+  // On a real device drop the mock seed: those tracks are not on the
+  // user's phone, so showing them as "recently played" is wrong. The
+  // list starts empty and fills as tracks actually play.
+  if (isNativeLibraryAvailable()) {
+    recentTrackIds.value = []
+  }
+
   try {
     const raw = storage.get(STORAGE_KEY)
     if (!raw) return
