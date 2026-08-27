@@ -198,6 +198,7 @@ Detail:
 | Uses `output_1`, never `output_0` | **TEST PASSED** (wiring) |
 | Kotlin type-checks vs. stub Android/ONNX/Capacitor APIs | **PASSED** (local shims, *not* Gradle) |
 | Nuxt build / generate / `cap sync` | **PASSED** |
+| Runtime id resolves (`onnxruntime`, not `onnx`) | **TEST PASSED** — see §13 |
 | **Android Gradle compile** | **NOT RUN** — no Android SDK in the sandbox |
 | **Real YAMNet execution** | **NOT PERFORMED** in this phase |
 | **Embedding quality** | **UNKNOWN — that is what the lab is for** |
@@ -244,3 +245,58 @@ No production model selected. No embedding database, no library scan, no
 background analysis, no semantic search, no recommendations. The aggregation
 pipeline is unchanged. The evaluation is capped at 20 explicitly chosen tracks
 so it can never become a library-wide sweep.
+
+---
+
+## 13. Postscript — the runtime identifier bug
+
+The first device run of this lab never reached a track:
+
+```
+EVALUATION ERROR
+Unknown runtime 'onnx'. Available: onnxruntime, reference
+```
+
+**Root cause.** `quality.vue` hardcoded `runtimeId: 'onnx'`. The Kotlin
+registry is keyed by each runtime's own `runtimeId`, which is
+`"onnxruntime"`, so the lookup missed and the run was rejected before the
+model was even loaded. Nothing downstream was wrong: preprocessing,
+`output_1` selection, aggregation and cosine were never reached.
+
+**Fix.** One line — the page now sends `RUNTIME_ONNX`, the constant already
+shared with Kotlin's `RuntimeIds.ONNX`. No new runtime was created, the
+registry was not widened, and `reference` is untouched.
+
+**Why it escaped review.** `runQualityEvaluation` is typed
+`runtimeId: RuntimeId`, a union of the two constants, so `'onnx'` *is* a
+type error — but nothing was type-checking it. `nuxt.config.ts` sets
+`typeCheck: false`, `nuxt build` does not check types, and `vue-tsc` was not
+installed, so **no tool in the repo type-checked a single `.vue` file.**
+The previous phase's claim that `npm run build` acts as a type-check was
+wrong, and this bug is what that error cost.
+
+`vue-tsc` is now a dev dependency with an `npm run typecheck` script. With
+it, the bug is caught precisely:
+
+```
+app/pages/dev/ai-benchmark/quality.vue(237,7):
+  error TS2322: Type '"onnx"' is not assignable to type 'RuntimeId'.
+```
+
+It is deliberately **not** part of `npm test` yet: the repo has ~94
+pre-existing type errors in older components, and wiring it in now would
+turn the suite red for reasons unrelated to any current change. Clearing
+those is its own task.
+
+**This is the second desynchronisation of this identifier.** Phase 15 hit
+the mirror image — the registry said `"onnx"` while callers said
+`"onnxruntime"`. That fix guarded the registry and `onnx.vue`; Phase 17 then
+added a *new* caller that no guard covered. The new assertions
+(`test-quality-lab.ts` §23) therefore check **every** `.vue` page in
+`app/pages/dev/ai-benchmark/` for a bare `'onnx'` literal, rather than one
+file by name, and simulate the registry lookup end to end — including that
+genuinely unknown ids (`'onnx'`, `'tflite'`, `''`) still fail, and that
+resolution is exact-match so a prefix cannot silently succeed.
+
+**Device verification is still required.** Fixing the identifier only means
+the run can now *start*. Nothing about embedding quality is known.

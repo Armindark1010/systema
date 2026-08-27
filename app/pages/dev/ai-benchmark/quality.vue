@@ -35,6 +35,7 @@ import {
 } from '~/services/native/inferenceService'
 import {
   isInferenceAvailable,
+  RUNTIME_ONNX,
   type EvaluationReport,
   type QualityEvalTrackCompletedEvent,
   type SimilarityMatrix,
@@ -227,7 +228,13 @@ async function start() {
 
   try {
     await runQualityEvaluation({
-      runtimeId: 'onnx',
+      // RUNTIME_ONNX, never a literal. A hardcoded 'onnx' here shipped
+      // to device and failed every run with
+      //   Unknown runtime 'onnx'. Available: onnxruntime, reference
+      // because the registry is keyed by each runtime's own runtimeId,
+      // which is "onnxruntime". The constant is the single source of
+      // truth shared with Kotlin's RuntimeIds.ONNX.
+      runtimeId: RUNTIME_ONNX,
       modelId: modelId.value,
       tracks: selected.value.map(id => ({
         trackId: id,
