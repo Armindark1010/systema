@@ -22,6 +22,16 @@ class ModelRegistry(context: Context) {
     private val storage = ModelStorage(context.applicationContext)
 
     /**
+     * What is known about imported models.
+     *
+     * Exposed so the plugin and the importer share ONE source of
+     * truth about each model's contract. Two stores would eventually
+     * disagree, and the disagreement would show up as a benchmark
+     * that ran when it should have refused.
+     */
+    val contracts = ModelContractStore(context.applicationContext)
+
+    /**
      * The deterministic test model (§8).
      *
      * Input [1,2,3,4] -> output [9,25,49,81] via (x*2+1)^2. Dynamic
@@ -67,8 +77,8 @@ class ModelRegistry(context: Context) {
     fun descriptorForInstalled(
         fileName: String,
         sampleRate: Int? = null,
-        inputFormat: InputFormat = InputFormat.RAW_WAVEFORM,
-        inputShape: List<Long> = listOf(-1L),
+        inputFormat: InputFormat? = null,
+        inputShape: List<Long>? = null,
     ): ModelDescriptor {
         val path = storage.pathFor(fileName)
             ?: throw InferenceException(
@@ -84,21 +94,157 @@ class ModelRegistry(context: Context) {
             )
         }
 
+        val modelId = fileName.removeSuffix(ModelStorage.EXTENSION)
+
+        // A stored contract, when one exists, is authoritative over
+        // any default. This is what makes an imported model carry its
+        // OWN sample rate rather than inheriting Phase 13's 22050 Hz
+        // — feeding YAMNet 22.05 kHz because that is what the decoder
+        // happens to emit would be exactly the silent-wrong-answer
+        // failure this phase exists to prevent.
+        val contract = contracts.find(modelId)
+
         return ModelDescriptor(
-            modelId = fileName.removeSuffix(ModelStorage.EXTENSION),
+            modelId = modelId,
             modelName = fileName,
-            version = "side-loaded",
+            version = if (contract != null) "imported" else "side-loaded",
             filePath = path,
-            inputShape = inputShape,
+            inputShape = inputShape ?: contract?.inputShape?.takeIf { it.isNotEmpty() }
+                ?: listOf(-1L),
             inputType = TensorType.FLOAT32,
-            inputSampleRate = sampleRate,
+            inputSampleRate = sampleRate ?: contract?.sampleRate,
             inputChannels = 1,
-            outputShape = listOf(-1L),
+            outputShape = contract?.outputShape?.takeIf { it.isNotEmpty() } ?: listOf(-1L),
             outputType = TensorType.FLOAT32,
             sizeBytes = file.length(),
             checksum = null,
-            inputFormat = inputFormat,
+            // No default. An undeclared model gets RAW_TENSOR, which
+            // the benchmark path refuses for audio, rather than
+            // RAW_WAVEFORM, which it would happily run.
+            inputFormat = inputFormat ?: contract?.inputFormat ?: InputFormat.RAW_TENSOR,
         )
+    }
+
+    /**
+     * Verifies a model may be benchmarked against real audio.
+     *
+     * THE GATE (§ preprocessing safety)
+     * ---------------------------------
+     * Loading proves a graph is executable. It says nothing about
+     * whether the tensor SYSTEMA would build is the tensor the model
+     * was trained on. Only a declared contract establishes that, so a
+     * model without one fails here — loudly, with
+     * PREPROCESSING_UNAVAILABLE — instead of producing plausible
+     * numbers from arbitrary PCM.
+     *
+     * The bundled test model is exempt: it is pure arithmetic with no
+     * audio semantics at all, and its expected output is known in
+     * advance.
+     */
+    fun requireAudioContract(modelId: String) {
+        if (modelId == ModelStorage.TEST_MODEL_ID) return
+
+        val contract = contracts.find(modelId)
+            ?: throw InferenceException(
+                InferenceErrorCode.PREPROCESSING_UNAVAILABLE,
+                "No preprocessing contract is declared for '$modelId'. An ONNX graph " +
+                    "records shapes but not sample rate or feature extraction, so " +
+                    "SYSTEMA cannot know what this model expects. Declare the contract " +
+                    "in the Candidate Lab first. Refusing to run: a benchmark on the " +
+                    "wrong input produces believable timings and meaningless embeddings.",
+            )
+
+        when (contract.preprocessingStatus) {
+            PreprocessingStatus.VERIFIED -> Unit
+
+            PreprocessingStatus.BLOCKED -> throw InferenceException(
+                InferenceErrorCode.PREPROCESSING_UNAVAILABLE,
+                "'$modelId' needs a ${contract.inputFormat?.name ?: "spectrogram"} front " +
+                    "end that SYSTEMA does not implement. Matching a training-time " +
+                    "filterbank exactly is required; approximating it is not acceptable.",
+            )
+
+            PreprocessingStatus.UNKNOWN -> throw InferenceException(
+                InferenceErrorCode.PREPROCESSING_UNAVAILABLE,
+                "The preprocessing contract for '$modelId' is UNKNOWN. Declare its " +
+                    "sample rate and input format in the Candidate Lab before " +
+                    "benchmarking it against real audio.",
+            )
+        }
+
+        if (contract.sampleRate == null || contract.sampleRate <= 0) {
+            throw InferenceException(
+                InferenceErrorCode.PREPROCESSING_UNAVAILABLE,
+                "'$modelId' is marked VERIFIED but declares no sample rate. That is " +
+                    "contradictory, so it is treated as unverified.",
+            )
+        }
+        if (contract.inputFormat == null) {
+            throw InferenceException(
+                InferenceErrorCode.PREPROCESSING_UNAVAILABLE,
+                "'$modelId' is marked VERIFIED but declares no input format.",
+            )
+        }
+    }
+
+    /** The contract for a model, or null when nothing is known. */
+    fun contractFor(modelId: String): ModelContract? = contracts.find(modelId)
+
+    /**
+     * Records a developer-declared contract.
+     *
+     * Graph-derived fields are preserved from the existing record; the
+     * developer only supplies what the graph cannot express. The
+     * source is stamped DEVELOPER_DECLARED so a later report can never
+     * present an assertion as something SYSTEMA verified.
+     */
+    fun declareContract(
+        modelId: String,
+        sampleRate: Int?,
+        inputFormat: InputFormat,
+    ): ModelContract {
+        val existing = contracts.find(modelId)
+
+        // Only formats with an implemented preparation path can be
+        // VERIFIED. Declaring "log-mel" does not make a mel front end
+        // exist, so those record as BLOCKED however confident the
+        // developer is.
+        val status = when (inputFormat) {
+            InputFormat.MEL_SPECTROGRAM,
+            InputFormat.LOG_MEL_SPECTROGRAM,
+            -> PreprocessingStatus.BLOCKED
+
+            InputFormat.RAW_WAVEFORM ->
+                if (sampleRate != null && sampleRate > 0) PreprocessingStatus.VERIFIED
+                else PreprocessingStatus.UNKNOWN
+
+            InputFormat.RAW_TENSOR -> PreprocessingStatus.UNKNOWN
+        }
+
+        val updated = ModelContract(
+            modelId = modelId,
+            inputName = existing?.inputName,
+            inputShape = existing?.inputShape ?: emptyList(),
+            inputType = existing?.inputType ?: "UNKNOWN",
+            outputName = existing?.outputName,
+            outputShape = existing?.outputShape ?: emptyList(),
+            embeddingDimension = existing?.embeddingDimension,
+            sampleRate = sampleRate,
+            inputFormat = inputFormat,
+            preprocessingStatus = status,
+            declaredBy = ContractSource.DEVELOPER_DECLARED,
+        )
+        contracts.save(updated)
+        return updated
+    }
+
+    /** Forgets an imported model's file and its contract together. */
+    fun deleteImported(modelId: String): Boolean {
+        val fileName = if (modelId.endsWith(ModelStorage.EXTENSION)) modelId
+        else modelId + ModelStorage.EXTENSION
+        val deleted = storage.deleteInstalled(fileName)
+        if (deleted) contracts.remove(modelId)
+        return deleted
     }
 
     /** Resolves a model id from the UI to a descriptor. */

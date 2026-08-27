@@ -169,6 +169,51 @@ Production Feature"**. Not reachable from Home, Library, Player, Search or any
 normal navigation. Nothing on the page runs automatically; the memory test is
 bound to an explicit click.
 
+### 2.5 In-app model import (Phase 16.1)
+
+adb is not always available, so a model can be supplied from the phone itself.
+
+**Flow:** `IMPORT ONNX MODEL` → `ACTION_OPEN_DOCUMENT` → user taps one file →
+copied to a `.part` staging file in the **existing** models directory →
+validated → promoted → registered → appears in the existing model selector.
+
+The architecture is unchanged. The destination is the same
+`getExternalFilesDir()/models` that adb pushes to, the model is consumed by the
+same `OnnxInferenceRuntime`, and no second inference path or JavaScript runtime
+was added.
+
+**Validation is two-stage, and only the second stage is authoritative:**
+
+1. A byte-level sniff rejects obvious impostors (renamed `.mp3`, `.zip`,
+   `.json`, `.wav`, PDFs, text). This is a *reject filter only* — passing it
+   proves nothing.
+2. The file is genuinely loaded through `OnnxInferenceRuntime`. If ONNX Runtime
+   will not build a session, the staging file is deleted and nothing is
+   registered.
+
+A corrupted model passes stage 1 and is caught by stage 2. That is exactly why
+stage 2 exists, and it is verified in `scripts/verify-import-validation.py`.
+
+**Metadata is read, not guessed.** Input/output names, shapes and types come
+from `OrtSession`, surfaced through the new `TensorSignature` on
+`LoadedModelInfo`. A dynamic trailing dimension yields `null`, not an invented
+embedding width. The filename is never used to infer identity — a file called
+`yamnet.onnx` is not evidence that it is YAMNet.
+
+**Sample rate and preprocessing are not in an ONNX graph**, so they are
+recorded as `UNKNOWN` at import. Until a developer declares them, benchmarking
+that model against real audio fails with the new
+**`PREPROCESSING_UNAVAILABLE`** error code, checked in
+`ModelRegistry.requireAudioContract()` before a single track is decoded.
+
+This is what stops YAMNet being benchmarked against the decoder's 22.05 kHz
+when its contract requires 16 kHz. An undeclared model now falls back to
+`RAW_TENSOR` — which the audio path refuses — rather than the old
+`RAW_WAVEFORM` default, which would have run happily on the wrong input.
+
+Declaring a mel or log-mel format records the model as **BLOCKED**, not
+verified: saying a model needs a mel front end does not make one exist.
+
 ---
 
 ## 3. Verification status
@@ -181,6 +226,11 @@ bound to an explicit click.
 | Memory test is manual only | CODE VERIFIED + TEST PASSED |
 | Candidate matrix declares itself unmeasured | CODE VERIFIED + TEST PASSED |
 | Memory lifecycle **runs on device** | **NOT VERIFIED ON HARDWARE** |
+| Import: sniff + session-build logic discriminates | LOGIC VERIFIED (`scripts/verify-import-validation.py`, 20/20 against real ONNX Runtime) |
+| Import: contract gate refuses undeclared models | CODE VERIFIED + TEST PASSED |
+| Import: **file picker works on a device** | **NOT VERIFIED ON HARDWARE** |
+| Import: **a real YAMNet .onnx was imported** | **NOT ATTEMPTED — weights unobtainable here** |
+| Import: **YAMNet inference executed** | **NOT VERIFIED — never run** |
 | Any candidate model loads | **NOT VERIFIED — weights unobtainable** |
 | Any candidate latency / RAM / thermal figure | **NOT VERIFIED — nothing executed** |
 | Embedding quality of any candidate | **NOT VERIFIED — nothing executed** |

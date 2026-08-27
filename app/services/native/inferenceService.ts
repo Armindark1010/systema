@@ -19,7 +19,9 @@ import {
   type InferenceEnvironment,
   type InferenceErrorCode,
   type CandidateMatrix,
+  type ImportResult,
   type MemoryLifecycleReport,
+  type ModelContract,
   type RealAudioResult,
   type RuntimeId,
   type TestModelResult,
@@ -123,6 +125,80 @@ export async function runRealAudio(options: {
 
   try {
     return await InferenceNative.runRealAudio(options)
+  } catch (e) {
+    throw toServiceError(e)
+  }
+}
+
+/**
+ * Imports one .onnx file chosen with the Android system file picker.
+ *
+ * WHAT THIS DOES NOT DO
+ * ---------------------
+ * It takes no path and no directory. The native side opens
+ * ACTION_OPEN_DOCUMENT, and only the single file the user taps is
+ * read. Nothing scans storage, nothing enumerates the music library,
+ * and nothing runs inference as a result of an import.
+ *
+ * A cancelled picker resolves with `cancelled: true` rather than
+ * throwing — dismissing a picker is a normal action, not an error.
+ */
+export async function pickAndImportModel(): Promise<ImportResult> {
+  requirePlugin()
+  try {
+    return await InferenceNative.pickAndImportModel()
+  } catch (e) {
+    throw toServiceError(e)
+  }
+}
+
+/**
+ * Declares what an imported model consumes.
+ *
+ * Only the fields an ONNX graph cannot express: sample rate and input
+ * representation. Shapes are read from the file, never entered here.
+ * The result is stamped DEVELOPER_DECLARED so nothing downstream can
+ * present it as verified by SYSTEMA.
+ */
+export async function declareModelContract(options: {
+  modelId: string
+  sampleRate?: number
+  inputFormat: string
+}): Promise<ModelContract> {
+  requirePlugin()
+
+  if (!options.modelId) {
+    throw new InferenceServiceError(
+      'MODEL_NOT_FOUND',
+      'A model must be chosen before its contract can be declared.',
+    )
+  }
+  // A waveform model without a rate is not a contract — it is the
+  // same unknown in different words, and letting it through would
+  // license a benchmark on arbitrary PCM.
+  if (options.inputFormat === 'RAW_WAVEFORM'
+    && (!options.sampleRate || options.sampleRate <= 0)) {
+    throw new InferenceServiceError(
+      'PREPROCESSING_UNAVAILABLE',
+      'A raw-waveform model needs its sample rate. YAMNet expects 16000 Hz; ' +
+        'feeding it the decoder\'s 22050 Hz would produce believable timings ' +
+        'and meaningless embeddings.',
+    )
+  }
+
+  try {
+    return await InferenceNative.declareModelContract(options)
+  } catch (e) {
+    throw toServiceError(e)
+  }
+}
+
+/** Removes an imported model and its contract. Never the test model. */
+export async function deleteImportedModel(modelId: string): Promise<boolean> {
+  requirePlugin()
+  try {
+    const res = await InferenceNative.deleteImportedModel({ modelId })
+    return res.deleted
   } catch (e) {
     throw toServiceError(e)
   }

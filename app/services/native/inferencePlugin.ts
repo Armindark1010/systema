@@ -44,6 +44,12 @@ export type InferenceErrorCode =
   | 'MODEL_UNLOADED'
   | 'INPUT_SHAPE_MISMATCH'
   | 'RUNTIME_UNAVAILABLE'
+  /**
+   * The model loads, but SYSTEMA does not know what it consumes.
+   * Distinct from INPUT_SHAPE_MISMATCH: that means the input was
+   * built wrongly, this means "correct" has not been defined yet.
+   */
+  | 'PREPROCESSING_UNAVAILABLE'
 
 /** Device conditions a measurement was taken under (Phase 14 §1). */
 export interface InferenceEnvironment {
@@ -96,10 +102,94 @@ export interface NativeModelInfo {
   name: string
   version: string
   sizeBytes: number
-  /** 'test' is the bundled deterministic model; 'sideloaded' is a real .onnx. */
-  kind: 'test' | 'sideloaded'
+  /**
+   * 'test' is the bundled deterministic model, 'sideloaded' arrived by
+   * adb, 'imported' came through the in-app file picker. All three are
+   * consumed by the same runtime; the distinction is provenance only.
+   */
+  kind: 'test' | 'sideloaded' | 'imported'
   installed: boolean
   inputFormat: string
+  /**
+   * Whether this model may be benchmarked against real audio.
+   * UNKNOWN is the default for anything imported, and the audio path
+   * refuses it until a contract is declared.
+   */
+  preprocessingStatus?: PreprocessingStatus
+  sampleRate?: number | null
+  embeddingDimension?: number | null
+  contract?: ModelContract | null
+}
+
+/**
+ * How much SYSTEMA knows about a model's preprocessing.
+ *
+ * There is deliberately no "PROBABLY". Either the contract is
+ * established and a benchmark is meaningful, or it is not and the
+ * benchmark must refuse.
+ */
+export type PreprocessingStatus = 'VERIFIED' | 'UNKNOWN' | 'BLOCKED'
+
+/** Where a piece of contract information came from. */
+export type ContractSource = 'GRAPH' | 'DEVELOPER_DECLARED'
+
+/** One graph input or output, as the ONNX file declares it. */
+export interface TensorSignature {
+  name: string
+  /** -1 marks a dynamic dimension, exactly as ONNX Runtime reports it. */
+  shape: number[]
+  type: string
+  elementCount: number | null
+}
+
+/**
+ * What SYSTEMA knows about an imported model.
+ *
+ * Split by provenance on purpose: shapes and types are read from the
+ * graph and are facts, while sampleRate and inputFormat cannot be
+ * read from an ONNX file and are null until a developer declares
+ * them. `declaredBy` records which, so a report can never present an
+ * assertion as a verified measurement.
+ */
+export interface ModelContract {
+  modelId: string
+  inputName: string | null
+  inputShape: number[]
+  inputType: string
+  outputName: string | null
+  outputShape: number[]
+  /** Trailing output dimension from the graph; null when dynamic. */
+  embeddingDimension: number | null
+  /** Null until declared: not present in an ONNX graph. */
+  sampleRate: number | null
+  inputFormat: string | null
+  preprocessingStatus: PreprocessingStatus
+  declaredBy: ContractSource
+}
+
+/**
+ * Outcome of one in-app model import.
+ *
+ * `cancelled` is a first-class, non-error outcome: dismissing the
+ * system file picker is a normal thing to do and must not surface as
+ * a failure.
+ */
+export interface ImportResult {
+  imported: boolean
+  cancelled: boolean
+  ok?: boolean
+  fileName?: string
+  modelId?: string | null
+  sizeBytes?: number
+  /** VALID_ONNX_MODEL only when ONNX Runtime actually built a session. */
+  validation?: 'VALID_ONNX_MODEL' | 'REJECTED'
+  runtimeLabel?: string | null
+  inputs?: TensorSignature[]
+  outputs?: TensorSignature[]
+  contract?: ModelContract | null
+  loadMs?: number | null
+  errorCode?: InferenceErrorCode | null
+  message?: string
 }
 
 export interface InferenceCapabilities {
@@ -303,6 +393,23 @@ export interface InferencePlugin {
     inferencesPerCycle?: number
   }): Promise<MemoryLifecycleReport>
   getCandidates(): Promise<CandidateMatrix>
+  /**
+   * Opens the Android system file picker for ONE .onnx file, copies
+   * it into the existing private model directory, and validates it by
+   * genuinely loading it through the existing ONNX runtime.
+   *
+   * Takes no arguments by design: there is no path parameter, no
+   * directory, and no bulk mode. Only the single file the user taps
+   * can be imported.
+   */
+  pickAndImportModel(): Promise<ImportResult>
+  /** Records what an imported model consumes. Stamped as declared. */
+  declareModelContract(options: {
+    modelId: string
+    sampleRate?: number
+    inputFormat: string
+  }): Promise<ModelContract>
+  deleteImportedModel(options: { modelId: string }): Promise<{ deleted: boolean }>
   getEnvironment(): Promise<InferenceEnvironment>
 }
 

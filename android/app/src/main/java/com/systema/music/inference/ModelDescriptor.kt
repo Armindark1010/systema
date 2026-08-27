@@ -180,6 +180,22 @@ enum class InferenceErrorCode {
 
     /** The runtime itself is unavailable in this build. */
     RUNTIME_UNAVAILABLE,
+
+    /**
+     * The model's preprocessing contract is not established.
+     *
+     * Raised when a developer imports a model and asks to benchmark it
+     * before declaring what it consumes. An ONNX graph records shapes
+     * but not sample rate or feature extraction, so running one on
+     * whatever PCM happens to be at hand would produce timings that
+     * look fine and embeddings that are meaningless.
+     *
+     * This exists as its own code, distinct from INPUT_SHAPE_MISMATCH,
+     * because the fix is completely different: a shape mismatch means
+     * the input was built wrongly, whereas this means SYSTEMA does not
+     * yet know what "correct" is.
+     */
+    PREPROCESSING_UNAVAILABLE,
 }
 
 /**
@@ -250,4 +266,50 @@ data class LoadedModelInfo(
     val actualInputShape: List<Long>,
     /** Cold load cost: reading the file and building the session. */
     val loadMs: Double,
+    /**
+     * The full graph signature, READ FROM THE FILE.
+     *
+     * Added for the in-app import flow: when a developer supplies an
+     * arbitrary .onnx through the file picker, SYSTEMA knows nothing
+     * about it, and the only trustworthy source of its shapes and
+     * types is the model itself. Everything here comes from the
+     * session; nothing is inferred from a filename.
+     *
+     * Empty when a runtime cannot report it — which is an absence of
+     * information, not an assertion that the model has no inputs.
+     */
+    val inputs: List<TensorSignature> = emptyList(),
+    val outputs: List<TensorSignature> = emptyList(),
 )
+
+/**
+ * One input or output as the ONNX graph declares it.
+ *
+ * WHY THIS IS SEPARATE FROM ModelDescriptor
+ * -----------------------------------------
+ * A descriptor says what SYSTEMA BELIEVES about a model. A signature
+ * says what the FILE actually contains. Keeping them apart is the
+ * whole point of import validation: the belief is checked against the
+ * file, and a disagreement is reported rather than reconciled.
+ */
+data class TensorSignature(
+    val name: String,
+    /** -1 for a dynamic dimension, exactly as ORT reports it. */
+    val shape: List<Long>,
+    /** ORT's own type name, or "UNKNOWN" when it could not be read. */
+    val type: String,
+) {
+    /** Product of the fixed dimensions, or null when any is dynamic. */
+    fun elementCount(): Long? =
+        if (shape.isEmpty() || shape.any { it <= 0 }) null
+        else shape.fold(1L) { a, b -> a * b }
+
+    /**
+     * The last fixed dimension — the conventional embedding width.
+     *
+     * Returns null rather than a guess when the trailing dimension is
+     * dynamic, because "the embedding is 1024-wide" is a claim that
+     * must come from the graph, not from hope.
+     */
+    fun trailingDimension(): Long? = shape.lastOrNull()?.takeIf { it > 0 }
+}

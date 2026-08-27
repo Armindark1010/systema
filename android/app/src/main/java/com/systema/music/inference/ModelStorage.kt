@@ -39,6 +39,20 @@ class ModelStorage(private val context: Context) {
         const val EXTENSION = ".onnx"
         private const val TAG = "SystemaModelStorage"
 
+        /** Marks a partially-copied import. Never matched by listInstalled(). */
+        const val STAGING_SUFFIX = ".part"
+
+        /**
+         * Upper bound on an imported file, in bytes.
+         *
+         * 800 MB clears the largest candidate researched in Phase 16
+         * (LAION-CLAP, ~620 MB) with headroom, while still refusing a
+         * mis-selected multi-gigabyte file before it fills the
+         * device. It is a storage guard, not a judgement about which
+         * models are usable.
+         */
+        const val MAX_IMPORT_BYTES = 800L * 1024L * 1024L
+
         /**
          * Test-model identity, re-exported from [TestModel] so callers
          * that already hold a ModelStorage need not import both. The
@@ -153,6 +167,99 @@ class ModelStorage(private val context: Context) {
     fun sideloadInstructions(): String {
         val dir = modelsDir()?.absolutePath ?: "<external storage unavailable>"
         return "adb push your-model.onnx $dir/"
+    }
+
+    // ---------------------------------------------------------------
+    // In-app import (Phase 16.1)
+    // ---------------------------------------------------------------
+    // adb is not always available to the developer, so a model can
+    // also arrive through the Android system file picker. The
+    // destination is UNCHANGED — the same models directory the rest of
+    // Phase 15/16 already uses — so an imported model is
+    // indistinguishable from an adb-pushed one to every layer above.
+
+    /**
+     * A staging file for an in-progress import.
+     *
+     * Staged INSIDE the models directory, deliberately: a rename
+     * within one filesystem is atomic, so a model either appears
+     * complete or does not appear at all. A half-copied 15 MB file
+     * that ONNX Runtime later rejects would be far more confusing
+     * than no file.
+     *
+     * The `.part` suffix keeps it invisible to [listInstalled], which
+     * matches only `.onnx`.
+     */
+    fun stagingFileFor(fileName: String): File? =
+        modelsDir()?.let { File(it, "$fileName$STAGING_SUFFIX") }
+
+    /**
+     * Picks a filename that does not collide with an existing model.
+     *
+     * Overwriting silently would be the wrong call: a developer
+     * comparing two exports of the same architecture would lose the
+     * first one without being told.
+     */
+    fun uniqueFileNameFor(requested: String): String {
+        val dir = modelsDir() ?: return requested
+        val base = requested.removeSuffix(EXTENSION)
+        if (!File(dir, "$base$EXTENSION").exists()) return "$base$EXTENSION"
+        var n = 2
+        while (n < 1000) {
+            val candidate = "$base-$n$EXTENSION"
+            if (!File(dir, candidate).exists()) return candidate
+            n++
+        }
+        return "$base-${System.currentTimeMillis()}$EXTENSION"
+    }
+
+    /** Moves a validated staging file into place. */
+    fun promoteStaging(staging: File, finalName: String): File? {
+        val dir = modelsDir() ?: return null
+        val target = File(dir, finalName)
+        return if (staging.renameTo(target)) target else null
+    }
+
+    /** Removes a staging file. Safe to call when it does not exist. */
+    fun discardStaging(staging: File?) {
+        if (staging == null) return
+        runCatching { if (staging.exists()) staging.delete() }
+            .onFailure { Log.w(TAG, "Could not delete staging file ${staging.name}", it) }
+    }
+
+    /**
+     * Deletes an installed model.
+     *
+     * Refuses to touch the bundled test model: the Phase 15 proof
+     * depends on it being present, and removing it would silently
+     * break the one check that shows ONNX Runtime really executes.
+     */
+    fun deleteInstalled(fileName: String): Boolean {
+        if (fileName == TEST_MODEL_FILE) return false
+        if (!fileName.endsWith(EXTENSION)) return false
+        if (fileName.contains('/') || fileName.contains("..")) return false
+        val dir = modelsDir() ?: return false
+        val file = File(dir, fileName)
+        return file.exists() && file.delete()
+    }
+
+    /**
+     * Sanitises a filename supplied by a content provider.
+     *
+     * The display name comes from outside the app and is used to build
+     * a path, so path separators and traversal segments are stripped
+     * rather than trusted.
+     */
+    fun sanitiseFileName(raw: String?): String {
+        val cleaned = (raw ?: "")
+            .substringAfterLast('/')
+            .substringAfterLast('\\')
+            .replace("..", "")
+            .filter { it.isLetterOrDigit() || it in "-_. " }
+            .trim()
+            .replace(' ', '-')
+        val base = cleaned.removeSuffix(EXTENSION).take(80)
+        return if (base.isBlank()) "imported-model$EXTENSION" else "$base$EXTENSION"
     }
 }
 

@@ -84,13 +84,6 @@ class InferenceBenchmark(
         )
 
     /**
-     * Loads a model, runs the deterministic tensor through it, unloads.
-     *
-     * This is the §8 proof: a real .onnx file, executed by a real
-     * runtime, producing an output that is checked against a value
-     * known before the run.
-     */
-    /**
      * Native memory across repeated load → infer → unload cycles.
      *
      * WHY REPEATED CYCLES AND NOT ONE
@@ -221,6 +214,13 @@ class InferenceBenchmark(
         }
     }
 
+    /**
+     * Loads a model, runs the deterministic tensor through it, unloads.
+     *
+     * This is the §8 proof: a real .onnx file, executed by a real
+     * runtime, producing an output that is checked against a value
+     * known before the run.
+     */
     suspend fun runTestModel(
         runtimeId: String,
         input: FloatArray,
@@ -320,6 +320,13 @@ class InferenceBenchmark(
                 "${rt.label} is not available on this device.",
             )
         }
+
+        // THE PREPROCESSING GATE.
+        // Checked before decoding a single track, because the failure
+        // is about the model, not the audio. Running first and failing
+        // per-track would waste minutes of decode time and bury the
+        // real reason in twenty identical rows.
+        registry.requireAudioContract(modelId)
 
         val descriptor = registry.resolve(modelId)
         val env = EnvironmentSnapshot.capture(context)

@@ -1,10 +1,15 @@
 package com.systema.music.inference
 
+import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.result.ActivityResult
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
+import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +41,9 @@ class InferencePlugin : Plugin() {
 
     private val registry: ModelRegistry by lazy { ModelRegistry(context) }
     private val benchmark: InferenceBenchmark by lazy { InferenceBenchmark(context, registry) }
+    private val importer: ModelImporter by lazy {
+        ModelImporter(context, ModelStorage(context), registry.contracts)
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun handleOnDestroy() {
@@ -75,21 +83,45 @@ class InferencePlugin : Plugin() {
                             put("kind", "test")
                             put("installed", true)
                             put("inputFormat", test.inputFormat.name)
+                            // Pure arithmetic with a known answer, so
+                            // there is no audio contract to establish.
+                            put("preprocessingStatus", PreprocessingStatus.VERIFIED.name)
+                            put("sampleRate", null)
+                            put("embeddingDimension", null)
                         },
                     )
                 }
                 registry.installedModels()
                     .filter { it.fileName != ModelStorage.TEST_MODEL_FILE }
                     .forEach { m ->
+                        val id = m.fileName.removeSuffix(ModelStorage.EXTENSION)
+                        val contract = registry.contractFor(id)
                         models.put(
                             JSObject().apply {
-                                put("id", m.fileName.removeSuffix(ModelStorage.EXTENSION))
+                                put("id", id)
                                 put("name", m.fileName)
-                                put("version", "side-loaded")
+                                put("version", if (contract != null) "imported" else "side-loaded")
                                 put("sizeBytes", m.sizeBytes)
-                                put("kind", "sideloaded")
+                                put("kind", if (contract != null) "imported" else "sideloaded")
                                 put("installed", true)
-                                put("inputFormat", InputFormat.RAW_WAVEFORM.name)
+                                // The REAL format when one is declared,
+                                // and RAW_TENSOR (which the audio path
+                                // refuses) when it is not. This used to
+                                // claim RAW_WAVEFORM for every
+                                // side-loaded file, which was an
+                                // assertion SYSTEMA had no basis for.
+                                put(
+                                    "inputFormat",
+                                    contract?.inputFormat?.name ?: InputFormat.RAW_TENSOR.name,
+                                )
+                                put(
+                                    "preprocessingStatus",
+                                    contract?.preprocessingStatus?.name
+                                        ?: PreprocessingStatus.UNKNOWN.name,
+                                )
+                                put("sampleRate", contract?.sampleRate)
+                                put("embeddingDimension", contract?.embeddingDimension)
+                                put("contract", contract?.toJs())
                             },
                         )
                     }
@@ -268,6 +300,160 @@ class InferencePlugin : Plugin() {
                 )
             }
         }
+    }
+
+    // ---------------------------------------------------------------
+    // In-app model import (Phase 16.1)
+    // ---------------------------------------------------------------
+
+    /**
+     * Opens the Android system file picker for ONE .onnx file.
+     *
+     * ACTION_OPEN_DOCUMENT, not ACTION_GET_CONTENT: it returns a
+     * durable document URI and, critically, grants access to exactly
+     * the single file the user tapped. There is no directory
+     * permission, no scanning, and no way for this to see anything
+     * else on the device.
+     *
+     * MIME TYPE
+     * ---------
+     * There is no registered MIME type for ONNX, and providers report
+     * inconsistent values for unknown extensions — application/octet-
+     * stream, application/x-onnx, or nothing at all. Filtering
+     * strictly would hide the file the developer is trying to select,
+     * which is the worst possible failure for this feature. So the
+     * picker accepts everything and the FILE ITSELF is validated
+     * afterwards by actually loading it. Extension is a hint; the
+     * session build is the proof.
+     */
+    @PluginMethod
+    fun pickAndImportModel(call: PluginCall) {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                arrayOf("application/octet-stream", "application/x-onnx", "*/*"),
+            )
+            // Single selection only. Bulk import is deliberately not
+            // offered: every model must be an explicit choice.
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        startActivityForResult(call, intent, "handleModelPicked")
+    }
+
+    /**
+     * Receives the picked document and runs the import.
+     *
+     * A cancelled picker is a normal outcome, not an error: it
+     * resolves with imported=false and no message, so the UI can stay
+     * quiet rather than showing a failure the user caused on purpose.
+     */
+    @ActivityCallback
+    private fun handleModelPicked(call: PluginCall?, result: ActivityResult) {
+        if (call == null) return
+
+        if (result.resultCode != Activity.RESULT_OK) {
+            call.resolve(
+                JSObject().apply {
+                    put("imported", false)
+                    put("cancelled", true)
+                },
+            )
+            return
+        }
+
+        val uri: Uri? = result.data?.data
+        if (uri == null) {
+            call.reject(
+                "The file picker returned no file.",
+                InferenceErrorCode.MODEL_NOT_FOUND.name,
+            )
+            return
+        }
+
+        scope.launch {
+            try {
+                // Validated against the SAME runtime that will execute
+                // the benchmark. Validating with anything else would
+                // prove the wrong thing.
+                val runtime = benchmark.runtime(RuntimeIds.ONNX)
+                val report = importer.import(uri, runtime)
+                call.resolve(
+                    report.toJs().apply {
+                        put("imported", report.ok)
+                        put("cancelled", false)
+                    },
+                )
+            } catch (e: InferenceException) {
+                call.reject(e.message ?: "Import failed.", e.code.name)
+            } catch (e: Throwable) {
+                call.reject(
+                    e.message ?: "Import failed.",
+                    InferenceErrorCode.MODEL_LOAD_FAILED.name,
+                )
+            }
+        }
+    }
+
+    /**
+     * Records what an imported model consumes.
+     *
+     * The developer supplies only what the ONNX graph cannot express —
+     * sample rate and input representation. It is stamped
+     * DEVELOPER_DECLARED, so no later report can present it as
+     * something SYSTEMA verified.
+     */
+    @PluginMethod
+    fun declareModelContract(call: PluginCall) {
+        val modelId = call.getString("modelId")
+        if (modelId.isNullOrBlank()) {
+            call.reject("A modelId is required.", InferenceErrorCode.MODEL_NOT_FOUND.name)
+            return
+        }
+        val formatName = call.getString("inputFormat")
+        val format = runCatching { InputFormat.valueOf(formatName ?: "") }.getOrNull()
+        if (format == null) {
+            call.reject(
+                "Unknown input format '$formatName'. Expected one of: " +
+                    InputFormat.entries.joinToString { it.name },
+                InferenceErrorCode.PREPROCESSING_UNAVAILABLE.name,
+            )
+            return
+        }
+        val sampleRate = call.getInt("sampleRate")
+
+        try {
+            val contract = registry.declareContract(modelId, sampleRate, format)
+            call.resolve(contract.toJs())
+        } catch (e: Throwable) {
+            call.reject(
+                e.message ?: "Could not record the contract.",
+                InferenceErrorCode.PREPROCESSING_UNAVAILABLE.name,
+            )
+        }
+    }
+
+    /** Removes an imported model and its contract. Never the test model. */
+    @PluginMethod
+    fun deleteImportedModel(call: PluginCall) {
+        val modelId = call.getString("modelId")
+        if (modelId.isNullOrBlank()) {
+            call.reject("A modelId is required.", InferenceErrorCode.MODEL_NOT_FOUND.name)
+            return
+        }
+        if (modelId == ModelStorage.TEST_MODEL_ID) {
+            call.reject(
+                "The bundled test model cannot be deleted: the Phase 15 integration " +
+                    "proof depends on it.",
+                InferenceErrorCode.MODEL_INVALID.name,
+            )
+            return
+        }
+        val deleted = registry.deleteImported(modelId)
+        call.resolve(JSObject().apply { put("deleted", deleted) })
     }
 
     /**

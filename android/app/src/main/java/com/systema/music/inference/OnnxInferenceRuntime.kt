@@ -181,6 +181,11 @@ class OnnxInferenceRuntime : InferenceRuntime {
                     outputNames = outputNames,
                     actualInputShape = actualShape,
                     loadMs = loadMs,
+                    // Read from the session, never inferred. This is
+                    // what the import flow inspects to describe an
+                    // unknown model without guessing.
+                    inputs = readSignatures(created.inputInfo),
+                    outputs = readSignatures(created.outputInfo),
                 )
                 info = loaded
 
@@ -313,6 +318,30 @@ class OnnxInferenceRuntime : InferenceRuntime {
             // library; closing it would break every later load, so it
             // is deliberately left alone.
         }
+    }
+
+    /**
+     * Converts ORT's node info map into plain Kotlin signatures.
+     *
+     * Every failure degrades to "UNKNOWN" for that one field rather
+     * than aborting: a model whose type ORT will not report is still
+     * loadable, and reporting the shape while admitting the type is
+     * unknown is more useful than reporting nothing. What it must
+     * never do is invent a type that sounds right.
+     */
+    private fun readSignatures(nodes: Map<String, ai.onnxruntime.NodeInfo>):
+        List<TensorSignature> = try {
+        nodes.map { (name, node) ->
+            val tensorInfo = node.info as? TensorInfo
+            TensorSignature(
+                name = name,
+                shape = tensorInfo?.shape?.toList() ?: emptyList(),
+                type = tensorInfo?.type?.name ?: "UNKNOWN",
+            )
+        }
+    } catch (t: Throwable) {
+        Log.w(TAG, "Could not read tensor signatures", t)
+        emptyList()
     }
 
     private fun readInputShape(session: OrtSession, name: String): List<Long> = try {
