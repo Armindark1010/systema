@@ -759,18 +759,3 @@ data class EvaluationReport(
         )
     }
 }
-
-/** JSON for the statistics block. */
-fun SimilarityStats.toJs(): JSObject = JSObject().apply {
-    put("pairCount", pairCount)
-    put("mean", mean)
-    put("median", median)
-    put("min", min)
-    put("max", max)
-    put("range", range)
-    put("stdDev", stdDev)
-    put("p25", p25)
-    put("p75", p75)
-    put("histogram", JSArray().apply { histogram.forEach { put(it) } })
-    put("histogramBuckets", EmbeddingSimilarity.HISTOGRAM_BUCKETS)
-}

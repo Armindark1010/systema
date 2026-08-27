@@ -552,6 +552,211 @@ export interface SimilarityMatrix {
   size: number
 }
 
+// ==================== PHASE 18: LABELLED EVALUATION ====================
+
+/** Human judgement about a PAIR. Never derived from a measurement. */
+export type PairLabel = 'SAME' | 'SIMILAR' | 'DIFFERENT'
+
+/** Where a label came from. Shown next to every result. */
+export type LabelSource = 'HUMAN' | 'FIXTURE'
+
+/**
+ * Per-pair reading aid — NOT a threshold verdict.
+ *
+ * CONSISTENT/INCONSISTENT are decided against the MEASURED median of
+ * the DIFFERENT-labelled pairs in the same run, which moves as data
+ * arrives. NOT_SCORED is the honest default before enough DIFFERENT
+ * pairs exist.
+ */
+export type PairOutcome = 'CONSISTENT' | 'INCONSISTENT' | 'NOT_SCORED'
+
+/** The phase's conclusion. No "good" and no "bad". */
+export type SeparationVerdict =
+  | 'CLEAR_SEPARATION'
+  | 'PARTIAL_SEPARATION'
+  | 'HEAVY_OVERLAP'
+  | 'INSUFFICIENT_DATA'
+
+/** Where retained memory appears to live. There is deliberately no LEAK. */
+export type MemoryAttribution =
+  | 'JAVA_HEAP'
+  | 'NATIVE_HEAP'
+  | 'NATIVE_RETAINED_AFTER_CLEANUP'
+  | 'RELEASED'
+  | 'UNKNOWN'
+
+export type MemoryCheckpointName =
+  | 'BEFORE_MODEL_LOAD'
+  | 'AFTER_MODEL_LOAD'
+  | 'AFTER_TRACK_1'
+  | 'AFTER_TRACK_5'
+  | 'AFTER_TRACK_10'
+  | 'AFTER_ALL_TRACKS'
+  | 'AFTER_SESSION_CLEANUP'
+  | 'AFTER_IDLE'
+
+export interface MemorySampleData {
+  totalPssKb: number
+  nativeHeapKb: number
+  javaHeapKb: number
+  javaUsedKb: number
+  timestamp: number
+}
+
+export interface MemoryCheckpointSample {
+  checkpoint: MemoryCheckpointName
+  sample: MemorySampleData
+  deltaTotalKb: number
+  deltaNativeKb?: number
+  deltaJavaKb?: number
+  runningPeakKb: number
+  elapsedMs: number
+}
+
+export interface MemoryLifecycleAuditReport {
+  baselineKb: number
+  peakKb: number
+  finalKb: number
+  peakDeltaKb: number
+  netDeltaKb: number
+  peakNativeShare?: number
+  retainedNativeShare?: number
+  attribution: MemoryAttribution
+  rationale: string
+  caveat: string
+  checkpoints: MemoryCheckpointSample[]
+}
+
+export interface LabeledPairResult {
+  position: number
+  indexA: number
+  indexB: number
+  trackIdA: string
+  trackIdB: string
+  /** The human's judgement, fixed before the cosine existed. */
+  label: PairLabel
+  source: LabelSource
+  cosine: number
+  outcome: PairOutcome
+  /** The measured value `outcome` was decided against, when one existed. */
+  referenceValue?: number
+}
+
+export interface ClassStats {
+  label: PairLabel
+  /** True when the class has too few pairs for its spread to mean anything. */
+  insufficient: boolean
+  stats: SimilarityStats
+}
+
+export interface ClassSeparation {
+  higher: PairLabel
+  lower: PairLabel
+  countHigher: number
+  countLower: number
+  /** Rank-based (Mann-Whitney). 0.5 = no separation. NaN = unmeasured. */
+  auc: number
+  meanGap: number
+  rangeOverlap: number
+  overlappingPairs: number
+  overlapFraction: number
+  insufficient: boolean
+}
+
+export interface SeparationAnalysis {
+  verdict: SeparationVerdict
+  rationale: string
+  comparisons: ClassSeparation[]
+}
+
+export interface TrackEmbeddingRow {
+  index: number
+  trackId: string
+  ok: boolean
+  dimension: number
+  frameCount: number
+  frameDimension: number
+  l2Norm: number
+  preNormL2: number
+  decodeMs: number
+  preprocessingMs: number
+  inferenceMs: number
+  tensorMs: number
+  aggregationMs: number
+  totalMs: number
+  audioDurationSec: number
+  rtf: number
+  errorCode?: string
+  errorMessage?: string
+}
+
+export interface LabeledEvalStartedEvent {
+  totalTracks: number
+  totalLabelledPairs: number
+  modelId: string
+  runtimeId: RuntimeId
+  aggregationStrategy: AggregationStrategy
+  coldLoadMs: number
+}
+
+export interface LabeledEvalTrackCompletedEvent {
+  index: number
+  position: number
+  totalTracks: number
+  elapsedMs: number
+  row: TrackEmbeddingRow
+  successCount: number
+  failureCount: number
+}
+
+/** Emitted after EVERY pair, with live statistics recomputed each time. */
+export interface LabeledEvalPairCompletedEvent {
+  pair: LabeledPairResult
+  position: number
+  totalPairs: number
+  scoredCount: number
+  skipped: boolean
+  elapsedMs: number
+  classStats: ClassStats[]
+  separation: SeparationAnalysis
+}
+
+export interface LabeledEvaluationReport {
+  modelId: string
+  runtimeId: RuntimeId
+  aggregationStrategy: AggregationStrategy
+  requestedTracks: number
+  successCount: number
+  failureCount: number
+  labelledPairsRequested: number
+  scoredPairCount: number
+  cancelled: boolean
+  embedStageMs: number
+  pairStageMs: number
+  totalElapsedMs: number
+  medianDecodeMs: number
+  medianPreprocessingMs: number
+  medianInferenceMs: number
+  medianTensorMs: number
+  medianAggregationMs: number
+  medianTotalMs: number
+  medianRtf: number
+  rows: TrackEmbeddingRow[]
+  pairResults: LabeledPairResult[]
+  classStats: ClassStats[]
+  separation: SeparationAnalysis
+  memory: MemoryLifecycleAuditReport
+  overallStats?: SimilarityStats
+  matrix: { trackIds: string[], pairs: Array<{ i: number, j: number, score: number }> }
+  /** Always false. Stated, never estimated. */
+  energyMeasured: boolean
+  energyNote: string
+  /** Present only when the run failed before producing a report. */
+  failed?: boolean
+  errorCode?: string
+  errorMessage?: string
+}
+
 export interface QualityEvalStartedEvent {
   totalTracks: number
   modelId: string
@@ -705,6 +910,51 @@ export interface InferencePlugin {
   stopQualityEvaluation(): Promise<{ stopping: boolean, running: boolean }>
 
   getQualityEvaluationStatus(): Promise<{ running: boolean, maxTracks: number }>
+
+  /**
+   * Starts a labelled evaluation (Phase 18).
+   *
+   * Resolves as soon as the run is ACCEPTED. Tracks are embedded one
+   * at a time, then every labelled pair is scored one at a time, each
+   * emitting its own event.
+   *
+   * `pairLabels` is keyed "i:j" (i < j, indices into `tracks`). The
+   * labels are human judgements supplied by the caller; nothing
+   * native derives, alters or defaults them.
+   */
+  runLabeledEvaluation(options: {
+    runtimeId: RuntimeId
+    modelId: string
+    tracks: Array<{ trackId: string, uri: string }>
+    pairLabels: Record<string, { label: PairLabel, source?: LabelSource }>
+    aggregationStrategy?: AggregationStrategy
+  }): Promise<{ started: boolean, totalTracks: number, labelledPairs: number }>
+
+  /** Requests a stop. Completed results are kept. */
+  stopLabeledEvaluation(): Promise<{ stopping: boolean, running: boolean }>
+
+  getLabeledEvaluationStatus(): Promise<{ running: boolean, maxTracks: number }>
+
+  addListener(
+    eventName: 'labeledEvalStarted',
+    handler: (event: LabeledEvalStartedEvent) => void,
+  ): Promise<PluginListenerHandle>
+  addListener(
+    eventName: 'labeledEvalTrackCompleted',
+    handler: (event: LabeledEvalTrackCompletedEvent) => void,
+  ): Promise<PluginListenerHandle>
+  addListener(
+    eventName: 'labeledEvalPairCompleted',
+    handler: (event: LabeledEvalPairCompletedEvent) => void,
+  ): Promise<PluginListenerHandle>
+  addListener(
+    eventName: 'labeledEvalMemory',
+    handler: (event: MemoryCheckpointSample) => void,
+  ): Promise<PluginListenerHandle>
+  addListener(
+    eventName: 'labeledEvalFinished',
+    handler: (event: LabeledEvaluationReport) => void,
+  ): Promise<PluginListenerHandle>
 
   addListener(
     eventName: 'qualityEvalStarted',

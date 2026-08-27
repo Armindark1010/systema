@@ -53,6 +53,14 @@ class InferencePlugin : Plugin() {
     private val qualityLab: EmbeddingQualityLab by lazy {
         EmbeddingQualityLab(context, registry) { benchmark.runtime(it) }
     }
+
+    /**
+     * Phase 18. Resolves runtimes through the same benchmark registry,
+     * for the same reason: one source of truth for the loaded session.
+     */
+    private val labeledLab: LabeledQualityLab by lazy {
+        LabeledQualityLab(context, registry) { benchmark.runtime(it) }
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun handleOnDestroy() {
@@ -705,6 +713,203 @@ class InferencePlugin : Plugin() {
             JSObject().apply {
                 put("running", qualityLab.isRunning())
                 put("maxTracks", EmbeddingQualityLab.MAX_TRACKS)
+            },
+        )
+    }
+
+    // ================= PHASE 18: LABELLED EVALUATION =================
+
+    /**
+     * Starts a labelled evaluation.
+     *
+     * Resolves as soon as the run is ACCEPTED, not when it finishes.
+     * A 13-track run takes minutes; holding the bridge promise open
+     * for that is exactly what produces a blank screen. Results arrive
+     * as events, one per track and then one per pair.
+     *
+     * Pair labels arrive as {"i:j": "SAME|SIMILAR|DIFFERENT"}. They are
+     * read, never written. Nothing here derives a label from metadata
+     * or from a measurement.
+     */
+    @PluginMethod
+    fun runLabeledEvaluation(call: PluginCall) {
+        val runtimeId = call.getString("runtimeId") ?: RuntimeIds.ONNX
+        val modelId = call.getString("modelId")
+        if (modelId.isNullOrBlank()) {
+            call.reject(
+                "A modelId is required. The lab never picks a model for you.",
+                InferenceErrorCode.MODEL_NOT_FOUND.name,
+            )
+            return
+        }
+
+        val rawTracks = call.getArray("tracks", null)
+        if (rawTracks == null || rawTracks.length() == 0) {
+            call.reject(
+                "A non-empty tracks array is required. Tracks are never auto-selected.",
+                InferenceErrorCode.INPUT_SHAPE_MISMATCH.name,
+            )
+            return
+        }
+        if (rawTracks.length() > LabeledQualityLab.MAX_TRACKS) {
+            call.reject(
+                "At most ${LabeledQualityLab.MAX_TRACKS} tracks may be evaluated at once.",
+                InferenceErrorCode.INPUT_SHAPE_MISMATCH.name,
+            )
+            return
+        }
+
+        val tracks = ArrayList<TrackRef>(rawTracks.length())
+        try {
+            for (i in 0 until rawTracks.length()) {
+                val obj = rawTracks.getJSONObject(i)
+                val id = obj.optString("trackId")
+                val uri = obj.optString("uri")
+                if (id.isNullOrBlank() || uri.isNullOrBlank()) {
+                    call.reject(
+                        "Each track needs both trackId and uri.",
+                        InferenceErrorCode.INPUT_SHAPE_MISMATCH.name,
+                    )
+                    return
+                }
+                tracks.add(TrackRef(id, uri))
+            }
+        } catch (e: Throwable) {
+            call.reject(
+                "The tracks array could not be read.",
+                InferenceErrorCode.INPUT_SHAPE_MISMATCH.name,
+            )
+            return
+        }
+
+        // ---- PAIR LABELS: read verbatim, never inferred ----
+        val pairLabels = HashMap<String, PairLabel>()
+        val labelSources = HashMap<String, LabelSource>()
+        val rawLabels = call.getObject("pairLabels")
+        if (rawLabels != null) {
+            val keys = rawLabels.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val entry = rawLabels.optJSONObject(key)
+                val labelText = entry?.optString("label") ?: rawLabels.optString(key)
+                val parsed = PairLabel.parse(labelText)
+                if (parsed == null) {
+                    // An unreadable label is rejected outright rather
+                    // than defaulted. Defaulting to DIFFERENT would
+                    // invent negatives, and negatives are what the
+                    // separation statistic is measured against.
+                    call.reject(
+                        "Pair '$key' has an unrecognised label '$labelText'. " +
+                            "Expected SAME, SIMILAR or DIFFERENT.",
+                        InferenceErrorCode.INPUT_SHAPE_MISMATCH.name,
+                    )
+                    return
+                }
+                if (!isValidPairKey(key, tracks.size)) {
+                    call.reject(
+                        "Pair key '$key' does not address two distinct tracks " +
+                            "in range 0..${tracks.size - 1}.",
+                        InferenceErrorCode.INPUT_SHAPE_MISMATCH.name,
+                    )
+                    return
+                }
+                pairLabels[key] = parsed
+                labelSources[key] = when (entry?.optString("source")?.uppercase()) {
+                    "FIXTURE" -> LabelSource.FIXTURE
+                    else -> LabelSource.HUMAN
+                }
+            }
+        }
+
+        val strategyName = call.getString("aggregationStrategy")
+        val strategy = if (strategyName.isNullOrBlank()) {
+            AggregationStrategy.MEAN
+        } else {
+            runCatching { AggregationStrategy.valueOf(strategyName) }.getOrNull()
+                ?: run {
+                    call.reject(
+                        "Unknown aggregation strategy '$strategyName'.",
+                        InferenceErrorCode.INPUT_SHAPE_MISMATCH.name,
+                    )
+                    return
+                }
+        }
+
+        if (labeledLab.isRunning()) {
+            call.reject(
+                "An evaluation is already running. Stop it before starting another.",
+                InferenceErrorCode.RUNTIME_UNAVAILABLE.name,
+            )
+            return
+        }
+
+        scope.launch {
+            try {
+                labeledLab.evaluate(
+                    runtimeId = runtimeId,
+                    modelId = modelId,
+                    tracks = tracks,
+                    pairLabels = pairLabels,
+                    labelSources = labelSources,
+                    strategy = strategy,
+                ) { event, payload -> notifyListeners(event, payload) }
+            } catch (e: InferenceException) {
+                notifyListeners(
+                    LabeledQualityLab.EVENT_FINISHED,
+                    JSObject().apply {
+                        put("failed", true)
+                        put("errorCode", e.code.name)
+                        put("errorMessage", e.message)
+                    },
+                )
+            } catch (e: Throwable) {
+                notifyListeners(
+                    LabeledQualityLab.EVENT_FINISHED,
+                    JSObject().apply {
+                        put("failed", true)
+                        put("errorCode", InferenceErrorCode.MODEL_INFERENCE_FAILED.name)
+                        put("errorMessage", e.message ?: "The evaluation failed.")
+                    },
+                )
+            }
+        }
+
+        call.resolve(
+            JSObject().apply {
+                put("started", true)
+                put("totalTracks", tracks.size)
+                put("labelledPairs", pairLabels.size)
+            },
+        )
+    }
+
+    /** "i:j" with i < j and both inside the track list. */
+    private fun isValidPairKey(key: String, trackCount: Int): Boolean {
+        val parts = key.split(":")
+        if (parts.size != 2) return false
+        val a = parts[0].toIntOrNull() ?: return false
+        val b = parts[1].toIntOrNull() ?: return false
+        return a in 0 until trackCount && b in 0 until trackCount && a < b
+    }
+
+    /** Stops between items. Completed results are kept. */
+    @PluginMethod
+    fun stopLabeledEvaluation(call: PluginCall) {
+        labeledLab.requestCancel()
+        call.resolve(
+            JSObject().apply {
+                put("stopping", true)
+                put("running", labeledLab.isRunning())
+            },
+        )
+    }
+
+    @PluginMethod
+    fun getLabeledEvaluationStatus(call: PluginCall) {
+        call.resolve(
+            JSObject().apply {
+                put("running", labeledLab.isRunning())
+                put("maxTracks", LabeledQualityLab.MAX_TRACKS)
             },
         )
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# SYSTEMA — Phase 15 / 16A / 17 inference test runner
+# SYSTEMA — Phase 15 / 16A / 17 / 18 inference test runner
 # ============================================================
 # Compiles and RUNS two Kotlin suites on a plain JVM. These are real
 # assertions against real objects:
@@ -17,6 +17,10 @@
 #                          vectors, norm validation, neighbour
 #                          selection, incremental pair growth and the
 #                          descriptive statistics
+#   LabeledPairTest        Phase 18 labelled evaluation: AUC / rank
+#                          separation, per-class statistics, overlap,
+#                          the data-derived reference, verdict
+#                          selection and diagonal exclusion
 #
 # AggregationTest needs no coroutines and no Android, because
 # FrameEmbeddingAggregator deliberately imports neither. That is what
@@ -74,6 +78,7 @@ if [ -z "$KOTLINC" ] || [ -z "$JAVA_BIN" ]; then
   echo "      Phase 16A mean / mean+std pooling and L2 normalisation"
   echo "      Phase 16A zero-vector, NaN and wrong-tensor rejection"
   echo "      Phase 17 cosine similarity and evaluation statistics"
+  echo "      Phase 18 labelled separation statistics (AUC, overlap)"
   echo ""
   echo "  A green 'npm test' therefore covers the TypeScript suites"
   echo "  ONLY. Do not report the inference layer as verified from"
@@ -189,6 +194,43 @@ fi
 if ! "$JAVA_BIN" -cp "$OUT/similarity-tests.jar" \
   com.systema.music.inference.SimilarityTest; then
   echo "  Similarity suite FAILED."
+  exit 1
+fi
+
+# ---- Phase 18: labelled evaluation suite ----------------------
+#
+# Coroutine-free like the others: LabeledPairEvaluation is pure
+# arithmetic over already-measured numbers. These functions decide
+# whether the phase reports separation or overlap, so they are
+# verified by execution rather than by review.
+
+LABELED_SRC=(
+  "$SRC/FrameEmbeddingAggregator.kt"
+  "$SRC/EmbeddingSimilarity.kt"
+  "$SRC/ModelDescriptor.kt"
+  "$SRC/LabeledPairEvaluation.kt"
+  "$TEST/LabeledPairTest.kt"
+)
+
+echo ""
+echo "Compiling Phase 18 labelled pair suite..."
+
+if ! "$KOTLINC" "${LABELED_SRC[@]}" \
+  -include-runtime -d "$OUT/labeled-tests.jar" 2>"$OUT/labeled-compile.log"; then
+  echo "  Labelled pair compilation FAILED:"
+  grep -v "^warning:" "$OUT/labeled-compile.log" | grep -iv "^WARNING" | head -30
+  exit 1
+fi
+
+if grep -q "error:" "$OUT/labeled-compile.log" 2>/dev/null; then
+  echo "  Labelled pair compilation reported errors:"
+  grep "error:" "$OUT/labeled-compile.log" | head -30
+  exit 1
+fi
+
+if ! "$JAVA_BIN" -cp "$OUT/labeled-tests.jar" \
+  com.systema.music.inference.LabeledPairTest; then
+  echo "  Labelled pair suite FAILED."
   exit 1
 fi
 

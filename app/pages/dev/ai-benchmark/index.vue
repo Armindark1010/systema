@@ -198,6 +198,31 @@ const sustainedIterations = ref(20)
         </div>
       </section>
 
+      <!-- ---- Labelled evaluation (Phase 18) -------------- -->
+      <section class="border border-line bg-surface">
+        <div class="border-b border-line px-5 py-3">
+          <p class="label text-fg-muted">
+            LABELLED QUALITY EVALUATION
+          </p>
+        </div>
+        <div class="px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+          <p class="text-small text-fg-muted max-w-[64ch] leading-relaxed">
+            You label pairs SAME / SIMILAR / DIFFERENT before the model measures
+            them, then the run reports whether cosine actually orders those
+            labels — as a rank statistic, so no similarity threshold is
+            invented. Also audits memory across the run's lifecycle. Results
+            appear one pair at a time.
+          </p>
+          <button
+            type="button"
+            class="sys-btn-outline shrink-0"
+            @click="router.push('/dev/ai-benchmark/labeled')"
+          >
+            LABELLED LAB →
+          </button>
+        </div>
+      </section>
+
       <!-- ---- Candidate evaluation (Phase 16) ------------ -->
       <section class="border border-line bg-surface">
         <div class="border-b border-line px-5 py-3">

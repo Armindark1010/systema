@@ -32,6 +32,15 @@ import {
   type TrackEvaluation,
   type RuntimeId,
   type TestModelResult,
+  type LabeledEvalStartedEvent,
+  type LabeledEvalTrackCompletedEvent,
+  type LabeledEvalPairCompletedEvent,
+  type LabeledEvaluationReport,
+  type MemoryCheckpointSample,
+  type PairLabel,
+  type LabelSource,
+  type ClassStats,
+  type SeparationVerdict,
 } from './inferencePlugin'
 
 /** Mirrors the Phase 13 error convention so the UI handles both alike. */
@@ -379,6 +388,124 @@ export async function onQualityEvalEvents(handlers: {
   return () => {
     handles.forEach(h => void h.remove())
   }
+}
+
+// ==================== PHASE 18: LABELLED EVALUATION ====================
+
+/**
+ * Starts a labelled evaluation.
+ *
+ * Resolves as soon as the run is accepted. Subscribe with
+ * [onLabeledEvalEvents] BEFORE calling this, or the first events can
+ * be missed.
+ */
+export async function runLabeledEvaluation(options: {
+  runtimeId: RuntimeId
+  modelId: string
+  tracks: Array<{ trackId: string, uri: string }>
+  pairLabels: Record<string, { label: PairLabel, source?: LabelSource }>
+  aggregationStrategy?: AggregationStrategy
+}): Promise<{ started: boolean, totalTracks: number, labelledPairs: number }> {
+  requirePlugin()
+  return InferenceNative.runLabeledEvaluation(options)
+}
+
+/** Requests a stop. Completed results are preserved. */
+export async function stopLabeledEvaluation(): Promise<void> {
+  requirePlugin()
+  await InferenceNative.stopLabeledEvaluation()
+}
+
+export async function getLabeledEvaluationStatus(): Promise<{
+  running: boolean
+  maxTracks: number
+}> {
+  requirePlugin()
+  return InferenceNative.getLabeledEvaluationStatus()
+}
+
+/**
+ * Subscribes to all five labelled-evaluation events at once.
+ *
+ * Returns a disposer that removes every listener, so none can be
+ * leaked by forgetting one in a component teardown.
+ */
+export async function onLabeledEvalEvents(handlers: {
+  onStarted?: (e: LabeledEvalStartedEvent) => void
+  onTrackCompleted?: (e: LabeledEvalTrackCompletedEvent) => void
+  onPairCompleted?: (e: LabeledEvalPairCompletedEvent) => void
+  onMemory?: (e: MemoryCheckpointSample) => void
+  onFinished?: (e: LabeledEvaluationReport) => void
+}): Promise<() => void> {
+  requirePlugin()
+  const handles = await Promise.all([
+    InferenceNative.addListener('labeledEvalStarted', e => handlers.onStarted?.(e)),
+    InferenceNative.addListener('labeledEvalTrackCompleted', e => handlers.onTrackCompleted?.(e)),
+    InferenceNative.addListener('labeledEvalPairCompleted', e => handlers.onPairCompleted?.(e)),
+    InferenceNative.addListener('labeledEvalMemory', e => handlers.onMemory?.(e)),
+    InferenceNative.addListener('labeledEvalFinished', e => handlers.onFinished?.(e)),
+  ])
+  return () => {
+    handles.forEach(h => void h.remove())
+  }
+}
+
+/** Human-readable text for a verdict. No verdict means "good" or "bad". */
+export function describeVerdict(v: SeparationVerdict): string {
+  switch (v) {
+    case 'CLEAR_SEPARATION':
+      return 'Cosine orders the human labels cleanly.'
+    case 'PARTIAL_SEPARATION':
+      return 'Cosine orders the labels on average, but not reliably per pair.'
+    case 'HEAVY_OVERLAP':
+      return 'Cosine does not order these human labels.'
+    case 'INSUFFICIENT_DATA':
+      return 'Not enough labelled pairs to say anything either way.'
+  }
+}
+
+/**
+ * Formats KB as MB for display.
+ *
+ * Returns 'UNKNOWN' for the -1 sentinel rather than '-0.0 MB': an
+ * unavailable counter is not a measurement of zero.
+ */
+export function formatMb(kb: number | undefined | null): string {
+  if (kb === undefined || kb === null || kb < 0) return 'UNKNOWN'
+  return `${(kb / 1024).toFixed(1)} MB`
+}
+
+/** Signed MB, so a release reads as negative rather than as growth. */
+export function formatDeltaMb(kb: number | undefined | null): string {
+  if (kb === undefined || kb === null) return 'UNKNOWN'
+  const mb = kb / 1024
+  return `${mb >= 0 ? '+' : ''}${mb.toFixed(1)} MB`
+}
+
+/**
+ * Renders an AUC as text.
+ *
+ * NaN prints as 'not measured', never as 0.5 — "unmeasured" and
+ * "measured, and found to be chance" are different findings.
+ */
+export function formatAuc(auc: number): string {
+  if (Number.isNaN(auc)) return 'not measured'
+  return auc.toFixed(3)
+}
+
+/**
+ * A one-line summary of a class's spread.
+ *
+ * Marks a too-small class rather than printing a standard deviation
+ * of 0.0, which would read as consistency instead of absence of data.
+ */
+export function describeClass(c: ClassStats): string {
+  const s = c.stats
+  const head = `n=${s.pairCount} mean=${s.mean.toFixed(4)} median=${s.median.toFixed(4)}`
+  const spread = `min=${s.min.toFixed(4)} max=${s.max.toFixed(4)} sd=${s.stdDev.toFixed(4)}`
+  return c.insufficient
+    ? `${head} ${spread} — TOO FEW PAIRS to characterise`
+    : `${head} ${spread}`
 }
 
 /**
