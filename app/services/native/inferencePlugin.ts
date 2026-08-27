@@ -26,6 +26,7 @@
 // ============================================================
 
 import { registerPlugin, Capacitor } from '@capacitor/core'
+import type { PluginListenerHandle } from '@capacitor/core'
 
 /**
  * Structured failure codes, mirroring the Kotlin enum exactly.
@@ -479,6 +480,158 @@ export interface RealAudioResult {
   aggregationStrategy?: AggregationStrategy
 }
 
+// ============================================================
+// Phase 17 — Embedding Quality Lab
+// ============================================================
+
+/** Descriptive statistics over pairwise cosine similarities. */
+export interface SimilarityStats {
+  /** Number of DISTINCT pairs, i.e. N(N-1)/2. Excludes the diagonal. */
+  pairCount: number
+  mean: number
+  median: number
+  min: number
+  max: number
+  range: number
+  stdDev: number
+  p25: number
+  p75: number
+  /** Fixed 10 buckets spanning [-1, 1]. Never auto-scaled to the data. */
+  histogram: number[]
+  histogramBuckets: number
+}
+
+/** One track's evaluation result. */
+export interface TrackEvaluation {
+  index: number
+  trackId: string
+  ok: boolean
+  /** Width of the track vector. 1024 for YAMNet under MEAN. */
+  dimension?: number
+  /** Measured L2 norm of the final vector. Should be ~1. */
+  norm?: number
+  /** Norm BEFORE normalising. Zero means a degenerate input. */
+  preNormL2?: number
+  /** N in the [N, D] frame-embedding tensor. */
+  frameCount?: number
+  /** D in the [N, D] frame-embedding tensor. */
+  frameDimension?: number
+  decodeMs?: number
+  preprocessingMs?: number
+  inferenceMs?: number
+  tensorMs?: number
+  aggregationMs?: number
+  totalMs?: number
+  audioDurationMs?: number
+  rtf?: number
+  sourceSampleRate?: number
+  sourceChannels?: number
+  outputContract?: OutputContractReport
+  /**
+   * Closest already-completed track. ABSENT for the first track:
+   * with nothing to compare against there is no nearest neighbour,
+   * and a placeholder score would be fabricated evidence.
+   */
+  nearestTrackId?: string
+  nearestScore?: number
+  farthestTrackId?: string
+  farthestScore?: number
+  /** False when this was the first embedding of the run. */
+  hasComparison: boolean
+  comparedAgainst: number
+  errorCode?: string
+  errorMessage?: string
+  /** First few components. Not the full vector. */
+  preview?: string
+}
+
+/** Live similarity matrix over the tracks completed so far. */
+export interface SimilarityMatrix {
+  trackIds: string[]
+  rows: number[][]
+  size: number
+}
+
+export interface QualityEvalStartedEvent {
+  totalTracks: number
+  modelId: string
+  runtimeId: RuntimeId
+  aggregationStrategy: AggregationStrategy
+  coldLoadMs: number
+  labelled: boolean
+}
+
+export interface QualityEvalTrackStartedEvent {
+  index: number
+  /** 1-based, for "[7/20]" style display. */
+  position: number
+  totalTracks: number
+  trackId: string
+  elapsedMs: number
+}
+
+export interface QualityEvalTrackCompletedEvent {
+  index: number
+  position: number
+  totalTracks: number
+  elapsedMs: number
+  evaluation: TrackEvaluation
+  completedCount: number
+  successCount: number
+  failureCount: number
+  /** Recomputed after every track, never only at the end. */
+  matrix: SimilarityMatrix
+  stats?: SimilarityStats
+  memoryPssKb: number
+}
+
+export interface EvaluationReport {
+  modelId: string
+  runtimeId: RuntimeId
+  aggregationStrategy: AggregationStrategy
+  requestedCount: number
+  completedCount: number
+  successCount: number
+  failureCount: number
+  remainingCount: number
+  cancelled: boolean
+  totalElapsedMs: number
+  evaluations: TrackEvaluation[]
+  trackIdsWithEmbeddings: string[]
+  stats?: SimilarityStats
+  /** Present only when the developer supplied labels for this run. */
+  groupedStats?: Record<string, SimilarityStats>
+  labelled: boolean
+  medianDecodeMs?: number
+  medianInferenceMs?: number
+  medianAggregationMs?: number
+  medianTotalMs?: number
+  medianRtf?: number
+  memoryBeforeKb: number
+  memoryPeakKb: number
+  memoryAfterKb: number
+  memoryDeltaKb: number
+  /**
+   * Always false today. Android exposes no per-process energy
+   * accounting trustworthy over a short foreground run, and an
+   * estimate presented as a measurement would be worse than nothing.
+   */
+  energyMeasured: boolean
+  energyNote: string
+  environment: InferenceEnvironment
+  /**
+   * A constant: 'INSUFFICIENT EVIDENCE'. No threshold on cosine
+   * statistics is defensible without labelled ground truth, so the
+   * lab reports geometry and refuses to grade it.
+   */
+  qualityConclusion: string
+  qualityNote: string
+  /** Set when the run itself failed to start. */
+  failed?: boolean
+  errorCode?: string
+  errorMessage?: string
+}
+
 export interface InferencePlugin {
   getCapabilities(): Promise<InferenceCapabilities>
   runTestModel(options: {
@@ -528,6 +681,47 @@ export interface InferencePlugin {
   }): Promise<ModelContract>
   deleteImportedModel(options: { modelId: string }): Promise<{ deleted: boolean }>
   getEnvironment(): Promise<InferenceEnvironment>
+
+  /**
+   * Starts an incremental embedding-quality evaluation (Phase 17).
+   *
+   * Resolves as soon as the run is ACCEPTED — every result arrives
+   * as an event. A twenty-track run takes minutes, so holding the
+   * promise open would leave the UI blank until the very end.
+   */
+  runQualityEvaluation(options: {
+    runtimeId: RuntimeId
+    modelId: string
+    /**
+     * Explicitly chosen tracks. `label` is optional and, when given,
+     * is a claim the developer is making — it is never derived from
+     * artist or genre metadata.
+     */
+    tracks: Array<{ trackId: string, uri: string, label?: string }>
+    aggregationStrategy?: AggregationStrategy
+  }): Promise<{ started: boolean, totalTracks: number, labelled: boolean }>
+
+  /** Requests a stop. Completed results are kept, never discarded. */
+  stopQualityEvaluation(): Promise<{ stopping: boolean, running: boolean }>
+
+  getQualityEvaluationStatus(): Promise<{ running: boolean, maxTracks: number }>
+
+  addListener(
+    eventName: 'qualityEvalStarted',
+    handler: (event: QualityEvalStartedEvent) => void,
+  ): Promise<PluginListenerHandle>
+  addListener(
+    eventName: 'qualityEvalTrackStarted',
+    handler: (event: QualityEvalTrackStartedEvent) => void,
+  ): Promise<PluginListenerHandle>
+  addListener(
+    eventName: 'qualityEvalTrackCompleted',
+    handler: (event: QualityEvalTrackCompletedEvent) => void,
+  ): Promise<PluginListenerHandle>
+  addListener(
+    eventName: 'qualityEvalFinished',
+    handler: (event: EvaluationReport) => void,
+  ): Promise<PluginListenerHandle>
 }
 
 export const InferenceNative = registerPlugin<InferencePlugin>('Inference')

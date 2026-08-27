@@ -44,6 +44,15 @@ class InferencePlugin : Plugin() {
     private val importer: ModelImporter by lazy {
         ModelImporter(context, ModelStorage(context), registry.contracts)
     }
+
+    /**
+     * Phase 17. Shares the benchmark's runtime registry rather than
+     * building its own, so both reach the SAME loaded ONNX session
+     * abstraction and no model-loading logic is duplicated.
+     */
+    private val qualityLab: EmbeddingQualityLab by lazy {
+        EmbeddingQualityLab(context, registry) { benchmark.runtime(it) }
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun handleOnDestroy() {
@@ -530,5 +539,173 @@ class InferencePlugin : Plugin() {
     @PluginMethod
     fun getEnvironment(call: PluginCall) {
         call.resolve(EnvironmentSnapshot.capture(context).toJs())
+    }
+
+    // ---------------------------------------------------------------
+    // Phase 17 — Embedding Quality Lab
+    // ---------------------------------------------------------------
+
+    /**
+     * Evaluates real track embeddings, emitting a result per track.
+     *
+     * WHY THIS RESOLVES IMMEDIATELY
+     * -----------------------------
+     * The call resolves as soon as the run is ACCEPTED, and every
+     * actual result arrives as an event. A twenty-track evaluation
+     * takes minutes; holding a bridge promise open for that long
+     * would give the UI nothing to show until the very end, which is
+     * exactly the batch-then-dump behaviour this phase forbids.
+     *
+     * This mirrors how MusicLibraryPlugin.scan already works, so the
+     * pattern is one the web layer already knows.
+     */
+    @PluginMethod
+    fun runQualityEvaluation(call: PluginCall) {
+        val runtimeId = call.getString("runtimeId") ?: RuntimeIds.ONNX
+        val modelId = call.getString("modelId")
+        if (modelId.isNullOrBlank()) {
+            call.reject(
+                "A modelId is required. The quality lab never picks a model for you.",
+                InferenceErrorCode.MODEL_NOT_FOUND.name,
+            )
+            return
+        }
+
+        val rawTracks = call.getArray("tracks", null)
+        if (rawTracks == null || rawTracks.length() == 0) {
+            call.reject(
+                "A non-empty tracks array is required. Tracks are never auto-selected.",
+                InferenceErrorCode.INPUT_SHAPE_MISMATCH.name,
+            )
+            return
+        }
+        if (rawTracks.length() > EmbeddingQualityLab.MAX_TRACKS) {
+            call.reject(
+                "At most ${EmbeddingQualityLab.MAX_TRACKS} tracks may be evaluated " +
+                    "at once.",
+                InferenceErrorCode.INPUT_SHAPE_MISMATCH.name,
+            )
+            return
+        }
+
+        val tracks = ArrayList<TrackRef>(rawTracks.length())
+        // Labels are read from the request and NEVER derived from
+        // artist or genre metadata. A label here is a claim the
+        // developer is making about the pair, and manufacturing one
+        // would turn a tag-quality measurement into an
+        // embedding-quality claim.
+        val labels = HashMap<String, String>()
+        try {
+            for (i in 0 until rawTracks.length()) {
+                val obj = rawTracks.getJSONObject(i)
+                val id = obj.optString("trackId")
+                val uri = obj.optString("uri")
+                if (id.isNullOrBlank() || uri.isNullOrBlank()) {
+                    call.reject(
+                        "Each track needs both trackId and uri.",
+                        InferenceErrorCode.INPUT_SHAPE_MISMATCH.name,
+                    )
+                    return
+                }
+                tracks.add(TrackRef(id, uri))
+                val label = obj.optString("label")
+                if (!label.isNullOrBlank()) labels[id] = label
+            }
+        } catch (e: Throwable) {
+            call.reject(
+                "The tracks array could not be read.",
+                InferenceErrorCode.INPUT_SHAPE_MISMATCH.name,
+            )
+            return
+        }
+
+        val strategyName = call.getString("aggregationStrategy")
+        val strategy = if (strategyName.isNullOrBlank()) {
+            AggregationStrategy.MEAN
+        } else {
+            runCatching { AggregationStrategy.valueOf(strategyName) }.getOrNull()
+                ?: run {
+                    call.reject(
+                        "Unknown aggregation strategy '$strategyName'.",
+                        InferenceErrorCode.INPUT_SHAPE_MISMATCH.name,
+                    )
+                    return
+                }
+        }
+
+        if (qualityLab.isRunning()) {
+            call.reject(
+                "An evaluation is already running. Stop it before starting another.",
+                InferenceErrorCode.RUNTIME_UNAVAILABLE.name,
+            )
+            return
+        }
+
+        scope.launch {
+            try {
+                qualityLab.evaluate(
+                    runtimeId = runtimeId,
+                    modelId = modelId,
+                    tracks = tracks,
+                    labels = labels,
+                    strategy = strategy,
+                ) { event, payload -> notifyListeners(event, payload) }
+            } catch (e: InferenceException) {
+                notifyListeners(
+                    EmbeddingQualityLab.EVENT_FINISHED,
+                    JSObject().apply {
+                        put("failed", true)
+                        put("errorCode", e.code.name)
+                        put("errorMessage", e.message)
+                    },
+                )
+            } catch (e: Throwable) {
+                notifyListeners(
+                    EmbeddingQualityLab.EVENT_FINISHED,
+                    JSObject().apply {
+                        put("failed", true)
+                        put("errorCode", InferenceErrorCode.MODEL_INFERENCE_FAILED.name)
+                        put("errorMessage", e.message ?: "The evaluation failed.")
+                    },
+                )
+            }
+        }
+
+        call.resolve(
+            JSObject().apply {
+                put("started", true)
+                put("totalTracks", tracks.size)
+                put("labelled", labels.isNotEmpty())
+            },
+        )
+    }
+
+    /**
+     * Requests a stop.
+     *
+     * Already-completed results are kept: they are real measurements
+     * that cost real time, and discarding them because the developer
+     * chose not to wait for the rest would be gratuitous.
+     */
+    @PluginMethod
+    fun stopQualityEvaluation(call: PluginCall) {
+        qualityLab.requestCancel()
+        call.resolve(
+            JSObject().apply {
+                put("stopping", true)
+                put("running", qualityLab.isRunning())
+            },
+        )
+    }
+
+    /** Whether an evaluation is in flight, for restoring UI state. */
+    @PluginMethod
+    fun getQualityEvaluationStatus(call: PluginCall) {
+        call.resolve(
+            JSObject().apply {
+                put("running", qualityLab.isRunning())
+                put("maxTracks", EmbeddingQualityLab.MAX_TRACKS)
+            },
+        )
     }
 }

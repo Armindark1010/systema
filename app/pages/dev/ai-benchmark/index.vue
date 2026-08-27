@@ -173,6 +173,31 @@ const sustainedIterations = ref(20)
         </div>
       </section>
 
+      <!-- ---- Embedding quality (Phase 17) --------------- -->
+      <section class="border border-line bg-surface">
+        <div class="border-b border-line px-5 py-3">
+          <p class="label text-fg-muted">
+            EMBEDDING QUALITY LAB
+          </p>
+        </div>
+        <div class="px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+          <p class="text-small text-fg-muted max-w-[64ch] leading-relaxed">
+            Runs an imported model over tracks you pick, pools each into one
+            normalized vector, and measures how those vectors sit relative to
+            each other — cosine similarity, live matrix, distribution. Results
+            appear one track at a time. Measures geometry only; it does not
+            grade the model or select one.
+          </p>
+          <button
+            type="button"
+            class="sys-btn-outline shrink-0"
+            @click="router.push('/dev/ai-benchmark/quality')"
+          >
+            QUALITY LAB →
+          </button>
+        </div>
+      </section>
+
       <!-- ---- Candidate evaluation (Phase 16) ------------ -->
       <section class="border border-line bg-surface">
         <div class="border-b border-line px-5 py-3">

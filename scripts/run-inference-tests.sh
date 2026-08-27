@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# SYSTEMA — Phase 15 / 16A inference test runner
+# SYSTEMA — Phase 15 / 16A / 17 inference test runner
 # ============================================================
 # Compiles and RUNS two Kotlin suites on a plain JVM. These are real
 # assertions against real objects:
@@ -12,6 +12,11 @@
 #                          arithmetic, the L2 normalisation, the
 #                          zero/NaN policies and the wrong-tensor
 #                          rejection
+#   SimilarityTest         Phase 17 cosine similarity and evaluation
+#                          statistics: identical/orthogonal/opposite
+#                          vectors, norm validation, neighbour
+#                          selection, incremental pair growth and the
+#                          descriptive statistics
 #
 # AggregationTest needs no coroutines and no Android, because
 # FrameEmbeddingAggregator deliberately imports neither. That is what
@@ -68,6 +73,7 @@ if [ -z "$KOTLINC" ] || [ -z "$JAVA_BIN" ]; then
   echo "      error codes, determinism, repeated inference"
   echo "      Phase 16A mean / mean+std pooling and L2 normalisation"
   echo "      Phase 16A zero-vector, NaN and wrong-tensor rejection"
+  echo "      Phase 17 cosine similarity and evaluation statistics"
   echo ""
   echo "  A green 'npm test' therefore covers the TypeScript suites"
   echo "  ONLY. Do not report the inference layer as verified from"
@@ -147,6 +153,42 @@ fi
 if ! "$JAVA_BIN" -cp "$OUT/aggregation-tests.jar" \
   com.systema.music.inference.AggregationTest; then
   echo "  Aggregation suite FAILED."
+  exit 1
+fi
+
+# ---- Phase 17: similarity suite -------------------------------
+#
+# Also coroutine-free, for the same reason: EmbeddingSimilarity is
+# pure arithmetic over FloatArrays. Every cosine score the quality lab
+# will ever report comes out of this code, so it is verified by
+# execution rather than by review.
+
+SIM_SRC=(
+  "$SRC/FrameEmbeddingAggregator.kt"
+  "$SRC/EmbeddingSimilarity.kt"
+  "$SRC/ModelDescriptor.kt"
+  "$TEST/SimilarityTest.kt"
+)
+
+echo ""
+echo "Compiling Phase 17 similarity suite..."
+
+if ! "$KOTLINC" "${SIM_SRC[@]}" \
+  -include-runtime -d "$OUT/similarity-tests.jar" 2>"$OUT/sim-compile.log"; then
+  echo "  Similarity compilation FAILED:"
+  grep -v "^warning:" "$OUT/sim-compile.log" | grep -iv "^WARNING" | head -30
+  exit 1
+fi
+
+if grep -q "error:" "$OUT/sim-compile.log" 2>/dev/null; then
+  echo "  Similarity compilation reported errors:"
+  grep "error:" "$OUT/sim-compile.log" | head -30
+  exit 1
+fi
+
+if ! "$JAVA_BIN" -cp "$OUT/similarity-tests.jar" \
+  com.systema.music.inference.SimilarityTest; then
+  echo "  Similarity suite FAILED."
   exit 1
 fi
 

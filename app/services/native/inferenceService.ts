@@ -22,8 +22,14 @@ import {
   type CandidateMatrix,
   type ImportResult,
   type MemoryLifecycleReport,
+  type EvaluationReport,
   type ModelContract,
+  type QualityEvalStartedEvent,
+  type QualityEvalTrackCompletedEvent,
+  type QualityEvalTrackStartedEvent,
   type RealAudioResult,
+  type SimilarityStats,
+  type TrackEvaluation,
   type RuntimeId,
   type TestModelResult,
 } from './inferencePlugin'
@@ -41,6 +47,12 @@ export class InferenceServiceError extends Error {
 
 /** Hard cap, duplicated from Kotlin so the UI can enforce it early. */
 export const MAX_BENCHMARK_TRACKS = 20
+
+/**
+ * Hard cap on one quality evaluation, mirroring
+ * EmbeddingQualityLab.MAX_TRACKS. Twenty tracks give 190 pairs.
+ */
+export const MAX_QUALITY_TRACKS = 20
 
 function requirePlugin(): void {
   if (!isInferenceAvailable()) {
@@ -306,4 +318,170 @@ export function describeEnvironment(env: InferenceEnvironment): string {
   if (env.batteryLevel !== null) parts.push(`${env.batteryLevel}%`)
   if (env.thermalStatus !== 'UNAVAILABLE') parts.push(`thermal ${env.thermalStatus}`)
   return parts.join(' · ')
+}
+
+
+// ============================================================
+// Phase 17 — Embedding Quality Lab
+// ============================================================
+
+/**
+ * Starts an incremental evaluation.
+ *
+ * Returns as soon as the run is accepted. Subscribe with
+ * [onQualityEvalEvents] BEFORE calling this, or the first events can
+ * be missed.
+ */
+export async function runQualityEvaluation(options: {
+  runtimeId: RuntimeId
+  modelId: string
+  tracks: Array<{ trackId: string, uri: string, label?: string }>
+  aggregationStrategy?: AggregationStrategy
+}): Promise<{ started: boolean, totalTracks: number, labelled: boolean }> {
+  requirePlugin()
+  return InferenceNative.runQualityEvaluation(options)
+}
+
+/** Requests a stop. Completed results are preserved. */
+export async function stopQualityEvaluation(): Promise<void> {
+  requirePlugin()
+  await InferenceNative.stopQualityEvaluation()
+}
+
+export async function getQualityEvaluationStatus(): Promise<{
+  running: boolean
+  maxTracks: number
+}> {
+  requirePlugin()
+  return InferenceNative.getQualityEvaluationStatus()
+}
+
+/**
+ * Subscribes to all four evaluation events at once.
+ *
+ * Returns a disposer that removes every listener. Registering them
+ * together makes it impossible to leak one by forgetting it in a
+ * component teardown.
+ */
+export async function onQualityEvalEvents(handlers: {
+  onStarted?: (e: QualityEvalStartedEvent) => void
+  onTrackStarted?: (e: QualityEvalTrackStartedEvent) => void
+  onTrackCompleted?: (e: QualityEvalTrackCompletedEvent) => void
+  onFinished?: (e: EvaluationReport) => void
+}): Promise<() => void> {
+  requirePlugin()
+  const handles = await Promise.all([
+    InferenceNative.addListener('qualityEvalStarted', (e) => handlers.onStarted?.(e)),
+    InferenceNative.addListener('qualityEvalTrackStarted', (e) => handlers.onTrackStarted?.(e)),
+    InferenceNative.addListener('qualityEvalTrackCompleted', (e) => handlers.onTrackCompleted?.(e)),
+    InferenceNative.addListener('qualityEvalFinished', (e) => handlers.onFinished?.(e)),
+  ])
+  return () => {
+    handles.forEach(h => void h.remove())
+  }
+}
+
+/**
+ * Cosine similarity, mirrored in TypeScript for display-side checks.
+ *
+ * THIS IS NOT THE PRODUCTION PATH. Every score shown in the lab is
+ * computed natively from the real embedding; this exists so the
+ * arithmetic can be asserted in the test suite and so the UI can
+ * sanity-check a matrix it was handed.
+ *
+ * Throws rather than returning NaN: a NaN would flow into a table
+ * cell and look like a measurement.
+ */
+export function cosineSimilarity(a: readonly number[], b: readonly number[]): number {
+  if (a.length !== b.length) {
+    throw new Error(
+      `Cannot compare a ${a.length}-d embedding with a ${b.length}-d one. ` +
+      'Refusing to pad or truncate.',
+    )
+  }
+  if (a.length === 0) throw new Error('Cannot compute similarity between empty vectors.')
+  let dot = 0
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i] as number
+    const y = b[i] as number
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      throw new Error('Refusing to compute a similarity from non-finite components.')
+    }
+    dot += x * y
+  }
+  // Both inputs are expected to be unit length, so the dot product IS
+  // the cosine. Clamped because float rounding can nudge an identical
+  // pair a hair past 1.
+  return Math.min(1, Math.max(-1, dot))
+}
+
+/** L2 norm. */
+export function l2Norm(v: readonly number[]): number {
+  let acc = 0
+  for (const x of v) acc += x * x
+  return Math.sqrt(acc)
+}
+
+/** Whether a vector is unit length within the shared tolerance. */
+export function isUnitLength(v: readonly number[], tolerance = 1e-4): boolean {
+  if (v.length === 0) return false
+  if (!v.every(Number.isFinite)) return false
+  return Math.abs(l2Norm(v) - 1) <= tolerance
+}
+
+/**
+ * Formats the quality conclusion for display.
+ *
+ * Deliberately has no GOOD or BAD branch. The lab measures geometry;
+ * grading it would require labelled ground truth this phase does not
+ * have, and a threshold invented to fill the gap is exactly the
+ * confirmation bias the phase exists to avoid.
+ */
+export function describeQualityConclusion(report: EvaluationReport): string {
+  return report.labelled
+    ? 'INSUFFICIENT EVIDENCE — labelled pairs were supplied, but the sample is ' +
+      'small and no accepted threshold exists for these statistics.'
+    : 'INSUFFICIENT EVIDENCE — unlabeled run. These numbers describe embedding ' +
+      'geometry only, not whether the tracks actually sound alike.'
+}
+
+/**
+ * Renders a similarity distribution as text bars.
+ *
+ * Buckets are fixed across [-1, 1] rather than fitted to the data, so
+ * a narrow cluster LOOKS narrow. An auto-scaled histogram would make
+ * every distribution appear healthy.
+ */
+export function renderHistogram(stats: SimilarityStats, width = 24): string[] {
+  const peak = Math.max(...stats.histogram, 1)
+  const bucketWidth = 2 / stats.histogramBuckets
+  return stats.histogram.map((count, i) => {
+    const lo = -1 + i * bucketWidth
+    const hi = lo + bucketWidth
+    const filled = Math.round((count / peak) * width)
+    const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(Math.max(0, width - filled))
+    return `${lo.toFixed(1)}..${hi.toFixed(1)} ${bar} ${count}`
+  })
+}
+
+/** A progress bar for the run header. */
+export function renderProgressBar(done: number, total: number, width = 14): string {
+  if (total <= 0) return '\u2591'.repeat(width)
+  const filled = Math.max(0, Math.min(width, Math.round((done / total) * width)))
+  return '\u2588'.repeat(filled) + '\u2591'.repeat(width - filled)
+}
+
+/**
+ * Summarises one completed track for the live feed.
+ *
+ * Returns the explicit first-track sentence rather than a score when
+ * there is nothing to compare against yet.
+ */
+export function describeNeighbours(evaluation: TrackEvaluation): string {
+  if (!evaluation.ok) return evaluation.errorMessage ?? 'Failed.'
+  if (!evaluation.hasComparison) return 'No comparison available \u2014 first embedding.'
+  const near = evaluation.nearestScore?.toFixed(4) ?? '?'
+  const far = evaluation.farthestScore?.toFixed(4) ?? '?'
+  return `closest ${evaluation.nearestTrackId} (${near}) \u00b7 ` +
+    `farthest ${evaluation.farthestTrackId} (${far})`
 }
