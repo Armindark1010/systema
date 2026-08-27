@@ -1,11 +1,22 @@
 #!/usr/bin/env bash
 # ============================================================
-# SYSTEMA — Phase 15 inference test runner
+# SYSTEMA — Phase 15 / 16A inference test runner
 # ============================================================
-# Compiles and RUNS the Kotlin inference contract suite on a plain
-# JVM. These are real assertions against real objects: the descriptor,
-# the preprocessing boundary and the reference runtime's full
-# load/infer/unload lifecycle.
+# Compiles and RUNS two Kotlin suites on a plain JVM. These are real
+# assertions against real objects:
+#
+#   InferenceContractTest  descriptor shape arithmetic, the
+#                          preprocessing boundary, and the reference
+#                          runtime's full load/infer/unload lifecycle
+#   AggregationTest        Phase 16A frame -> track pooling: the
+#                          arithmetic, the L2 normalisation, the
+#                          zero/NaN policies and the wrong-tensor
+#                          rejection
+#
+# AggregationTest needs no coroutines and no Android, because
+# FrameEmbeddingAggregator deliberately imports neither. That is what
+# makes the pooling maths executable here rather than only reviewable
+# in a diff.
 #
 # WHAT IS AND IS NOT COVERED HERE
 # -------------------------------
@@ -49,12 +60,14 @@ if [ -z "$KOTLINC" ] || [ -z "$JAVA_BIN" ]; then
   echo "  ============================================================"
   echo "  !! INFERENCE SUITE NOT RUN — NOT VERIFIED IN THIS ENVIRONMENT"
   echo "  ============================================================"
-  echo "  No Kotlin/JDK toolchain found, so InferenceContractTest was"
+  echo "  No Kotlin/JDK toolchain found, so the Kotlin suites were"
   echo "  NEITHER RUN NOR PASSED here. That covers:"
   echo "      ModelDescriptor shape arithmetic"
   echo "      ModelInputPreparer resampling / normalisation / gating"
   echo "      ReferenceInferenceRuntime load-infer-unload lifecycle"
   echo "      error codes, determinism, repeated inference"
+  echo "      Phase 16A mean / mean+std pooling and L2 normalisation"
+  echo "      Phase 16A zero-vector, NaN and wrong-tensor rejection"
   echo ""
   echo "  A green 'npm test' therefore covers the TypeScript suites"
   echo "  ONLY. Do not report the inference layer as verified from"
@@ -82,11 +95,17 @@ fi
 # Android build; otherwise this cannot compile and says so rather than
 # emitting a confusing "unresolved reference: runBlocking".
 COROUTINES_JAR=""
+#
+# Some kotlinc distributions ship the jar in their own lib/ directory,
+# so that is checked too — it saves a full Android build on a machine
+# that only has the compiler.
+KOTLINC_LIB="$(cd "$(dirname "$KOTLINC")/../lib" 2>/dev/null && pwd || true)"
 for candidate in \
   "$HOME/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlinx/kotlinx-coroutines-core-jvm" \
-  "$HOME/.m2/repository/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm"; do
+  "$HOME/.m2/repository/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm" \
+  "$KOTLINC_LIB"; do
   if [ -d "$candidate" ]; then
-    found="$(find "$candidate" -name 'kotlinx-coroutines-core-jvm-*.jar' \
+    found="$(find "$candidate" -name 'kotlinx-coroutines-core-jvm*.jar' \
       ! -name '*sources*' ! -name '*javadoc*' 2>/dev/null | sort | tail -1)"
     if [ -n "$found" ]; then
       COROUTINES_JAR="$found"
@@ -94,6 +113,44 @@ for candidate in \
     fi
   fi
 done
+
+# ---- Phase 16A: aggregation suite -----------------------------
+#
+# Compiled and run FIRST and SEPARATELY, because it has no coroutines
+# dependency at all. A machine that cannot run the suspend-based
+# contract suite can still verify the pooling arithmetic, and that
+# arithmetic is what every stored track embedding depends on.
+
+AGG_SRC=(
+  "$SRC/FrameEmbeddingAggregator.kt"
+  "$SRC/ModelDescriptor.kt"
+  "$TEST/AggregationTest.kt"
+)
+
+echo ""
+echo "Compiling Phase 16A aggregation suite..."
+mkdir -p "$OUT"
+
+if ! "$KOTLINC" "${AGG_SRC[@]}" \
+  -include-runtime -d "$OUT/aggregation-tests.jar" 2>"$OUT/agg-compile.log"; then
+  echo "  Aggregation compilation FAILED:"
+  grep -v "^warning:" "$OUT/agg-compile.log" | grep -iv "^WARNING" | head -30
+  exit 1
+fi
+
+if grep -q "error:" "$OUT/agg-compile.log" 2>/dev/null; then
+  echo "  Aggregation compilation reported errors:"
+  grep "error:" "$OUT/agg-compile.log" | head -30
+  exit 1
+fi
+
+if ! "$JAVA_BIN" -cp "$OUT/aggregation-tests.jar" \
+  com.systema.music.inference.AggregationTest; then
+  echo "  Aggregation suite FAILED."
+  exit 1
+fi
+
+# ---- Phase 15: contract suite ---------------------------------
 
 if [ -z "$COROUTINES_JAR" ]; then
   echo ""
@@ -108,7 +165,8 @@ if [ -z "$COROUTINES_JAR" ]; then
   echo "  populate the cache, or run the suite through Gradle:"
   echo "      ./gradlew testDebugUnitTest"
   echo ""
-  echo "  These assertions were NOT run and are NOT verified here."
+  echo "  The Phase 16A aggregation suite above DID run. These"
+  echo "  contract assertions did NOT and are NOT verified here."
   echo "  ============================================================"
   echo ""
   if [ "${SYSTEMA_REQUIRE_INFERENCE:-0}" = "1" ]; then

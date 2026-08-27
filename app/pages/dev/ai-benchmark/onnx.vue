@@ -797,13 +797,62 @@ function titleFor(trackId: string): string {
                   </p>
 
                   <p
-                    v-if="m.outputContract.aggregationRequired"
+                    v-if="m.outputContract.aggregationRequired && !m.trackEmbedding"
                     class="text-micro text-warning leading-relaxed"
                   >
-                    POOLING REQUIRED — these are per-frame embeddings. A track-level
-                    vector needs aggregation across frames, which is NOT implemented.
-                    No pooling has been applied to this measurement.
+                    POOLING REQUIRED — these are per-frame embeddings and no track
+                    embedding was produced for this measurement.
+                    <span v-if="m.aggregationError">{{ m.aggregationError }}</span>
                   </p>
+
+                  <!-- ---- TRACK EMBEDDING (Phase 16A) ---- -->
+                  <div
+                    v-if="m.trackEmbedding"
+                    class="pt-2 mt-2 border-t border-line space-y-1"
+                  >
+                    <p class="label text-fg-muted">
+                      TRACK EMBEDDING
+                    </p>
+                    <p class="text-micro text-fg-faint tnum">
+                      frame embedding: {{ m.trackEmbedding.inputFrameCount }} ×
+                      {{ m.trackEmbedding.inputDimension }} ·
+                      aggregation: <span class="text-fg">{{ m.trackEmbedding.strategy }}</span> ·
+                      track embedding: <span class="text-fg">{{ m.trackEmbedding.dimension }}</span> ·
+                      normalization: {{ m.trackEmbedding.normalisation }}
+                    </p>
+                    <p class="text-micro text-fg-faint tnum">
+                      aggregation time: {{ fmt(m.aggregationMs, 2) }} ms ·
+                      pre-norm L2: {{ fmt(m.trackEmbedding.preNormL2, 4) }} ·
+                      unit length:
+                      <span
+                        :class="m.trackEmbedding.unitLength ? 'text-success' : 'text-danger'"
+                      >{{ m.trackEmbedding.unitLength ? 'YES' : 'NO' }}</span>
+                    </p>
+                    <p class="text-micro text-fg-faint tnum">
+                      preview: [{{ m.trackEmbedding.preview }} …]
+                    </p>
+                    <p
+                      v-if="m.trackEmbedding.degenerate"
+                      class="text-micro text-danger leading-relaxed"
+                    >
+                      DEGENERATE — the pooled vector had zero magnitude, so it was
+                      returned as zeros rather than NaN. It must not be used for
+                      similarity: cosine against it is undefined, not zero.
+                    </p>
+                    <p
+                      v-if="m.trackEmbedding.strategy === 'MEAN_STD'"
+                      class="text-micro text-warning leading-relaxed"
+                    >
+                      MEAN_STD produces {{ m.trackEmbedding.dimension }} dimensions,
+                      not {{ m.trackEmbedding.inputDimension }}. It is NOT
+                      interchangeable with the MEAN baseline.
+                    </p>
+                    <p class="text-micro text-fg-faint leading-relaxed">
+                      Aggregation runs after inference and is excluded from
+                      inferenceMs and totalMs. Mean pooling is the baseline —
+                      no quality claim has been evaluated.
+                    </p>
+                  </div>
                 </div>
               </details>
               <p v-else class="mt-1 text-micro text-fg-muted leading-relaxed">
