@@ -12,20 +12,18 @@ const emit = defineEmits<{
 
 <template>
   <section class="library-controls" aria-label="Library controls">
-    <button class="library-controls__sort focus-ring" aria-label="Choose how tracks are sorted" @click="emit('sort')">
-      <span class="label-muted">SORT BY</span>
-      <span class="library-controls__sort-value text-small">{{ sortLabel }}</span>
+    <button class="library-controls__sort focus-ring flex items-center gap-1" aria-label="Choose how tracks are sorted" @click="emit('sort')">
+      <span class="library-controls__sort-value text-xs">{{ sortLabel }}</span>
       <UIcon name="lucide:chevron-down" class="library-controls__chevron" aria-hidden="true" />
     </button>
 
-    <span class="library-controls__count label-muted tnum" aria-live="polite">
-      {{ trackCount.toLocaleString() }} TRACKS
-    </span>
+    <div class="flex gap-2">
+      <UIcon name="lucide:shuffle" class="library-controls__shuffle-icon" aria-hidden="true" @click="emit('shuffle')" />
+      <span class="library-controls__count label-muted tnum" aria-live="polite">
+        {{ trackCount.toLocaleString() }} Songs
+      </span>
+    </div>
 
-    <button class="library-controls__shuffle focus-ring" aria-label="Shuffle library" @click="emit('shuffle')">
-      <UIcon name="lucide:shuffle" class="library-controls__shuffle-icon" aria-hidden="true" />
-      <span class="text-micro">SHUFFLE</span>
-    </button>
   </section>
 </template>
 
@@ -34,20 +32,17 @@ const emit = defineEmits<{
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--library-gutter);
-  align-items: end;
-  padding: var(--library-control-pad);
-  border: var(--library-line-width) solid var(--sys-border);
+  align-items: center;
+  /* padding: var(--library-control-pad); */
+  /* border: var(--library-line-width) solid var(--sys-border); */
   background: var(--sys-surface);
 }
 
 .library-controls__sort {
-  display: grid;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    'label icon'
-    'value icon';
-  gap: var(--library-gap-tight) var(--library-gap);
   border: 0;
   background: transparent;
   color: var(--sys-foreground);
@@ -55,10 +50,7 @@ const emit = defineEmits<{
   cursor: pointer;
 }
 
-.library-controls__sort > .label-muted { grid-area: label; }
-
 .library-controls__sort-value {
-  grid-area: value;
   overflow: hidden;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -68,11 +60,10 @@ const emit = defineEmits<{
 }
 
 .library-controls__chevron {
-  grid-area: icon;
   width: var(--library-icon-size);
   height: var(--library-icon-size);
-  align-self: center;
   color: var(--sys-foreground-faint);
+  flex-shrink: 0;
 }
 
 .library-controls__count {

@@ -18,7 +18,7 @@
       <NuxtPage />
     </NuxtLayout>
   </div>
-  <UToaster position="bottom-right" :ui="{ width: 'w-80' }" />
+  <UToaster position="top-center" class="app-safe-top !bg-transparent" :ui="{ width: 'w-80' }" />
 </template>
 
 <style>
@@ -32,6 +32,8 @@
 */
 .app-safe-top {
   padding-top: var(--sys-safe-top, env(safe-area-inset-top, 0px));
+}
+div.app-safe-top {
   background: var(--sys-background);
 }
 </style>

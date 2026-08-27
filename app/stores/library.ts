@@ -48,9 +48,9 @@ export interface LibrarySortOption {
 
 export const librarySections: { id: LibrarySection; label: string }[] = [
   { id: 'tracks', label: 'TRACKS' },
-  { id: 'albums', label: 'ALBUMS' },
-  { id: 'artists', label: 'ARTISTS' },
-  { id: 'playlists', label: 'PLAYLISTS' },
+  // { id: 'albums', label: 'ALBUMS' },
+  // { id: 'artists', label: 'ARTISTS' },
+  // { id: 'playlists', label: 'PLAYLISTS' },
 ]
 
 export const librarySortOptions: LibrarySortOption[] = [

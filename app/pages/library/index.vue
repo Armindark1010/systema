@@ -117,9 +117,14 @@ const selectedAction = ref<
   | null
 >(null)
 
-const activeIndex = computed(() =>
-  librarySections.findIndex(section => section.id === activeSection.value),
-)
+const activeIndex = computed(() => {
+  const idx = librarySections.findIndex(section => section.id === activeSection.value)
+  return idx >= 0 ? idx : 0
+})
+
+if (activeSection.value !== 'tracks') {
+  setSection('tracks')
+}
 
 // ---- Infinite scroll ---------------------------------------
 // The Library scrolls the document, so the sentinel is observed
@@ -391,11 +396,11 @@ function isPaneVisible(paneIndex: number) {
           @sort="openSort"
           @shuffle="shuffle"
         />
-        <LibraryTabs
+        <!-- <LibraryTabs
           :active="activeSection"
           :sections="librarySections"
           @select="activateSection"
-        />
+        /> -->
 
         <LibrarySkeleton v-if="isLoading" :section="activeSection" />
 
@@ -474,7 +479,8 @@ function isPaneVisible(paneIndex: number) {
               </template>
             </div>
 
-            <!-- 1: ALBUMS -->
+            <!-- 1: ALBUMS (commented out) -->
+            <!--
             <div
               class="library-page__swipe-pane"
               :class="{
@@ -490,8 +496,10 @@ function isPaneVisible(paneIndex: number) {
                 @actions="album => openActions('album', album)"
               />
             </div>
+            -->
 
-            <!-- 2: ARTISTS -->
+            <!-- 2: ARTISTS (commented out) -->
+            <!--
             <div
               class="library-page__swipe-pane"
               :class="{
@@ -507,8 +515,10 @@ function isPaneVisible(paneIndex: number) {
                 @actions="artist => openActions('artist', artist)"
               />
             </div>
+            -->
 
-            <!-- 3: PLAYLISTS -->
+            <!-- 3: PLAYLISTS (commented out) -->
+            <!--
             <div
               class="library-page__swipe-pane"
               :class="{
@@ -525,6 +535,7 @@ function isPaneVisible(paneIndex: number) {
                 @actions="playlist => openActions('playlist', playlist)"
               />
             </div>
+            -->
           </div>
         </section>
         <!--
@@ -611,8 +622,8 @@ function isPaneVisible(paneIndex: number) {
 
 .library-page__swipe-pane {
   flex: 0 0 100%;
-  width: 100%;
-  max-width: 100%;
+  width: calc(100vw);
+  /* max-width: 100%; */
   min-width: 0;
   box-sizing: border-box;
 }
