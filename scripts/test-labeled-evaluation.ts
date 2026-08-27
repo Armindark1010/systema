@@ -434,14 +434,19 @@ ok('the track cap is inherited from Phase 17',
   /MAX_TRACKS = EmbeddingQualityLab\.MAX_TRACKS/.test(labCode))
 
 // Timing boundaries must stay separate and comparable.
+//
+// Either put() or putNumeric() satisfies this: what matters is that
+// the key is emitted under its own name, not which writer emits it.
+// putNumeric is the NaN-safe variant added for the white-screen fix
+// (see EvaluationJson.kt) and changes no finite value.
 for (const t of ['decodeMs', 'preprocessingMs', 'inferenceMs', 'tensorMs', 'aggregationMs', 'totalMs']) {
-  ok(`${t} is recorded separately`, new RegExp(`put\\("${t}"`).test(lab))
+  ok(`${t} is recorded separately`, new RegExp(`put(Numeric)?\\("${t}"`).test(lab))
 }
 ok('totalMs keeps the Phase 16A/17 boundary (no aggregation folded in)',
   /val totalMs = decodeMs \+ prepared\.preparationMs \+ result\.inferenceMs \+ result\.tensorMs/
     .test(labCode))
 ok('quality-evaluation wall clock is reported separately',
-  /put\("pairStageMs"/.test(lab) && /put\("embedStageMs"/.test(lab))
+  /put(Numeric)?\("pairStageMs"/.test(lab) && /put(Numeric)?\("embedStageMs"/.test(lab))
 ok('energy is declared not measured, never estimated',
   /put\("energyMeasured", false\)/.test(lab))
 

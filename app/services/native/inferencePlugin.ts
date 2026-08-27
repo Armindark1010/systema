@@ -484,18 +484,32 @@ export interface RealAudioResult {
 // Phase 17 — Embedding Quality Lab
 // ============================================================
 
+/**
+ * A number that native could not represent.
+ *
+ * Android's org.json cannot hold NaN or Infinity, so the bridge sends
+ * JSON null for them (see EvaluationJson.kt putNumeric). `null` here
+ * means "measured, and the answer is not a number" - an empty label
+ * class, or a pair whose track failed to embed. It is NOT missing
+ * data and it is NOT zero.
+ *
+ * Typed honestly so the compiler forces every read site to handle it;
+ * an unhandled one used to reach `.toFixed()` and blank the page.
+ */
+export type MaybeNumber = number | null
+
 /** Descriptive statistics over pairwise cosine similarities. */
 export interface SimilarityStats {
   /** Number of DISTINCT pairs, i.e. N(N-1)/2. Excludes the diagonal. */
   pairCount: number
-  mean: number
-  median: number
-  min: number
-  max: number
-  range: number
-  stdDev: number
-  p25: number
-  p75: number
+  mean: MaybeNumber
+  median: MaybeNumber
+  min: MaybeNumber
+  max: MaybeNumber
+  range: MaybeNumber
+  stdDev: MaybeNumber
+  p25: MaybeNumber
+  p75: MaybeNumber
   /** Fixed 10 buckets spanning [-1, 1]. Never auto-scaled to the data. */
   histogram: number[]
   histogramBuckets: number
@@ -610,7 +624,7 @@ export interface MemoryCheckpointSample {
   deltaNativeKb?: number
   deltaJavaKb?: number
   runningPeakKb: number
-  elapsedMs: number
+  elapsedMs: MaybeNumber
 }
 
 export interface MemoryLifecycleAuditReport {
@@ -619,8 +633,8 @@ export interface MemoryLifecycleAuditReport {
   finalKb: number
   peakDeltaKb: number
   netDeltaKb: number
-  peakNativeShare?: number
-  retainedNativeShare?: number
+  peakNativeShare?: MaybeNumber
+  retainedNativeShare?: MaybeNumber
   attribution: MemoryAttribution
   rationale: string
   caveat: string
@@ -636,10 +650,11 @@ export interface LabeledPairResult {
   /** The human's judgement, fixed before the cosine existed. */
   label: PairLabel
   source: LabelSource
-  cosine: number
+  /** null when the pair could not be scored (a track failed to embed). */
+  cosine: MaybeNumber
   outcome: PairOutcome
-  /** The measured value `outcome` was decided against, when one existed. */
-  referenceValue?: number
+  /** The measured value `outcome` was decided against; null when none existed yet. */
+  referenceValue?: MaybeNumber
 }
 
 export interface ClassStats {
@@ -654,12 +669,12 @@ export interface ClassSeparation {
   lower: PairLabel
   countHigher: number
   countLower: number
-  /** Rank-based (Mann-Whitney). 0.5 = no separation. NaN = unmeasured. */
-  auc: number
-  meanGap: number
-  rangeOverlap: number
+  /** Rank-based (Mann-Whitney). 0.5 = no separation. null = unmeasured. */
+  auc: MaybeNumber
+  meanGap: MaybeNumber
+  rangeOverlap: MaybeNumber
   overlappingPairs: number
-  overlapFraction: number
+  overlapFraction: MaybeNumber
   insufficient: boolean
 }
 
@@ -676,16 +691,16 @@ export interface TrackEmbeddingRow {
   dimension: number
   frameCount: number
   frameDimension: number
-  l2Norm: number
-  preNormL2: number
-  decodeMs: number
-  preprocessingMs: number
-  inferenceMs: number
-  tensorMs: number
-  aggregationMs: number
-  totalMs: number
-  audioDurationSec: number
-  rtf: number
+  l2Norm: MaybeNumber
+  preNormL2: MaybeNumber
+  decodeMs: MaybeNumber
+  preprocessingMs: MaybeNumber
+  inferenceMs: MaybeNumber
+  tensorMs: MaybeNumber
+  aggregationMs: MaybeNumber
+  totalMs: MaybeNumber
+  audioDurationSec: MaybeNumber
+  rtf: MaybeNumber
   errorCode?: string
   errorMessage?: string
 }

@@ -41,6 +41,7 @@ import {
   type LabelSource,
   type ClassStats,
   type SeparationVerdict,
+  type MaybeNumber,
 } from './inferencePlugin'
 
 /** Mirrors the Phase 13 error convention so the UI handles both alike. */
@@ -470,13 +471,13 @@ export function describeVerdict(v: SeparationVerdict): string {
  * Returns 'UNKNOWN' for the -1 sentinel rather than '-0.0 MB': an
  * unavailable counter is not a measurement of zero.
  */
-export function formatMb(kb: number | undefined | null): string {
+export function formatMb(kb: MaybeNumber | undefined): string {
   if (kb === undefined || kb === null || kb < 0) return 'UNKNOWN'
   return `${(kb / 1024).toFixed(1)} MB`
 }
 
 /** Signed MB, so a release reads as negative rather than as growth. */
-export function formatDeltaMb(kb: number | undefined | null): string {
+export function formatDeltaMb(kb: MaybeNumber | undefined): string {
   if (kb === undefined || kb === null) return 'UNKNOWN'
   const mb = kb / 1024
   return `${mb >= 0 ? '+' : ''}${mb.toFixed(1)} MB`
@@ -488,8 +489,10 @@ export function formatDeltaMb(kb: number | undefined | null): string {
  * NaN prints as 'not measured', never as 0.5 — "unmeasured" and
  * "measured, and found to be chance" are different findings.
  */
-export function formatAuc(auc: number): string {
-  if (Number.isNaN(auc)) return 'not measured'
+export function formatAuc(auc: MaybeNumber | undefined): string {
+  // null/undefined as well as NaN: the bridge sends JSON null for a
+  // non-finite double, and an older payload may omit the key entirely.
+  if (auc === null || auc === undefined || !Number.isFinite(auc)) return 'not measured'
   return auc.toFixed(3)
 }
 
@@ -501,11 +504,23 @@ export function formatAuc(auc: number): string {
  */
 export function describeClass(c: ClassStats): string {
   const s = c.stats
-  const head = `n=${s.pairCount} mean=${s.mean.toFixed(4)} median=${s.median.toFixed(4)}`
-  const spread = `min=${s.min.toFixed(4)} max=${s.max.toFixed(4)} sd=${s.stdDev.toFixed(4)}`
+  const head = `n=${s.pairCount} mean=${formatScore(s.mean)} median=${formatScore(s.median)}`
+  const spread = `min=${formatScore(s.min)} max=${formatScore(s.max)} sd=${formatScore(s.stdDev)}`
   return c.insufficient
     ? `${head} ${spread} — TOO FEW PAIRS to characterise`
     : `${head} ${spread}`
+}
+
+/**
+ * Formats a cosine-scale number that may legitimately not be a number.
+ *
+ * Returns the em dash for null/undefined/NaN rather than throwing or
+ * printing "NaN". A pair whose track failed to embed has no cosine,
+ * and that is a real state to display, not an error to hide.
+ */
+export function formatScore(v: MaybeNumber | undefined, digits = 4): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return '—'
+  return v.toFixed(digits)
 }
 
 /**
@@ -580,8 +595,14 @@ export function describeQualityConclusion(report: EvaluationReport): string {
  * every distribution appear healthy.
  */
 export function renderHistogram(stats: SimilarityStats, width = 24): string[] {
+  // Defensive: the bridge can only send an array here, but a missing
+  // or malformed one must not throw inside a render function.
+  if (!Array.isArray(stats?.histogram) || stats.histogram.length === 0) return []
   const peak = Math.max(...stats.histogram, 1)
-  const bucketWidth = 2 / stats.histogramBuckets
+  const buckets = stats.histogramBuckets > 0
+    ? stats.histogramBuckets
+    : stats.histogram.length
+  const bucketWidth = 2 / buckets
   return stats.histogram.map((count, i) => {
     const lo = -1 + i * bucketWidth
     const hi = lo + bucketWidth

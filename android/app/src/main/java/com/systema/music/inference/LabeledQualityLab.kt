@@ -588,16 +588,16 @@ data class TrackEmbeddingRow(
         put("dimension", dimension)
         put("frameCount", frameCount)
         put("frameDimension", frameDimension)
-        put("l2Norm", l2Norm)
-        put("preNormL2", preNormL2)
-        put("decodeMs", decodeMs)
-        put("preprocessingMs", preprocessingMs)
-        put("inferenceMs", inferenceMs)
-        put("tensorMs", tensorMs)
-        put("aggregationMs", aggregationMs)
-        put("totalMs", totalMs)
-        put("audioDurationSec", audioDurationSec)
-        put("rtf", rtf)
+        putNumeric("l2Norm", l2Norm)
+        putNumeric("preNormL2", preNormL2)
+        putNumeric("decodeMs", decodeMs)
+        putNumeric("preprocessingMs", preprocessingMs)
+        putNumeric("inferenceMs", inferenceMs)
+        putNumeric("tensorMs", tensorMs)
+        putNumeric("aggregationMs", aggregationMs)
+        putNumeric("totalMs", totalMs)
+        putNumeric("audioDurationSec", audioDurationSec)
+        putNumeric("rtf", rtf)
         errorCode?.let { put("errorCode", it) }
         errorMessage?.let { put("errorMessage", it) }
     }
@@ -667,18 +667,18 @@ data class LabeledEvaluationReport(
         // numbers stay comparable with the earlier runs. The two new
         // stage timers are reported separately and are not folded into
         // any per-track total.
-        put("embedStageMs", embedStageMs)
-        put("pairStageMs", pairStageMs)
-        put("totalElapsedMs", totalElapsedMs)
+        putNumeric("embedStageMs", embedStageMs)
+        putNumeric("pairStageMs", pairStageMs)
+        putNumeric("totalElapsedMs", totalElapsedMs)
 
         val okRows = rows.filter { it.ok }
-        put("medianDecodeMs", median(okRows.map { it.decodeMs }))
-        put("medianPreprocessingMs", median(okRows.map { it.preprocessingMs }))
-        put("medianInferenceMs", median(okRows.map { it.inferenceMs }))
-        put("medianTensorMs", median(okRows.map { it.tensorMs }))
-        put("medianAggregationMs", median(okRows.map { it.aggregationMs }))
-        put("medianTotalMs", median(okRows.map { it.totalMs }))
-        put("medianRtf", median(okRows.map { it.rtf }.filter { !it.isNaN() }))
+        putNumeric("medianDecodeMs", median(okRows.map { it.decodeMs }))
+        putNumeric("medianPreprocessingMs", median(okRows.map { it.preprocessingMs }))
+        putNumeric("medianInferenceMs", median(okRows.map { it.inferenceMs }))
+        putNumeric("medianTensorMs", median(okRows.map { it.tensorMs }))
+        putNumeric("medianAggregationMs", median(okRows.map { it.aggregationMs }))
+        putNumeric("medianTotalMs", median(okRows.map { it.totalMs }))
+        putNumeric("medianRtf", median(okRows.map { it.rtf }.filter { !it.isNaN() }))
 
         put("rows", JSArray().apply { rows.forEach { put(it.toJs()) } })
         put("pairResults", JSArray().apply { pairResults.forEach { put(it.toJs()) } })

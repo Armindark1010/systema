@@ -63,7 +63,7 @@ data class MemoryCheckpointSample(
         deltaNativeKb?.let { put("deltaNativeKb", it) }
         deltaJavaKb?.let { put("deltaJavaKb", it) }
         put("runningPeakKb", runningPeakKb)
-        put("elapsedMs", elapsedMs)
+        putNumeric("elapsedMs", elapsedMs)
     }
 }
 
@@ -118,8 +118,8 @@ data class MemoryLifecycleAuditReport(
         put("finalKb", finalKb)
         put("peakDeltaKb", peakDeltaKb)
         put("netDeltaKb", netDeltaKb)
-        peakNativeShare?.let { put("peakNativeShare", it) }
-        retainedNativeShare?.let { put("retainedNativeShare", it) }
+        peakNativeShare?.let { putNumeric("peakNativeShare", it) }
+        retainedNativeShare?.let { putNumeric("retainedNativeShare", it) }
         put("attribution", attribution.name)
         put("rationale", rationale)
         put("caveat", caveat)

@@ -3,6 +3,7 @@ package com.systema.music.inference
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.activity.result.ActivityResult
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
@@ -38,6 +39,16 @@ import kotlinx.coroutines.launch
  */
 @CapacitorPlugin(name = "Inference")
 class InferencePlugin : Plugin() {
+
+    private companion object {
+        /**
+         * Logcat tag for the labelled evaluation.
+         *
+         * Kept distinct so a long run can be watched without the rest
+         * of the app's noise:  adb logcat -s LabeledEval
+         */
+        const val LABELED_TAG = "LabeledEval"
+    }
 
     private val registry: ModelRegistry by lazy { ModelRegistry(context) }
     private val benchmark: InferenceBenchmark by lazy { InferenceBenchmark(context, registry) }
@@ -852,7 +863,24 @@ class InferencePlugin : Plugin() {
                     pairLabels = pairLabels,
                     labelSources = labelSources,
                     strategy = strategy,
-                ) { event, payload -> notifyListeners(event, payload) }
+                ) { event, payload ->
+                    // Device diagnostics for the Phase 18 white-screen
+                    // investigation. The terminal events are the ones
+                    // that historically preceded the blank page, so
+                    // their payload is logged in full and can be read
+                    // with:  adb logcat -s LabeledEval
+                    //
+                    // Logging never blocks the emit: a diagnostic must
+                    // not be able to break the thing it is diagnosing.
+                    runCatching {
+                        if (event == LabeledQualityLab.EVENT_FINISHED) {
+                            Log.i(LABELED_TAG, "$event -> $payload")
+                        } else {
+                            Log.d(LABELED_TAG, "$event")
+                        }
+                    }
+                    notifyListeners(event, payload)
+                }
             } catch (e: InferenceException) {
                 notifyListeners(
                     LabeledQualityLab.EVENT_FINISHED,
