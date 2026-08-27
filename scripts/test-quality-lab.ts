@@ -26,7 +26,7 @@
 // looking for it in code.
 // ============================================================
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 let passed = 0
@@ -850,6 +850,157 @@ section('22. BEHAVIOUR — statistics come only from real embeddings')
       e.nearestScore === undefined && e.farthestScore === undefined))
   ok('no failed track carries a dimension',
     evaluations.filter(e => !e.ok).every(e => e.dimension === undefined))
+}
+
+// ------------------------------------------------------------
+section('23. Runtime identifier is canonical (device regression)')
+// ------------------------------------------------------------
+//
+// REGRESSION GUARD — this shipped and broke every device run:
+//
+//   EVALUATION ERROR
+//   Unknown runtime 'onnx'. Available: onnxruntime, reference
+//
+// The page hardcoded runtimeId: 'onnx'. The Kotlin registry is keyed
+// by each runtime's OWN runtimeId, which is "onnxruntime", so the
+// lookup missed and the run aborted before a single track was
+// evaluated.
+//
+// This is the SECOND time this identifier has desynchronised. The
+// first (Phase 15) was the mirror image: the registry said "onnx"
+// while callers said "onnxruntime". test-onnx-integration.ts §2b
+// locked down the registry and onnx.vue, but Phase 17 added a NEW
+// caller that nothing covered. So these assertions are written against
+// EVERY caller, present and future, rather than one page.
+
+// ---- the specific bug: the literal is gone ----
+ok('quality.vue does not hardcode the runtime id as \'onnx\'',
+  !/runtimeId:\s*['"]onnx['"]/.test(pageCode))
+ok('quality.vue requests the canonical id via the shared constant',
+  /runtimeId:\s*RUNTIME_ONNX/.test(pageCode))
+ok('quality.vue imports RUNTIME_ONNX rather than redefining it',
+  /RUNTIME_ONNX/.test(pageCode.slice(0, pageCode.indexOf('</script>') >>> 0 || pageCode.length))
+  && /import\s*\{[\s\S]*?RUNTIME_ONNX[\s\S]*?\}\s*from\s*'~\/services\/native\/inferencePlugin'/.test(pageCode))
+
+// ---- no bare literal anywhere in ANY benchmark page ----
+// Comments are stripped first: several files explain the old bug in
+// prose precisely so it is not reintroduced.
+{
+  const pagesDir = resolve(ROOT, 'app/pages/dev/ai-benchmark')
+  const vuePages = readdirSync(pagesDir).filter(f => f.endsWith('.vue'))
+  ok('there are benchmark pages to check', vuePages.length > 0, String(vuePages.length))
+  for (const f of vuePages) {
+    const src = stripComments(readFileSync(resolve(pagesDir, f), 'utf8'))
+    ok(`${f} holds no bare 'onnx' runtime literal`, !/['"]onnx['"]/.test(src))
+  }
+}
+
+// ---- the constant itself still has the agreed value ----
+// If someone "fixes" a future mismatch by editing the constant, every
+// caller silently moves with it. Pin the value.
+ok('RUNTIME_ONNX is still "onnxruntime"',
+  /RUNTIME_ONNX = 'onnxruntime'/.test(tsPlugin))
+ok('RUNTIME_REFERENCE is still "reference" (preserved, not replaced)',
+  /RUNTIME_REFERENCE = 'reference'/.test(tsPlugin))
+
+// ---- Kotlin agrees, and no second runtime was invented ----
+{
+  const descriptorKt = read('android/app/src/main/java/com/systema/music/inference/ModelDescriptor.kt')
+  const benchKt = read('android/app/src/main/java/com/systema/music/inference/InferenceBenchmark.kt')
+  ok('Kotlin RuntimeIds.ONNX is "onnxruntime"',
+    /const val ONNX = "onnxruntime"/.test(descriptorKt))
+  ok('Kotlin RuntimeIds.REFERENCE is "reference"',
+    /const val REFERENCE = "reference"/.test(descriptorKt))
+  ok('the registry is still derived from each runtime\'s own runtimeId',
+    /associateBy\s*\{\s*it\.runtimeId\s*\}/.test(benchKt))
+  // Requirement 4/5: fix the caller, never widen the registry.
+  ok('no alias runtime named "onnx" was added to the registry',
+    !/mapOf\(\s*"onnx"/.test(stripComments(benchKt))
+    && !/"onnx"\s+to\s+/.test(stripComments(benchKt)))
+  ok('the registry still lists exactly the ONNX and reference runtimes',
+    /OnnxInferenceRuntime\(\)/.test(benchKt) && /ReferenceInferenceRuntime\(\)/.test(benchKt))
+  ok('the quality lab plugin method defaults to the constant, not a literal',
+    /val runtimeId = call\.getString\("runtimeId"\) \?: RuntimeIds\.ONNX/.test(plugin))
+}
+
+// ---- BEHAVIOURAL: resolve the id the way the device does ----
+// Static greps can pass while the wiring is still wrong, so the whole
+// resolution is executed: page -> bridge -> registry lookup.
+{
+  const ONNX = 'onnxruntime'
+  const REFERENCE = 'reference'
+
+  // Kotlin: listOf(OnnxInferenceRuntime(), ReferenceInferenceRuntime())
+  //           .associateBy { it.runtimeId }
+  const registry = new Map<string, string>([
+    [ONNX, 'OnnxInferenceRuntime'],
+    [REFERENCE, 'ReferenceInferenceRuntime'],
+  ])
+
+  // Kotlin: runtimes[id] ?: reject("Unknown runtime '$id'. Available: ...")
+  function resolveRuntime(id: string): { ok: true, cls: string } | { ok: false, message: string } {
+    const hit = registry.get(id)
+    if (hit === undefined) {
+      return {
+        ok: false,
+        message: `Unknown runtime '${id}'. Available: ${[...registry.keys()].join(', ')}`,
+      }
+    }
+    return { ok: true, cls: hit }
+  }
+
+  // Extract what the page ACTUALLY sends, from source, rather than
+  // restating it here — otherwise the simulation cannot fail.
+  const constantValue = /RUNTIME_ONNX = '([^']+)'/.exec(tsPlugin)?.[1]
+  const usesConstant = /runtimeId:\s*RUNTIME_ONNX/.test(pageCode)
+  const literal = /runtimeId:\s*['"]([^'"]+)['"]/.exec(pageCode)?.[1]
+  const requestedId = usesConstant ? constantValue : literal
+
+  ok('the quality lab requests "onnxruntime"', requestedId === ONNX, String(requestedId))
+  ok('the quality lab does NOT request "onnx"', requestedId !== 'onnx', String(requestedId))
+
+  // Requirement 8b: a YAMNet quality evaluation resolves the runtime.
+  const resolved = resolveRuntime(requestedId!)
+  ok('a YAMNet quality evaluation resolves the ONNX runtime successfully',
+    resolved.ok && resolved.cls === 'OnnxInferenceRuntime',
+    resolved.ok ? resolved.cls : resolved.message)
+
+  // The exact device symptom must no longer be reachable.
+  ok('the device error "Unknown runtime \'onnx\'" can no longer occur',
+    resolved.ok)
+
+  // Requirement 7: the reference runtime still resolves.
+  const ref = resolveRuntime(REFERENCE)
+  ok('the "reference" runtime is preserved and still resolves',
+    ref.ok && ref.cls === 'ReferenceInferenceRuntime')
+
+  // Requirement 8c: genuinely unknown ids must STILL fail. The fix
+  // must not have been a permissive registry that accepts anything.
+  for (const bogus of ['onnx', 'tflite', 'coreml', 'ONNXRUNTIME', '']) {
+    const bad = resolveRuntime(bogus)
+    ok(`unknown runtime '${bogus}' is still rejected`, !bad.ok)
+    if (!bad.ok) {
+      ok(`the rejection for '${bogus}' names the available runtimes`,
+        bad.message.includes('onnxruntime') && bad.message.includes('reference'))
+    }
+  }
+
+  // Lookup is exact, not fuzzy/prefix — 'onnx' is a prefix of
+  // 'onnxruntime', and a startsWith-based "fix" would have papered
+  // over the bug while breaking the unknown-id contract above.
+  ok('resolution is exact-match, so a prefix does not silently succeed',
+    !resolveRuntime('onnx').ok && resolveRuntime('onnxruntime').ok)
+}
+
+// ---- every id the TS layer can express is resolvable ----
+{
+  const declared = [...tsPlugin.matchAll(/RUNTIME_(?:ONNX|REFERENCE) = '([^']+)'/g)].map(m => m[1]!)
+  const kotlinDeclared = [...read('android/app/src/main/java/com/systema/music/inference/ModelDescriptor.kt')
+    .matchAll(/const val (?:ONNX|REFERENCE) = "([^"]+)"/g)].map(m => m[1]!)
+  ok('TS and Kotlin declare the identical runtime id set',
+    declared.length === 2
+    && JSON.stringify([...declared].sort()) === JSON.stringify([...kotlinDeclared].sort()),
+    `ts=${JSON.stringify(declared)} kotlin=${JSON.stringify(kotlinDeclared)}`)
 }
 
 // ------------------------------------------------------------
