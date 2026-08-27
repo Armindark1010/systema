@@ -18,6 +18,7 @@ import {
   type InferenceCapabilities,
   type InferenceEnvironment,
   type InferenceErrorCode,
+  type AggregationStrategy,
   type CandidateMatrix,
   type ImportResult,
   type MemoryLifecycleReport,
@@ -107,6 +108,12 @@ export async function runRealAudio(options: {
   runtimeId: RuntimeId
   modelId: string
   tracks: Array<{ trackId: string, uri: string }>
+  /**
+   * Pooling for the track-level embedding. Defaults to the MEAN
+   * baseline natively; passing an unknown value is rejected rather
+   * than silently defaulted, so a run is never mislabelled.
+   */
+  aggregationStrategy?: AggregationStrategy
 }): Promise<RealAudioResult> {
   requirePlugin()
 

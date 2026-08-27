@@ -251,6 +251,20 @@ data class InferenceResult(
      * (the frame count) that explains an element count.
      */
     val outputs: List<TensorSignature> = emptyList(),
+
+    /**
+     * The per-frame embedding tensor, when the graph exposes one.
+     *
+     * Flattened row-major [frames, dim], matching [embeddingShape].
+     * Null when no output classified as an embedding - the caller
+     * must FAIL on null rather than substituting another tensor.
+     *
+     * Carried separately from [output] so the existing field keeps
+     * its original meaning and no past measurement changes.
+     */
+    val embeddingFrames: FloatArray? = null,
+    val embeddingShape: List<Long> = emptyList(),
+    val embeddingOutputIndex: Int? = null,
 ) {
     // Data classes with an array member need these by hand; the
     // generated versions compare references, which would make two
@@ -265,7 +279,11 @@ data class InferenceResult(
             modelId == other.modelId &&
             selectedOutputName == other.selectedOutputName &&
             selectedOutputIndex == other.selectedOutputIndex &&
-            outputs == other.outputs
+            outputs == other.outputs &&
+            embeddingShape == other.embeddingShape &&
+            embeddingOutputIndex == other.embeddingOutputIndex &&
+            (embeddingFrames?.contentEquals(other.embeddingFrames)
+                ?: (other.embeddingFrames == null))
     }
 
     override fun hashCode(): Int {
@@ -277,6 +295,9 @@ data class InferenceResult(
         result = 31 * result + selectedOutputName.hashCode()
         result = 31 * result + selectedOutputIndex
         result = 31 * result + outputs.hashCode()
+        result = 31 * result + (embeddingFrames?.contentHashCode() ?: 0)
+        result = 31 * result + embeddingShape.hashCode()
+        result = 31 * result + (embeddingOutputIndex ?: -1)
         return result
     }
 }

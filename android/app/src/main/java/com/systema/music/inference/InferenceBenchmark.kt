@@ -298,6 +298,14 @@ class InferenceBenchmark(
         runtimeId: String,
         modelId: String,
         tracks: List<TrackRef>,
+        /**
+         * Pooling used to build a track-level vector (Phase 16A).
+         *
+         * Selectable rather than hardcoded so strategies can be
+         * compared later without touching the runtime. MEAN is the
+         * default BASELINE - not a claim that it is the best choice.
+         */
+        aggregationStrategy: AggregationStrategy = AggregationStrategy.MEAN,
     ): RealAudioReport = mutex.withLock {
         if (tracks.isEmpty()) {
             throw InferenceException(
@@ -340,7 +348,9 @@ class InferenceBenchmark(
             val loaded = rt.loadModel(descriptor)
 
             for (track in tracks) {
-                rows.add(measureOne(track, decoder, config, descriptor, rt))
+                rows.add(
+                    measureOne(track, decoder, config, descriptor, rt, aggregationStrategy),
+                )
             }
 
             return@withLock RealAudioReport(
@@ -352,6 +362,7 @@ class InferenceBenchmark(
                 coldLoadMs = loaded.loadMs,
                 measurements = rows,
                 environment = env,
+                aggregationStrategy = aggregationStrategy,
             )
         } finally {
             runCatching { rt.unloadModel() }
@@ -365,6 +376,7 @@ class InferenceBenchmark(
         config: AudioAnalysisConfig,
         descriptor: ModelDescriptor,
         rt: InferenceRuntime,
+        aggregationStrategy: AggregationStrategy,
     ): TrackMeasurement {
         // ---- DECODE ----
         val decodeStartNs = System.nanoTime()
@@ -429,6 +441,45 @@ class InferenceBenchmark(
             )
         }
 
+        // ---- TRACK-LEVEL AGGREGATION (Phase 16A) ----
+        // Runs AFTER inference, outside every existing timing
+        // boundary. inferenceMs stays session.run() alone and totalMs
+        // keeps its original formula, so numbers from earlier runs
+        // remain directly comparable to these.
+        //
+        // A failure here does NOT fail the track: the timings are
+        // still valid measurements of the model. The reason is
+        // recorded instead, so an absent embedding is visible rather
+        // than silently missing.
+        var trackEmbedding: TrackEmbedding? = null
+        var aggregationError: String? = null
+
+        val embFrames = result.embeddingFrames
+        val embShape = result.embeddingShape
+        if (embFrames == null) {
+            aggregationError = "No output of this model classified as a frame " +
+                "embedding, so no track embedding was produced. Not substituting " +
+                "another tensor: for YAMNet, output_0 is 521-wide AudioSet class " +
+                "scores, and pooling those would yield a confident nonsense vector."
+        } else if (embShape.size != 2 || embShape.any { it <= 0 }) {
+            aggregationError = "The embedding tensor has shape $embShape, which is " +
+                "not a resolved [frames, dim] matrix. Refusing to guess its layout."
+        } else {
+            try {
+                trackEmbedding = FrameEmbeddingAggregator.aggregate(
+                    frames = embFrames,
+                    frameCount = embShape[0].toInt(),
+                    dimension = embShape[1].toInt(),
+                    strategy = aggregationStrategy,
+                    normalise = true,
+                )
+            } catch (e: InferenceException) {
+                aggregationError = e.message
+            } catch (e: Throwable) {
+                aggregationError = e.message ?: "Aggregation failed."
+            }
+        }
+
         val totalMs = decodeMs + prepared.preparationMs + result.inferenceMs + result.tensorMs
 
         return TrackMeasurement(
@@ -457,6 +508,11 @@ class InferenceBenchmark(
                 selectedElementCount = result.output.size,
             ),
             outputPreview = result.output.take(8).toFloatArray(),
+            // Reported alongside, never folded into totalMs - see the
+            // comment above the aggregation block.
+            aggregationMs = trackEmbedding?.aggregationMs,
+            trackEmbedding = trackEmbedding,
+            aggregationError = aggregationError,
             sourceSampleRate = info.sourceSampleRate,
             sourceChannels = info.channels,
             errorCode = null,
@@ -511,9 +567,12 @@ data class RealAudioReport(
     val coldLoadMs: Double,
     val measurements: List<TrackMeasurement>,
     val environment: EnvironmentSnapshot,
+    /** Which pooling produced the track embeddings in this run. */
+    val aggregationStrategy: AggregationStrategy = AggregationStrategy.MEAN,
 ) {
     fun toJs(): JSObject = JSObject().apply {
         put("runtimeId", runtimeId)
+        put("aggregationStrategy", aggregationStrategy.name)
         put("runtimeLabel", runtimeLabel)
         put("modelId", modelId)
         put("modelVersion", modelVersion)
@@ -545,6 +604,16 @@ data class TrackMeasurement(
     val outputDimension: Int?,
     /** Full description of every output, or null when unavailable. */
     val outputContract: OutputContractReport? = null,
+    /**
+     * Pooling + normalisation cost. NOT part of [totalMs].
+     *
+     * Kept outside the total on purpose: totalMs must keep meaning
+     * what it meant in earlier runs, or the two cannot be compared.
+     */
+    val aggregationMs: Double? = null,
+    val trackEmbedding: TrackEmbedding? = null,
+    /** Why no track embedding exists, when one could not be built. */
+    val aggregationError: String? = null,
     val outputPreview: FloatArray?,
     val sourceSampleRate: Int?,
     val sourceChannels: Int?,
@@ -558,6 +627,7 @@ data class TrackMeasurement(
             inferenceMs = null, tensorMs = null, totalMs = null,
             audioDurationMs = null, rtf = null,
             outputDimension = null, outputContract = null, outputPreview = null,
+            aggregationMs = null, trackEmbedding = null, aggregationError = null,
             sourceSampleRate = null, sourceChannels = null,
             errorCode = code, errorMessage = message,
         )
@@ -576,6 +646,9 @@ data class TrackMeasurement(
         rtf?.let { put("rtf", it) }
         outputDimension?.let { put("outputDimension", it) }
         outputContract?.let { put("outputContract", it.toJs()) }
+        aggregationMs?.let { put("aggregationMs", it) }
+        trackEmbedding?.let { put("trackEmbedding", FrameEmbeddingBridge.toJs(it)) }
+        aggregationError?.let { put("aggregationError", it) }
         outputPreview?.let { p ->
             put("outputPreview", JSArray().apply { p.forEach { put(it.toDouble()) } })
         }

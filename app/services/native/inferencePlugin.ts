@@ -384,6 +384,45 @@ export interface OutputContractReport {
   aggregationRequired: boolean
 }
 
+/**
+ * How per-frame embeddings are collapsed into one track vector.
+ *
+ * MEAN is the default BASELINE. That is a starting point, not a
+ * finding — no evaluation has compared these on real music.
+ */
+export type AggregationStrategy = 'MEAN' | 'MEAN_STD'
+
+export type Normalisation = 'L2' | 'NONE'
+
+/**
+ * One track-level embedding.
+ *
+ * The provenance fields are load-bearing: two vectors can only be
+ * compared if they share a strategy and a normalisation, and
+ * `degenerate` marks the ones that must not be compared at all.
+ */
+export interface TrackEmbedding {
+  /** Width of the vector. For MEAN_STD this is 2x the input width. */
+  dimension: number
+  inputFrameCount: number
+  inputDimension: number
+  strategy: AggregationStrategy
+  normalisation: Normalisation
+  /** L2 norm BEFORE normalising. Zero means a degenerate input. */
+  preNormL2: number
+  /**
+   * True when the pooled vector had zero magnitude. Such a vector is
+   * all zeros rather than NaN, and cosine against it is undefined —
+   * not "zero similarity".
+   */
+  degenerate: boolean
+  aggregationMs: number
+  /** Self-check that the unit-length property actually holds. */
+  unitLength: boolean
+  /** First few components, for eyeballing. Not the full vector. */
+  preview: string
+}
+
 /** Per-track timings from a real-audio run (§11). */
 export interface TrackMeasurement {
   trackId: string
@@ -408,6 +447,16 @@ export interface TrackMeasurement {
    */
   outputDimension?: number
   outputContract?: OutputContractReport
+  /**
+   * Pooling + normalisation cost. NOT included in `totalMs`.
+   *
+   * Deliberately outside the total so figures from runs before
+   * aggregation existed remain directly comparable.
+   */
+  aggregationMs?: number
+  trackEmbedding?: TrackEmbedding
+  /** Why no track embedding exists. Present only on failure. */
+  aggregationError?: string
   /** First few output values, for sanity-checking. Not the embedding. */
   outputPreview?: number[]
   sourceSampleRate?: number
@@ -426,6 +475,8 @@ export interface RealAudioResult {
   coldLoadMs: number
   measurements: TrackMeasurement[]
   environment: InferenceEnvironment
+  /** Which pooling produced the track embeddings in this run. */
+  aggregationStrategy?: AggregationStrategy
 }
 
 export interface InferencePlugin {
@@ -444,6 +495,8 @@ export interface InferencePlugin {
     runtimeId: RuntimeId
     modelId: string
     tracks: Array<{ trackId: string, uri: string }>
+    /** Defaults to MEAN. An unknown value is rejected, not defaulted. */
+    aggregationStrategy?: AggregationStrategy
   }): Promise<RealAudioResult>
   /**
    * Repeated load -> infer -> unload cycles with memory sampled at

@@ -386,3 +386,155 @@ audit.
 | Diagnostics render on device | **NOT VERIFIED ON HARDWARE — retest required** |
 | Kotlin compiles | **NOT VERIFIED — no JDK installable** |
 | Real `yamnet.onnx` re-executed | **NO — model hosts unreachable here** |
+
+---
+
+## 6. Phase 16A — track-level aggregation
+
+Section 5.6 said aggregation was required but not implemented. This section
+records implementing it.
+
+```
+audio → YAMNet → output_1 [N, 1024] → pooling → [1024] → L2 norm → track embedding
+```
+
+### 6.1 The contract
+
+| Stage | Value |
+|---|---|
+| input | `N × D` per-frame embeddings, float32, row-major |
+| pooling | `MEAN` (default) or `MEAN_STD` |
+| output | `D` for MEAN, **`2D` for MEAN_STD** |
+| normalisation | L2, tolerance `1e-4` |
+| zero input | all-zero vector, `degenerate = true`, **no epsilon** |
+| NaN / Inf | **rejected before pooling**, with a count |
+| shape mismatch | **rejected**, never reshaped |
+
+`FrameEmbeddingAggregator` takes `N` and `D` as parameters and contains no
+model name and no literal `1024`. It also imports nothing from Capacitor,
+Android or ONNX — which is what makes the arithmetic executable on a plain JVM
+instead of only reviewable in a diff. The bridge-facing glue lives separately in
+`FrameEmbeddingBridge.kt`.
+
+### 6.2 Which tensor, and what happens when it is absent
+
+The embedding is located by **shape**, through `OutputContract.classify`, and
+accepted only for the roles `FRAME_EMBEDDINGS` or `SINGLE_EMBEDDING`. The model
+name is never consulted: a file called `yamnet.onnx` may contain any graph, and
+name-based identification is how the original defect became possible.
+
+If no output classifies as an embedding, the run records an
+`aggregationError` and produces **no** track embedding. It does **not** fall
+back to `output_0`. Pooling 521-wide AudioSet class scores would yield a
+well-formed, confident, meaningless 1024-d vector — the failure mode that is
+hardest to detect downstream.
+
+A failed aggregation does **not** fail the track. The decode, preprocessing and
+inference timings are still valid measurements of the model, so they are kept
+and the reason for the missing embedding is reported alongside them.
+
+### 6.3 Timings
+
+Aggregation runs **after** `infer()` returns, outside every pre-existing timing
+boundary.
+
+| Timing | Meaning | Changed? |
+|---|---|---|
+| `decodeMs` | PCM decode | unchanged |
+| `preprocessingMs` | resample / normalise | unchanged |
+| `inferenceMs` | `session.run()` alone | unchanged |
+| `tensorMs` | tensor construction | unchanged |
+| `totalMs` | the four above, same formula | unchanged |
+| **`aggregationMs`** | pooling + L2 normalisation | **new** |
+
+`aggregationMs` is reported but **deliberately excluded from `totalMs`**, so
+numbers measured before aggregation existed remain directly comparable. No
+previous measurement is retroactively reinterpreted.
+
+### 6.4 MEAN_STD is not the baseline
+
+`MEAN_STD` concatenates the mean with the population standard deviation, so a
+1024-wide input produces a **2048-wide** output. That is stated in the enum, in
+the aggregator, in the JSON payload and in the UI. A 2048-d vector cannot be
+compared against a 1024-d one, and quietly changing the width would silently
+invalidate anything built on the earlier contract.
+
+Population (`N`), not sample (`N−1`): this describes the frames of *this* track,
+not an estimate of a wider population. A single frame therefore has a deviation
+of exactly zero rather than a divide-by-zero NaN. Variance uses the two-pass
+form; the one-pass shortcut cancels catastrophically when the mean is large
+relative to the spread, which is a real risk for embedding activations.
+
+### 6.5 Why a zero vector stays zero
+
+A zero vector has no direction, so it has no unit form. Three options exist and
+only one is honest:
+
+| Option | Result |
+|---|---|
+| divide anyway | `NaN`, silently corrupting everything downstream |
+| add an epsilon | a near-zero vector that *looks* normalised but is not |
+| return zeros | stays zero, and the caller is told |
+
+The aggregator returns the zero vector unchanged and sets `degenerate = true`.
+**No epsilon is added anywhere.** Such a vector must not be used for similarity:
+cosine against it is *undefined*, not "zero similarity".
+
+### 6.6 Memory
+
+Mean pooling allocates exactly one `DoubleArray(D)` accumulator and one
+`FloatArray(D)` output, and walks the input once. The `N × 1024` tensor is never
+duplicated. When the embedding happens to be output index 0, the already-read
+buffer is reused rather than copying ~1.6 MB a second time. The embedding is
+read inside the scope that closes the ONNX result, so no native buffer, tensor
+or session outlives the run.
+
+### 6.7 Verification status
+
+| Claim | Status |
+|---|---|
+| Aggregation arithmetic is correct | **TEST PASSED** — 97/97, executed on a JVM |
+| `[[1,2],[3,4]] → [2,3]` | **TEST PASSED** (hand-checkable) |
+| `[[3,4]] → [3,4] → [0.6,0.8]` | **TEST PASSED** (hand-checkable) |
+| L2 norm ≈ 1 at D = 2/64/512/1024 | **TEST PASSED** |
+| Bit-identical across repeated runs | **TEST PASSED** |
+| `2 × 1024` and `401 × 1024` both → 1024 | **TEST PASSED** |
+| Zero vector gives zeros, never NaN | **TEST PASSED** |
+| NaN / +Inf / −Inf rejected pre-pooling | **TEST PASSED** |
+| A `[401,521]` buffer claimed as `[401,1024]` is rejected | **TEST PASSED** |
+| CLASS_SCORES / FRAME_EMBEDDINGS / TRACK_EMBEDDING are distinct | **TEST PASSED** (integration) |
+| Wiring: tensor choice, timings, labelling | **TEST PASSED** — 111/111, static audit |
+| Phase 15 contract suite still passes | **TEST PASSED** — 67/67 |
+| Whole repo suite | **TEST PASSED** — 823 assertions, 0 failed |
+| Nuxt build / static generate / `cap sync` | **PASSED** |
+| Kotlin type-checks against stub Android+ONNX APIs | **PASSED** (local shims, *not* a Gradle build) |
+| **Android app compiles via Gradle** | **NOT RUN** — no Android SDK here |
+| **Runs on a device** | **NOT VERIFIED — no hardware run performed** |
+| **Embedding quality** | **NOT EVALUATED** |
+| **Production model** | **NOT SELECTED** |
+
+Mean pooling is the **baseline**. Nothing here shows it is the best pooling for
+music similarity, and no claim to that effect is made.
+
+### 6.8 Manual device verification
+
+Not yet performed. To perform it:
+
+1. Build and install the debug APK (`./gradlew :app:installDebug`).
+2. Settings → **AI BENCHMARK LAB** → **ONNX RUNTIME LAB**.
+3. Import `yamnet.onnx` via the in-app importer (Phase 16.1).
+4. Select **one** track and run it.
+5. Expand **OUTPUT CONTRACT** and confirm:
+   - `output_1` is `[N, 1024]`, role `FRAME_EMBEDDINGS`;
+   - `output_0` is `[N, 521]`, role `CLASS_SCORES`, and is the *selected* output;
+   - the raw element count is labelled a **flattened count**, not a dimension.
+6. In the **TRACK EMBEDDING** block, confirm:
+   - aggregation = `MEAN`;
+   - frame embedding `N × 1024` → track embedding **1024**;
+   - normalization = `L2`, unit length = **YES**;
+   - the preview contains no `NaN` or `Infinity`;
+   - `aggregation time` is present and small relative to `inferenceMs`.
+7. Confirm `inferenceMs`, `totalMs` and `rtf` are of the same order as the
+   pre-aggregation run — aggregation must not have moved them.
+
+Record the numbers. One run is a measurement, not a performance result.

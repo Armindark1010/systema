@@ -292,6 +292,43 @@ class OnnxInferenceRuntime : InferenceRuntime {
                     // is what makes "401 x 521 = 208921" checkable.
                     val allOutputs = readResultShapes(active, results)
 
+                    // ---- EMBEDDING TENSOR EXTRACTION ----
+                    // Read IN ADDITION to `first`, never instead of
+                    // it: the existing `output` field keeps meaning
+                    // exactly what it meant before, so no previous
+                    // measurement is retroactively reinterpreted.
+                    //
+                    // Identified by SHAPE via OutputContract, never by
+                    // model name. Reading it here is mandatory because
+                    // `results` is closed in the finally block below -
+                    // the native buffers do not outlive this scope,
+                    // which is what keeps the load/infer/unload memory
+                    // lifecycle intact.
+                    val embeddingIndex = allOutputs.indexOfFirst {
+                        val role = OutputContract.classify(it)
+                        role == OutputRole.FRAME_EMBEDDINGS ||
+                            role == OutputRole.SINGLE_EMBEDDING
+                    }
+                    var embeddingFrames: FloatArray? = null
+                    var embeddingShape: List<Long> = emptyList()
+                    if (embeddingIndex >= 0) {
+                        embeddingShape = allOutputs[embeddingIndex].shape
+                        embeddingFrames = if (embeddingIndex == 0) {
+                            // Already read; do not copy 1.6 MB twice.
+                            flat
+                        } else {
+                            try {
+                                flattenFloats(results.get(embeddingIndex).value)
+                            } catch (t: Throwable) {
+                                // A missing embedding is reported as
+                                // absent, not faked. The caller fails
+                                // loudly rather than pooling nothing.
+                                Log.w(TAG, "Could not read embedding output", t)
+                                null
+                            }
+                        }
+                    }
+
                     val readMs = (System.nanoTime() - readStartNs) / 1_000_000.0
 
                     InferenceResult(
@@ -303,6 +340,9 @@ class OnnxInferenceRuntime : InferenceRuntime {
                         selectedOutputName = active.outputNames.firstOrNull() ?: "",
                         selectedOutputIndex = 0,
                         outputs = allOutputs,
+                        embeddingFrames = embeddingFrames,
+                        embeddingShape = embeddingShape,
+                        embeddingOutputIndex = embeddingIndex.takeIf { it >= 0 },
                     )
                 } catch (e: InferenceException) {
                     throw e

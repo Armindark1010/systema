@@ -248,9 +248,30 @@ class InferencePlugin : Plugin() {
             return
         }
 
+        // Optional. Defaults to the MEAN baseline; an unrecognised
+        // value is rejected rather than quietly falling back, so a
+        // typo can never produce a run labelled with the wrong
+        // strategy.
+        val strategyName = call.getString("aggregationStrategy")
+        val strategy = if (strategyName.isNullOrBlank()) {
+            AggregationStrategy.MEAN
+        } else {
+            runCatching { AggregationStrategy.valueOf(strategyName) }.getOrNull()
+                ?: run {
+                    call.reject(
+                        "Unknown aggregation strategy '$strategyName'. Expected one " +
+                            "of: ${AggregationStrategy.entries.joinToString { it.name }}",
+                        InferenceErrorCode.INPUT_SHAPE_MISMATCH.name,
+                    )
+                    return
+                }
+        }
+
         scope.launch {
             try {
-                call.resolve(benchmark.runRealAudio(runtimeId, modelId, tracks).toJs())
+                call.resolve(
+                    benchmark.runRealAudio(runtimeId, modelId, tracks, strategy).toJs(),
+                )
             } catch (e: InferenceException) {
                 call.reject(e.message ?: "The benchmark failed.", e.code.name)
             } catch (e: Throwable) {
