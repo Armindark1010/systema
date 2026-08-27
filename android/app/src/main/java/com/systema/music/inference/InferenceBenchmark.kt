@@ -445,7 +445,17 @@ class InferenceBenchmark(
             totalMs = totalMs,
             audioDurationMs = audioDurationMs,
             rtf = if (audioDurationMs > 0) totalMs / audioDurationMs else null,
+            // NOT an embedding dimension. This is the flattened
+            // element count of whichever output the runtime read, and
+            // for a framed model it scales with track length. The
+            // audit that renamed the UI label found it reporting
+            // 401 frames x 521 AudioSet classes = 208921 for YAMNet.
             outputDimension = result.output.size,
+            outputContract = OutputContract.describe(
+                outputs = result.outputs,
+                selectedIndex = result.selectedOutputIndex,
+                selectedElementCount = result.output.size,
+            ),
             outputPreview = result.output.take(8).toFloatArray(),
             sourceSampleRate = info.sourceSampleRate,
             sourceChannels = info.channels,
@@ -525,7 +535,16 @@ data class TrackMeasurement(
     val totalMs: Double?,
     val audioDurationMs: Double?,
     val rtf: Double?,
+    /**
+     * Flattened element count of the output that was read.
+     *
+     * Named `outputDimension` for wire compatibility, but it is NOT an
+     * embedding dimension and the UI must not label it as one. See
+     * [outputContract] for what the number actually means.
+     */
     val outputDimension: Int?,
+    /** Full description of every output, or null when unavailable. */
+    val outputContract: OutputContractReport? = null,
     val outputPreview: FloatArray?,
     val sourceSampleRate: Int?,
     val sourceChannels: Int?,
@@ -538,7 +557,7 @@ data class TrackMeasurement(
             decodeMs = null, dspMs = null, preprocessingMs = null,
             inferenceMs = null, tensorMs = null, totalMs = null,
             audioDurationMs = null, rtf = null,
-            outputDimension = null, outputPreview = null,
+            outputDimension = null, outputContract = null, outputPreview = null,
             sourceSampleRate = null, sourceChannels = null,
             errorCode = code, errorMessage = message,
         )
@@ -556,6 +575,7 @@ data class TrackMeasurement(
         audioDurationMs?.let { put("audioDurationMs", it) }
         rtf?.let { put("rtf", it) }
         outputDimension?.let { put("outputDimension", it) }
+        outputContract?.let { put("outputContract", it.toJs()) }
         outputPreview?.let { p ->
             put("outputPreview", JSArray().apply { p.forEach { put(it.toDouble()) } })
         }

@@ -329,6 +329,61 @@ export interface CandidateMatrix {
   note: string
 }
 
+/**
+ * What a tensor appears to be, judged from its resolved shape.
+ *
+ * These describe what the tensor LOOKS like; none asserts an
+ * architecture. UNKNOWN is a first-class outcome, never a shrug that
+ * defaults to "embedding".
+ */
+export type OutputRole =
+  | 'CLASS_SCORES'
+  | 'FRAME_EMBEDDINGS'
+  | 'SINGLE_EMBEDDING'
+  | 'LOG_MEL_SPECTROGRAM'
+  | 'UNKNOWN'
+
+export interface DescribedOutput {
+  index: number
+  name: string
+  /** RESOLVED shape for this run, so dynamic dims are real numbers. */
+  shape: number[]
+  type: string
+  elementCount: number | null
+  role: OutputRole
+  meaning: string
+  /** True for the one output the runtime actually read. */
+  selected: boolean
+}
+
+/**
+ * The full output contract of one inference.
+ *
+ * Exists because "out dim 208921" was displayed with no way to tell
+ * that it was a flattened class-score tensor rather than an
+ * embedding. Every field here is derived from shapes the session
+ * returned.
+ */
+export interface OutputContractReport {
+  outputs: DescribedOutput[]
+  selectedIndex: number
+  selectedName: string | null
+  selectedRole: OutputRole
+  embeddingOutputIndex: number | null
+  embeddingOutputName: string | null
+  /** Resolved leading dimension of the framed output. */
+  frameCount: number | null
+  /** Width of ONE frame's embedding, not the flattened total. */
+  embeddingDimension: number | null
+  rawOutputElements: number
+  currentOutputDimension: number
+  /** True only when the selected output really is a single vector. */
+  isSingleEmbeddingVector: boolean
+  explanation: string
+  /** True when frames must be pooled to get a track-level vector. */
+  aggregationRequired: boolean
+}
+
 /** Per-track timings from a real-audio run (§11). */
 export interface TrackMeasurement {
   trackId: string
@@ -343,7 +398,16 @@ export interface TrackMeasurement {
   totalMs?: number
   audioDurationMs?: number
   rtf?: number
+  /**
+   * Flattened element count of the output that was READ.
+   *
+   * NOT an embedding dimension. For a framed model this scales with
+   * track length: the YAMNet audit found it reporting 401 frames x
+   * 521 AudioSet classes = 208921. Label it "raw output elements" in
+   * any UI, and use `outputContract` to say what it means.
+   */
   outputDimension?: number
+  outputContract?: OutputContractReport
   /** First few output values, for sanity-checking. Not the embedding. */
   outputPreview?: number[]
   sourceSampleRate?: number

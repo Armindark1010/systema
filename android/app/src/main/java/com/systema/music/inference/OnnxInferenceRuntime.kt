@@ -257,6 +257,26 @@ class OnnxInferenceRuntime : InferenceRuntime {
                     val inferenceMs = (System.nanoTime() - runStartNs) / 1_000_000.0
 
                     val readStartNs = System.nanoTime()
+
+                    // WHICH OUTPUT THIS READS, AND WHY IT MATTERS
+                    // -------------------------------------------
+                    // `results.get(0)` is the FIRST output the graph
+                    // declares, which for a single-output model is the
+                    // only sensible choice. For a multi-output model it
+                    // is an arbitrary one.
+                    //
+                    // The YAMNet audit made that concrete: its graph
+                    // declares output_0 [frames,521] AudioSet class
+                    // scores, output_1 [frames,1024] embeddings and
+                    // output_2 [mel_frames,64] log-mel. Index 0 is the
+                    // CLASS SCORES, so a benchmark reading it was never
+                    // touching the embeddings at all.
+                    //
+                    // The selection is left unchanged here on purpose:
+                    // this release audits and reports, it does not
+                    // silently switch which tensor a measurement means.
+                    // What IS new is that every output is now described,
+                    // so the choice is visible instead of implicit.
                     val first = results.get(0)
                     val flat = flattenFloats(first.value)
                         ?: throw InferenceException(
@@ -265,6 +285,13 @@ class OnnxInferenceRuntime : InferenceRuntime {
                                 "cannot read as float32 (${first.value?.javaClass?.name}).",
                         )
                     val outShape = (first.info as? TensorInfo)?.shape?.toList() ?: emptyList()
+
+                    // Every output's ACTUAL runtime shape, read from the
+                    // result. Declared shapes carry -1 for dynamic dims;
+                    // these are resolved against the real input, which
+                    // is what makes "401 x 521 = 208921" checkable.
+                    val allOutputs = readResultShapes(active, results)
+
                     val readMs = (System.nanoTime() - readStartNs) / 1_000_000.0
 
                     InferenceResult(
@@ -273,6 +300,9 @@ class OnnxInferenceRuntime : InferenceRuntime {
                         inferenceMs = inferenceMs,
                         tensorMs = tensorMs + readMs,
                         modelId = model.modelId,
+                        selectedOutputName = active.outputNames.firstOrNull() ?: "",
+                        selectedOutputIndex = 0,
+                        outputs = allOutputs,
                     )
                 } catch (e: InferenceException) {
                     throw e
@@ -318,6 +348,44 @@ class OnnxInferenceRuntime : InferenceRuntime {
             // library; closing it would break every later load, so it
             // is deliberately left alone.
         }
+    }
+
+    /**
+     * The RESOLVED shape of every output of one run.
+     *
+     * Distinct from the declared signature: a declared shape says
+     * [-1, 521], while this says [401, 521] for the audio that was
+     * actually fed in. Only the resolved form can explain an element
+     * count, which is the whole point of the output-contract
+     * diagnostics.
+     *
+     * Degrades per-output rather than failing: an output whose shape
+     * cannot be read is reported with an empty shape, which the UI
+     * renders as UNKNOWN. Losing one description must not fail an
+     * otherwise valid inference.
+     */
+    private fun readResultShapes(
+        session: OrtSession,
+        results: OrtSession.Result,
+    ): List<TensorSignature> = try {
+        val names = session.outputNames.toList()
+        names.mapIndexed { index, name ->
+            val shape = try {
+                (results.get(index).info as? TensorInfo)?.shape?.toList() ?: emptyList()
+            } catch (t: Throwable) {
+                Log.w(TAG, "Could not read runtime shape for output $name", t)
+                emptyList()
+            }
+            val type = try {
+                (results.get(index).info as? TensorInfo)?.type?.name ?: "UNKNOWN"
+            } catch (t: Throwable) {
+                "UNKNOWN"
+            }
+            TensorSignature(name = name, shape = shape, type = type)
+        }
+    } catch (t: Throwable) {
+        Log.w(TAG, "Could not enumerate result shapes", t)
+        emptyList()
     }
 
     /**

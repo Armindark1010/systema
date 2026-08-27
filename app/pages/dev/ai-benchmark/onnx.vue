@@ -42,6 +42,7 @@ import {
   RUNTIME_REFERENCE,
   type RuntimeId,
   type InferenceCapabilities,
+  type OutputContractReport,
   type RealAudioResult,
   type TestModelResult,
 } from '~/services/native/inferencePlugin'
@@ -223,6 +224,39 @@ const summary = computed(() => {
 
 function fmt(v: number | null | undefined, digits = 2): string {
   return v === null || v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(digits)
+}
+
+/**
+ * Green only when the run actually read the embedding tensor.
+ *
+ * For YAMNet it will be amber: the runtime reads output_0 (class
+ * scores) while the embeddings sit in output_1, unread.
+ */
+/**
+ * Raised when the tensor that was read is not the embedding.
+ *
+ * This is the YAMNet case: the timings are real, but they describe a
+ * run that produced class scores. Presenting that without comment is
+ * exactly how "out dim 208921" came to look like an embedding width.
+ */
+const contractWarning = computed(() => {
+  const withContract = okRows.value.filter(m => m.outputContract)
+  if (!withContract.length) return null
+  const first = withContract[0]!.outputContract!
+  if (first.embeddingOutputName === null) return null
+  if (first.embeddingOutputIndex === first.selectedIndex) return null
+  return `The benchmark read '${first.selectedName}' (${first.selectedRole}), not ` +
+    `the embedding tensor '${first.embeddingOutputName}'. The timings are real, ` +
+    `but the ${first.rawOutputElements} reported elements are a flattened ` +
+    `${first.selectedRole.toLowerCase().replace('_', ' ')} tensor. Output ` +
+    `selection has deliberately NOT been changed — this is an audit.`
+})
+
+function embeddingTone(contract: OutputContractReport): string {
+  if (contract.embeddingOutputName === null) return 'text-fg-faint'
+  return contract.embeddingOutputIndex === contract.selectedIndex
+    ? 'text-success'
+    : 'text-warning'
 }
 
 function titleFor(trackId: string): string {
@@ -545,6 +579,14 @@ function titleFor(trackId: string): string {
           </p>
         </div>
 
+        <LabBanner
+          v-if="contractWarning"
+          tone="warning"
+          title="THIS RUN DID NOT MEASURE AN EMBEDDING"
+        >
+          {{ contractWarning }}
+        </LabBanner>
+
         <section v-if="audioResult" class="border border-line bg-surface">
           <div class="border-b border-line px-5 py-3">
             <p class="label text-fg-muted">
@@ -573,9 +615,9 @@ function titleFor(trackId: string): string {
               class="text-micro text-warning leading-relaxed"
             >
               This is the arithmetic test model, which is element-wise: it
-              emits one float per input sample, so <strong>out dim equals the
-                decoded sample count, not an embedding size</strong>. It measures
-              the pipeline, not audio understanding.
+              emits one float per input sample, so <strong>raw output elements
+                equals the decoded sample count, not an embedding size</strong>.
+              It measures the pipeline, not audio understanding.
             </p>
           </div>
 
@@ -655,8 +697,115 @@ function titleFor(trackId: string): string {
                 tensor {{ fmt(m.tensorMs, 1) }} ms ·
                 total {{ fmt(m.totalMs, 0) }} ms ·
                 rtf {{ fmt(m.rtf, 3) }} ·
-                out dim {{ m.outputDimension }}
+                raw output elements {{ m.outputDimension }}
               </p>
+
+              <!-- ---- OUTPUT CONTRACT (audit diagnostics) ---- -->
+              <!--
+                Added after "out dim 208921" was displayed for YAMNet
+                with no way to tell it was 401 frames x 521 AudioSet
+                classes rather than an embedding. Everything here is
+                read from the tensors ONNX Runtime returned.
+              -->
+              <details v-if="m.ok && m.outputContract" class="mt-2">
+                <summary class="label text-fg-muted hover:text-fg cursor-pointer t-col">
+                  OUTPUT CONTRACT ({{ m.outputContract.outputs.length }} OUTPUTS)
+                </summary>
+
+                <div class="mt-2 space-y-2 border-l border-line pl-3">
+                  <div
+                    v-for="o in m.outputContract.outputs"
+                    :key="o.name"
+                    class="space-y-0.5"
+                  >
+                    <p class="text-micro">
+                      <span class="text-fg font-bold">{{ o.name }}</span>
+                      <span
+                        v-if="o.selected"
+                        class="ml-2 label text-warning"
+                      >← READ BY THIS RUN</span>
+                    </p>
+                    <p class="text-micro text-fg-faint tnum">
+                      shape: [{{ o.shape.join(', ') }}] ·
+                      type: {{ o.type }} ·
+                      elements: {{ o.elementCount ?? 'UNKNOWN' }}
+                    </p>
+                    <p class="text-micro text-fg-muted leading-relaxed">
+                      meaning: {{ o.meaning }}
+                    </p>
+                  </div>
+
+                  <dl class="grid grid-cols-2 gap-x-4 gap-y-1 pt-1">
+                    <div>
+                      <dt class="label text-fg-muted">
+                        SELECTED OUTPUT
+                      </dt>
+                      <dd class="text-micro text-fg tnum">
+                        {{ m.outputContract.selectedName ?? 'UNKNOWN' }}
+                        ({{ m.outputContract.selectedRole }})
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="label text-fg-muted">
+                        EMBEDDING OUTPUT
+                      </dt>
+                      <dd class="text-micro tnum" :class="embeddingTone(m.outputContract)">
+                        {{ m.outputContract.embeddingOutputName ?? 'NONE FOUND' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="label text-fg-muted">
+                        FRAME COUNT
+                      </dt>
+                      <dd class="text-micro text-fg tnum">
+                        {{ m.outputContract.frameCount ?? 'UNKNOWN' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="label text-fg-muted">
+                        EMBEDDING DIMENSION
+                      </dt>
+                      <dd class="text-micro text-fg tnum">
+                        {{ m.outputContract.embeddingDimension ?? 'UNKNOWN' }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="label text-fg-muted">
+                        RAW OUTPUT ELEMENTS
+                      </dt>
+                      <dd class="text-micro text-fg tnum">
+                        {{ m.outputContract.rawOutputElements }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="label text-fg-muted">
+                        IS ONE VECTOR?
+                      </dt>
+                      <dd
+                        class="text-micro tnum"
+                        :class="m.outputContract.isSingleEmbeddingVector
+                          ? 'text-success' : 'text-warning'"
+                      >
+                        {{ m.outputContract.isSingleEmbeddingVector ? 'YES' : 'NO' }}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  <p class="text-micro text-fg-muted leading-relaxed pt-1">
+                    <span class="label text-fg-muted">EXPLANATION</span><br>
+                    {{ m.outputContract.explanation }}
+                  </p>
+
+                  <p
+                    v-if="m.outputContract.aggregationRequired"
+                    class="text-micro text-warning leading-relaxed"
+                  >
+                    POOLING REQUIRED — these are per-frame embeddings. A track-level
+                    vector needs aggregation across frames, which is NOT implemented.
+                    No pooling has been applied to this measurement.
+                  </p>
+                </div>
+              </details>
               <p v-else class="mt-1 text-micro text-fg-muted leading-relaxed">
                 {{ m.errorMessage }}
               </p>

@@ -231,6 +231,26 @@ data class InferenceResult(
      * after the fact.
      */
     val modelId: String = "",
+
+    /**
+     * Which output [output] was read from. Empty for runtimes that do
+     * not name their outputs.
+     *
+     * Recorded because a bare element count is uninterpretable
+     * without it: 208921 means nothing until you know it came from
+     * output_0 rather than output_1.
+     */
+    val selectedOutputName: String = "",
+    val selectedOutputIndex: Int = 0,
+
+    /**
+     * RESOLVED shapes of ALL outputs for this run.
+     *
+     * Not the declared signature - the declared one carries -1 for
+     * dynamic dimensions, and it is precisely the resolved dimension
+     * (the frame count) that explains an element count.
+     */
+    val outputs: List<TensorSignature> = emptyList(),
 ) {
     // Data classes with an array member need these by hand; the
     // generated versions compare references, which would make two
@@ -242,7 +262,10 @@ data class InferenceResult(
             outputShape == other.outputShape &&
             inferenceMs == other.inferenceMs &&
             tensorMs == other.tensorMs &&
-            modelId == other.modelId
+            modelId == other.modelId &&
+            selectedOutputName == other.selectedOutputName &&
+            selectedOutputIndex == other.selectedOutputIndex &&
+            outputs == other.outputs
     }
 
     override fun hashCode(): Int {
@@ -251,6 +274,9 @@ data class InferenceResult(
         result = 31 * result + inferenceMs.hashCode()
         result = 31 * result + tensorMs.hashCode()
         result = 31 * result + modelId.hashCode()
+        result = 31 * result + selectedOutputName.hashCode()
+        result = 31 * result + selectedOutputIndex
+        result = 31 * result + outputs.hashCode()
         return result
     }
 }

@@ -574,8 +574,14 @@ for (const field of ['decode', 'preprocessing', 'inference', 'tensor', 'total'])
 }
 ok('the UI states the TOTAL formula so the numbers can be checked',
   /TOTAL = decode \+ prep \+ inference \+ tensor/.test(labUi))
-ok('the UI warns that the test model\'s out dim is a sample count',
-  /out dim equals the\s*\n?\s*decoded sample count/.test(labUi))
+// Wording updated by the Phase 16.2 output-contract audit: the label
+// "out dim" was retired everywhere because it read like an embedding
+// width. The SUBSTANCE of this check is unchanged - the UI must still
+// warn that the test model's element count is a sample count.
+ok('the UI warns that the test model\'s element count is a sample count',
+  /raw output elements\s*\n?\s*equals the\s*\n?\s*decoded sample count/.test(labUi))
+ok('the retired "out dim" label is gone from the UI',
+  !/>\s*out dim|out dim \{\{/.test(labUi))
 
 // ------------------------------------------------------------
 section('13. The real-audio path uses real audio (§3)')

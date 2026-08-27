@@ -275,3 +275,114 @@ device test**, to be treated as a hypothesis:
   sanity check, not a trained benchmark.
 
 Until those exist, SYSTEMA stays in benchmark mode.
+
+---
+
+## 5. Output contract audit — explaining `out dim 208921`
+
+A device run of an imported `yamnet.onnx` on the Xiaomi 2412DPC0AG reported
+`out dim 208921`. This section explains that figure exactly and records what it
+revealed.
+
+### 5.1 The number
+
+```
+208921 = 401 × 521
+```
+
+401 and 521 are both prime, so this factorisation is **unique** — there is no
+competing explanation. Of the three declared trailing dimensions, only 521
+divides 208921 exactly:
+
+| Trailing dim | 208921 ÷ dim | Remainder |
+|---|---|---|
+| **521** | **401** | **0 — exact** |
+| 1024 | 204 | 25 |
+| 64 | 3264 | 25 |
+
+**401 is the frame count.** YAMNet frames at a 0.96 s window with a 0.48 s hop,
+so 401 frames spans `(401−1) × 0.48 + 0.96 = 192.96 s`. The reported
+`total 25058 ms ÷ rtf 0.130` implies ≈192.75 s — consistent, since an rtf
+rounded to three decimals cannot resolve a single 0.48 s frame.
+
+### 5.2 Output meanings
+
+Read from the session, classified by shape:
+
+| Output | Runtime shape | Elements | Meaning |
+|---|---|---|---|
+| `output_0` | `[401, 521]` | **208,921** | Per-frame **AudioSet class scores**. 521 is the published AudioSet ontology size. **Not an embedding.** |
+| `output_1` | `[401, 1024]` | 410,624 | Per-frame **embeddings**. This is the tensor a similarity system needs. |
+| `output_2` | `[19296, 64]` | 1,234,944 | **Log-mel spectrogram**, computed *inside* the graph. Its presence confirms the mel front end is in-graph, so raw-waveform input is correct. |
+
+### 5.3 The code path
+
+```
+OnnxInferenceRuntime.infer()
+  results = active.run(...)
+  val first = results.get(0)          ← index 0 = output_0 = CLASS SCORES
+  val flat  = flattenFloats(first)    ← [401,521] → FloatArray(208921)
+InferenceBenchmark.measureOne()
+  outputDimension = result.output.size ← 208921
+onnx.vue
+  "out dim {{ m.outputDimension }}"    ← displayed as if a dimension
+```
+
+### 5.4 The finding
+
+**Worse than suspected.** The concern was that frame embeddings were being
+flattened into one giant vector. In fact **the embeddings were never read at
+all**. `results.get(0)` returns `output_0`, so the benchmark measured the
+class-score tensor. The 1024-d embeddings in `output_1` were computed, thrown
+away, and never appeared in any measurement.
+
+The timings remain valid — the full graph ran, so inference cost is real. Only
+the *output figure* was misattributed.
+
+Two distinct defects:
+
+1. **Wrong tensor selected.** `results.get(0)` is arbitrary for a multi-output
+   graph.
+2. **A flattened element count labelled as a dimension.** `out dim` scales with
+   track length and ontology size; it never described embedding width.
+
+### 5.5 What changed
+
+Diagnostics only. **Output selection is deliberately unchanged** — switching
+tensors would retroactively alter what previous measurements meant.
+
+- `OutputContract.kt` — classifies each output by **shape**, never by model
+  name. Unrecognised shapes are `UNKNOWN`, never defaulted to "embedding".
+- `LoadedModelInfo`/`InferenceResult` carry all resolved output shapes plus the
+  name and index of the tensor actually read.
+- The UI label `out dim` is retired in favour of **`raw output elements`**, with
+  an expandable `OUTPUT CONTRACT` panel and a banner when the read tensor is not
+  the embedding.
+
+### 5.6 Is track-level aggregation required?
+
+**Yes — but not yet, and not silently.** The correct pipeline is:
+
+```
+audio → 16 kHz mono waveform → YAMNet → N × 1024 per-frame embeddings
+      → pooling → ONE 1024-d track embedding
+```
+
+Aggregation is **not implemented** and was not implemented here; the audit only
+makes its absence visible (`aggregationRequired: true`). Choosing a pooling
+strategy — mean, max, or mean+std — is a decision with real consequences for
+similarity quality and must be made deliberately, not as a side effect of an
+audit.
+
+### 5.7 Verification status
+
+| Claim | Status |
+|---|---|
+| 208921 = 401 × 521, uniquely | **PROVEN** (closed-form arithmetic) |
+| `results.get(0)` returns `output_0` | **PROVEN** (live ONNX Runtime, YAMNet-shaped stand-in) |
+| Flattened `output_0` = 208921 for a 192.96 s track | **REPRODUCED EXACTLY** |
+| Embeddings are `output_1`, unread | **PROVEN** |
+| Shape-based classification is correct | **TEST PASSED** (23/23 + 73/73) |
+| Diagnostics render on device | **NOT VERIFIED ON HARDWARE — retest required** |
+| Kotlin compiles | **NOT VERIFIED — no JDK installable** |
+| Real `yamnet.onnx` re-executed | **NO — model hosts unreachable here** |
