@@ -25,6 +25,8 @@ export interface ReportClassStats {
   p25?: number | null
   p75?: number | null
   stdDev?: number | null
+  /** True when the class is too small for its spread to be relied on. */
+  insufficient?: boolean
 }
 
 export interface ReportPairRow {
@@ -33,6 +35,36 @@ export interface ReportPairRow {
   trackB: string
   label: string
   cosine?: number | null
+  /** The existing evaluation's per-pair CONSISTENT / INCONSISTENT call. */
+  outcome?: string
+}
+
+/** Rank-based ordering detail, straight from the device. */
+export interface ReportSeparationDetail {
+  sameVsDifferent?: unknown
+  similarVsDifferent?: unknown
+  sameVsSimilar?: unknown
+  rationale?: string | null
+}
+
+export interface ReportConsistency {
+  consistent: number
+  inconsistent: number
+  notScored: number
+  scored: number
+  consistentPercent: number | null
+  inconsistentPercent: number | null
+}
+
+export interface ReportIntegrity {
+  ok: boolean
+  scoredPairCount: number
+  labelledPairCount: number
+  duplicatePairIds: string[]
+  malformedPairs: string[]
+  selfPairs: string[]
+  unmatched: string[]
+  issues: string[]
 }
 
 export interface ReportMemory {
@@ -70,6 +102,9 @@ export interface EvaluationReportInput {
   warnings?: string[]
   blockers?: string[]
   nextAction?: string | null
+  separationDetail?: ReportSeparationDetail
+  consistency?: ReportConsistency
+  integrity?: ReportIntegrity
 }
 
 const NM = 'NOT MEASURED'
@@ -119,8 +154,46 @@ export function toMarkdown(r: EvaluationReportInput): string {
   L.push(`| SAME vs DIFFERENT AUC | ${num(r.sameVsDifferentAuc)} |`)
   L.push(`| SIMILAR vs DIFFERENT AUC | ${num(r.similarVsDifferentAuc)} |`)
   L.push(`| SAME vs SIMILAR AUC | ${num(r.sameVsSimilarAuc)} |`)
-  L.push(`| Overlap % | ${num(r.overlapPercent, 2)} |`)
+  L.push(`| Overlap % (SIMILAR vs DIFFERENT) | ${num(r.overlapPercent, 2)} |`)
   L.push('')
+  L.push('AUC is rank-based (Mann-Whitney): 0.5 means no ordering, 1.0 means')
+  L.push('every higher-class pair outranks every lower-class pair.')
+  L.push('')
+
+  // Rank-based separation / ordering detail, per comparison.
+  const detail = r.separationDetail
+  if (detail) {
+    const rowsOut: string[] = []
+    const add = (name: string, c: unknown) => {
+      if (!c || typeof c !== 'object') return
+      const x = c as Record<string, unknown>
+      const n = (v: unknown, d = 4) =>
+        num(typeof v === 'number' ? v : null, d)
+      rowsOut.push(
+        `| ${name} | ${n(x.auc)} | ${n(x.meanGap)} | ${n(x.rangeOverlap)} `
+        + `| ${x.overlappingPairs ?? NM} | ${n(x.overlapFraction, 4)} `
+        + `| ${x.countHigher ?? NM} | ${x.countLower ?? NM} `
+        + `| ${x.insufficient ? 'YES' : 'no'} |`,
+      )
+    }
+    add('SAME vs DIFFERENT', detail.sameVsDifferent)
+    add('SIMILAR vs DIFFERENT', detail.similarVsDifferent)
+    add('SAME vs SIMILAR', detail.sameVsSimilar)
+
+    if (rowsOut.length) {
+      L.push('## Rank-based separation / ordering')
+      L.push('')
+      L.push('| Comparison | AUC | mean gap | range overlap | overlapping pairs '
+        + '| overlap fraction | n higher | n lower | insufficient |')
+      L.push('|---|---|---|---|---|---|---|---|---|')
+      L.push(...rowsOut)
+      L.push('')
+      if (detail.rationale) {
+        L.push(`Device rationale: ${txt(detail.rationale)}`)
+        L.push('')
+      }
+    }
+  }
 
   if (r.classStats?.length) {
     L.push('## Class distributions')
@@ -131,6 +204,38 @@ export function toMarkdown(r: EvaluationReportInput): string {
       L.push(`| ${c.label} | ${c.count} | ${num(c.mean)} | ${num(c.median)} `
         + `| ${num(c.p25)} | ${num(c.p75)} | ${num(c.min)} | ${num(c.max)} `
         + `| ${num(c.stdDev)} |`)
+    }
+    L.push('')
+  }
+
+  // Consistency under the EXISTING per-pair evaluation definition.
+  const cons = r.consistency
+  if (cons) {
+    L.push('## Consistency')
+    L.push('')
+    L.push('| Outcome | n | % of scored |')
+    L.push('|---|---|---|')
+    L.push(`| CONSISTENT | ${cons.consistent} | ${num(cons.consistentPercent, 2)} |`)
+    L.push(`| INCONSISTENT | ${cons.inconsistent} | ${num(cons.inconsistentPercent, 2)} |`)
+    L.push(`| NOT SCORED | ${cons.notScored} | — |`)
+    L.push(`| Scored total | ${cons.scored} | 100 |`)
+    L.push('')
+  }
+
+  // One-to-one correspondence between scored and labelled pairs.
+  const integ = r.integrity
+  if (integ) {
+    L.push('## Dataset integrity')
+    L.push('')
+    L.push(`- Scored pairs (distinct): ${integ.scoredPairCount}`)
+    L.push(`- Labelled pairs: ${integ.labelledPairCount}`)
+    L.push(`- One-to-one correspondence: ${integ.ok ? 'VERIFIED' : 'FAILED'}`)
+    L.push(`- Duplicate pairs: ${integ.duplicatePairIds.length}`)
+    L.push(`- Malformed rows: ${integ.malformedPairs.length}`)
+    L.push(`- Self-pairs: ${integ.selfPairs.length}`)
+    if (integ.issues.length) {
+      L.push('')
+      for (const i of integ.issues) L.push(`- ISSUE: ${i}`)
     }
     L.push('')
   }
@@ -161,10 +266,11 @@ export function toMarkdown(r: EvaluationReportInput): string {
   if (r.pairs?.length) {
     L.push('## Pair results')
     L.push('')
-    L.push('| Track A | Track B | Label | Cosine |')
-    L.push('|---|---|---|---|')
+    L.push('| Track A | Track B | Label | Cosine | Outcome |')
+    L.push('|---|---|---|---|---|')
     for (const p of r.pairs) {
-      L.push(`| ${p.trackA} | ${p.trackB} | ${p.label} | ${num(p.cosine)} |`)
+      L.push(`| ${p.trackA} | ${p.trackB} | ${p.label} | ${num(p.cosine)} `
+        + `| ${txt(p.outcome)} |`)
     }
     L.push('')
   }
@@ -221,6 +327,14 @@ export function toSummary(r: EvaluationReportInput): string {
   L.push(`SIMILAR vs DIFFERENT AUC: ${num(r.similarVsDifferentAuc)}`)
   L.push(`SAME vs SIMILAR AUC: ${num(r.sameVsSimilarAuc)}`)
   L.push(`Overlap: ${num(r.overlapPercent, 2)}%`)
+  if (r.consistency) {
+    L.push(`Consistency: ${r.consistency.consistent}/${r.consistency.scored} `
+      + `(${num(r.consistency.consistentPercent, 2)}%)`)
+  }
+  if (r.integrity) {
+    L.push(`Pair correspondence: ${r.integrity.ok ? 'VERIFIED 1:1' : 'FAILED'} `
+      + `(${r.integrity.scoredPairCount} scored / ${r.integrity.labelledPairCount} labelled)`)
+  }
   L.push('')
   L.push(`Peak PSS: ${num(m.peakPssMb, 1)} MB`)
   L.push(`Retained: ${num(m.retainedMb, 1)} MB`)

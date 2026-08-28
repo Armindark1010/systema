@@ -76,6 +76,14 @@ import {
   type LabelDataset,
 } from '~/services/ai-lab/labelDataset'
 import {
+  findComparison,
+  mapClassStats,
+  mapNativeReport,
+  mapPairs,
+  tallyConsistency,
+  verifyPairIntegrity,
+} from '~/services/ai-lab/reportMapping'
+import {
   copyToClipboard,
   downloadText,
   toJson,
@@ -343,11 +351,44 @@ function cancelImport() {
 
 // ---- Report export (§12) --------------------------------------
 
+/**
+ * Resolves a stable track id to a display title.
+ *
+ * The report previously emitted blank Track A / Track B cells because
+ * it read `trackA`/`trackB` (which the native contract does not have)
+ * and never looked a title up at all. Falling back to the id keeps a
+ * row identifiable when a track has left the library.
+ */
+function resolveTrackTitle(trackId: string): string | null {
+  const fromDataset = currentDataset().tracks.find(t => t.id === trackId)
+  if (fromDataset?.title) return fromDataset.title
+  const fromLibrary = tracks.value.find(t => t.id === trackId)
+  return fromLibrary?.title ?? null
+}
+
 function buildReportInput(): EvaluationReportInput {
   const d = currentDataset()
   const counts = countByLabel(d.pairs)
-  const r = report.value
-  const sep = (r?.separation ?? liveSeparation.value) as any
+
+  // A completed native run is the authoritative source. Map it through
+  // the tested contract mapper rather than re-reading fields here.
+  if (report.value) {
+    const { input } = mapNativeReport(report.value, {
+      phase: 'Phase 20',
+      modelId: modelId.value || null,
+      modelName: models.value.find(m => m.id === modelId.value)?.name ?? null,
+      datasetVersion: d.datasetVersion,
+      resolveTitle: resolveTrackTitle,
+      expectedCounts: counts.same + counts.similar + counts.different > 0
+        ? counts
+        : undefined,
+    })
+    return input
+  }
+
+  // Reached only when no completed native report exists, so the live
+  // (mid-run) values are the best available source.
+  const sep = liveSeparation.value as any
   const mem = memoryTimeline.value
   // The native timeline reports KB; the report is stated in MB.
   // `null` when a checkpoint is absent, never 0 — a missing sample and
@@ -377,24 +418,19 @@ function buildReportInput(): EvaluationReportInput {
     trackCount: d.tracks.length,
     pairCount: d.pairs.length,
     counts,
-    sameVsDifferentAuc: sep?.sameVsDifferentAuc ?? null,
-    similarVsDifferentAuc: sep?.similarVsDifferentAuc ?? null,
-    sameVsSimilarAuc: sep?.sameVsSimilarAuc ?? null,
-    overlapPercent: sep?.overlapPercent ?? null,
-    classStats: (liveClasses.value ?? []).map(c => ({
-      label: String((c as any).label ?? ''),
-      count: Number((c as any).count ?? 0),
-      mean: (c as any).meanCosine ?? null,
-      median: (c as any).medianCosine ?? null,
-      min: (c as any).minCosine ?? null,
-      max: (c as any).maxCosine ?? null,
-    })),
-    pairs: pairs.value.map(p => ({
-      trackA: String((p as any).trackA ?? ''),
-      trackB: String((p as any).trackB ?? ''),
-      label: String((p as any).label ?? ''),
-      cosine: (p as any).cosine ?? null,
-    })),
+    // Live (mid-run) values use the same contract mapper, so this path
+    // cannot drift back to inventing field names that do not exist.
+    sameVsDifferentAuc: findComparison(sep?.comparisons, 'SAME', 'DIFFERENT').auc,
+    similarVsDifferentAuc: findComparison(sep?.comparisons, 'SIMILAR', 'DIFFERENT').auc,
+    sameVsSimilarAuc: findComparison(sep?.comparisons, 'SAME', 'SIMILAR').auc,
+    overlapPercent: (() => {
+      const f = findComparison(sep?.comparisons, 'SIMILAR', 'DIFFERENT').overlapFraction
+      return f === null ? null : f * 100
+    })(),
+    classStats: mapClassStats(liveClasses.value ?? []),
+    pairs: mapPairs(pairs.value, resolveTrackTitle),
+    consistency: tallyConsistency(pairs.value),
+    integrity: verifyPairIntegrity(pairs.value),
     embeddingDimension: rows.value[0]?.dimension ?? null,
     pooling: 'MEAN',
     memory: {
