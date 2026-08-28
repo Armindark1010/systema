@@ -591,6 +591,13 @@ const pairProgress = computed(() =>
 // landed, and it should not require scrolling to find.
 const pairsNewestFirst = computed(() => [...pairs.value].reverse())
 
+/**
+ * The scored pairs, mapped through the SAME contract mapper the report
+ * uses. Phase 21.4's analysis reads this; it does not re-derive
+ * cosines and does not run anything.
+ */
+const analysablePairs = computed(() => mapPairs(pairs.value, resolveTrackTitle))
+
 async function start() {
   if (!available || running.value) return
   if (!modelId.value) {
@@ -1481,6 +1488,16 @@ const elapsedLabel = computed(() => {
         </DevResultsBoundary>
 
       </template>
+
+      <!-- ---- Phase 21.4: threshold & distribution analysis ---------
+           Deliberately OUTSIDE the native-only branch above. This panel
+           runs no model and needs no plugin: it reads pairs that were
+           already scored, either from the live run or from an exported
+           report JSON. Gating it on `available` would make the 190-pair
+           results unanalysable the moment the page is reloaded, or on
+           any machine that is not the phone. It selects nothing and
+           changes no recommendation behaviour. -->
+      <ThresholdAnalysisPanel :pairs="analysablePairs" />
     </div>
   </div>
 </template>
