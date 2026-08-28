@@ -30,6 +30,8 @@ object ClapLog {
     const val UNLOAD_SUCCESS = "UNLOAD_SUCCESS"
     const val MEMORY_BEFORE = "MEMORY_BEFORE"
     const val MEMORY_AFTER = "MEMORY_AFTER"
+    /** The input format derived from the loaded graph (Phase 21.1). */
+    const val CONTRACT_DERIVED = "CONTRACT_DERIVED"
     const val GUARD_REFUSED = "GUARD_REFUSED"
     const val FAILURE = "FAILURE"
 

@@ -15,6 +15,7 @@ import com.systema.music.inference.MemoryGuard
 import com.systema.music.inference.MemorySample
 import com.systema.music.inference.ModelDescriptor
 import com.systema.music.inference.ModelRegistry
+import com.systema.music.inference.TensorSignature
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -115,33 +116,70 @@ class ClapSession(
             )
         }
 
-        // THE SHAPE MATTERS, AND THE DEFAULT IS WRONG FOR CLAP
-        // -----------------------------------------------------
+        // THE SHAPE MUST COME FROM THE GRAPH, NOT FROM AN ASSUMPTION
+        // -----------------------------------------------------------
         // The runtime builds its ONNX tensor from the DESCRIPTOR's
-        // declared shape, not from the rank of the data. An imported
-        // model with no stored contract defaults to [-1], which would
-        // hand a 4-D log-mel to the graph as a flat vector and either
-        // fail opaquely inside ORT or, far worse, succeed against a
-        // fully dynamic graph while meaning something else entirely.
+        // declared shape, and it must be fully concrete: a dynamic
+        // axis gets resolved by dividing the element count, which
+        // silently yields the wrong rank rather than an error.
         //
-        // So the shape is declared explicitly: [1, 1, frames, mels],
-        // matching what ClapMelFrontEnd.toNchwTimeMajor() actually
-        // produces. The frame count is fixed by the 10 s clip length,
-        // so every dimension here is concrete and the runtime has
-        // nothing left to infer.
+        // Which shape is correct depends entirely on the model. A raw
+        // HTSAT audio tower wants [1,1,frames,64] log-mel. A
+        // pre-converted export such as clap-htsat-base-onnx/audio.onnx
+        // wants [1,480000] waveform and computes the mel internally.
+        // Both are "CLAP", so the answer is read from the signatures
+        // the importer recorded off the real graph.
         val frontEnd = ClapMelFrontEnd()
-        val frames = frontEnd.frameCountFor(ClapMelFrontEnd.DEFAULT_CLIP_SAMPLES)
+        val fileName = if (modelId.endsWith(".onnx")) modelId else "$modelId.onnx"
 
-        val descriptor = registry.descriptorForInstalled(
-            fileName = if (modelId.endsWith(".onnx")) modelId else "$modelId.onnx",
-            sampleRate = frontEndSampleRate,
-            inputFormat = InputFormat.LOG_MEL_SPECTROGRAM,
-            inputShape = listOf(1L, 1L, frames.toLong(), frontEnd.melBins.toLong()),
+        val stored = registry.contractFor(modelId)
+        val predicted = ClapGraphContract.derive(
+            inputs = listOfNotNull(
+                stored?.let {
+                    TensorSignature(
+                        name = it.inputName ?: "",
+                        shape = it.inputShape,
+                        type = it.inputType,
+                    )
+                },
+            ),
+            outputs = listOfNotNull(
+                stored?.let {
+                    TensorSignature(
+                        name = it.outputName ?: "",
+                        shape = it.outputShape,
+                        type = "FLOAT",
+                    )
+                },
+            ),
         )
 
-        // Tensor cost for ONE window: [1,1,frames,mels] float32, plus
-        // the window's own PCM.
-        val tensorBytes = frames.toLong() * frontEnd.melBins * 4L +
+        // When the stored signatures are missing or inconclusive, fall
+        // back to a fully dynamic descriptor and let the adapter derive
+        // the contract from the live graph after load. It refuses to
+        // infer on an UNKNOWN contract, so a wrong guess cannot reach
+        // the model.
+        val declaredShape = predicted.concreteInputShape()
+        val declaredFormat = when (predicted.inputKind) {
+            ClapGraphContract.InputKind.WAVEFORM -> InputFormat.RAW_WAVEFORM
+            ClapGraphContract.InputKind.LOG_MEL -> InputFormat.LOG_MEL_SPECTROGRAM
+            ClapGraphContract.InputKind.UNKNOWN -> InputFormat.RAW_TENSOR
+        }
+
+        val descriptor = registry.descriptorForInstalled(
+            fileName = fileName,
+            sampleRate = frontEndSampleRate,
+            inputFormat = declaredFormat,
+            inputShape = declaredShape,
+        )
+
+        // Tensor cost for ONE window, plus the window's own PCM. Uses
+        // the derived element count when known, and the log-mel size
+        // otherwise, which is the larger of the two.
+        val elements = predicted.elementsPerWindow()
+            ?: (frontEnd.frameCountFor(ClapMelFrontEnd.DEFAULT_CLIP_SAMPLES) *
+                frontEnd.melBins)
+        val tensorBytes = elements.toLong() * 4L +
             ClapMelFrontEnd.DEFAULT_CLIP_SAMPLES * 4L
 
         val decision = MemoryGuard.evaluate(context, descriptor.sizeBytes, tensorBytes)
@@ -159,8 +197,43 @@ class ClapSession(
             )
         }
 
-        val model = ClapAudioEmbeddingModel(context, descriptor, runtime, frontEnd)
-        val result = model.load()
+        var model = ClapAudioEmbeddingModel(context, descriptor, runtime, frontEnd)
+        var result = model.load()
+
+        // ---- SECOND PASS, only when the first was a guess ----
+        // If the stored signatures were absent or inconclusive, the
+        // descriptor above declared a dynamic shape. The live graph has
+        // now told us exactly what it wants, so if that turns out to be
+        // concrete and different, the session is rebuilt with the real
+        // shape. Without this the runtime would keep resolving a
+        // dynamic axis by division and hand the model the wrong rank.
+        val live = model.contract()
+        val liveShape = live?.concreteInputShape()
+        if (liveShape != null && liveShape != descriptor.inputShape) {
+            ClapLog.event(
+                ClapLog.CONTRACT_DERIVED,
+                "modelId" to modelId,
+                "action" to "RELOAD_WITH_GRAPH_SHAPE",
+                "predicted" to descriptor.inputShape.joinToString("x"),
+                "actual" to liveShape.joinToString("x"),
+            )
+            // Release the first session before opening another: two
+            // must never be resident at once (§4).
+            runCatching { model.unload() }
+
+            val corrected = registry.descriptorForInstalled(
+                fileName = fileName,
+                sampleRate = frontEndSampleRate,
+                inputFormat = when (live.inputKind) {
+                    ClapGraphContract.InputKind.WAVEFORM -> InputFormat.RAW_WAVEFORM
+                    ClapGraphContract.InputKind.LOG_MEL -> InputFormat.LOG_MEL_SPECTROGRAM
+                    ClapGraphContract.InputKind.UNKNOWN -> InputFormat.RAW_TENSOR
+                },
+                inputShape = liveShape,
+            )
+            model = ClapAudioEmbeddingModel(context, corrected, runtime, frontEnd)
+            result = model.load()
+        }
 
         active = model
         activeModelId = modelId
@@ -171,6 +244,7 @@ class ClapSession(
             put("sizeBytes", result.sizeBytes)
             put("memoryGuard", decision.toJs())
             put("metadata", model.getMetadata().toJs())
+            model.contract()?.let { put("graphContract", it.toJs()) }
             put(
                 "inputNames",
                 JSArray().apply { result.inputNames.forEach { put(it) } },

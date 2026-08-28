@@ -32,6 +32,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { CLAP_HTSAT_TINY, hzToMel, logMel, melToHz } from './clap-melref/melPort'
+import { derive } from './clap-melref/graphContractPort'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const read = (p: string) => readFileSync(resolve(ROOT, p), 'utf8')
@@ -56,6 +57,7 @@ const adapterSrc = read(`${KOTLIN}/clap/ClapAudioEmbeddingModel.kt`)
 const sessionSrc = read(`${KOTLIN}/clap/ClapSession.kt`)
 const logSrc = read(`${KOTLIN}/clap/ClapLog.kt`)
 const guardSrc = read(`${KOTLIN}/MemoryGuard.kt`)
+const contractSrc = read(`${KOTLIN}/clap/ClapGraphContract.kt`)
 const ifaceSrc = read(`${KOTLIN}/AudioEmbeddingModel.kt`)
 const pluginSrc = read(`${KOTLIN}/InferencePlugin.kt`)
 const portSrc = read('scripts/clap-melref/melPort.ts')
@@ -392,21 +394,31 @@ section('14. Import records a real identity (§1)')
 section('15. The tensor shape is declared, not left to a default')
 {
   // The runtime builds its ONNX tensor from the DESCRIPTOR's shape. An
-  // imported model defaults to [-1], which would submit a 4-D log-mel
-  // as a flat vector. The session must override that.
-  ok('the session declares a 4-D input shape',
-    /listOf\(1L,\s*1L,\s*frames\.toLong\(\),/.test(sessionSrc))
-  ok('it declares LOG_MEL_SPECTROGRAM',
+  // imported model defaults to [-1], which the runtime would resolve
+  // by dividing the element count — producing the wrong rank rather
+  // than an error. So the shape must always be made concrete.
+  //
+  // Which concrete shape is correct is now decided by section 17 from
+  // the graph itself, not hardcoded here.
+  ok('the session declares a concrete shape from the contract',
+    sessionSrc.includes('predicted.concreteInputShape()'))
+  ok('it can declare LOG_MEL_SPECTROGRAM',
     sessionSrc.includes('InputFormat.LOG_MEL_SPECTROGRAM'))
+  ok('it can declare RAW_WAVEFORM',
+    sessionSrc.includes('InputFormat.RAW_WAVEFORM'))
+  ok('an undeterminable format stays fully dynamic',
+    /InputKind\.UNKNOWN -> InputFormat\.RAW_TENSOR/.test(sessionSrc))
   ok('it declares the CLAP sample rate',
     sessionSrc.includes('sampleRate = frontEndSampleRate'))
   ok('the tensor layout is time-major',
     frontEndSrc.includes('fun toNchwTimeMajor'))
 
-  // 480000/480 + 1 = 1001 frames x 64 mels.
+  // For the LOG-MEL path only: 480000/480 + 1 = 1001 frames x 64 mels.
   const frames = 480000 / 480 + 1
-  ok('frame count arithmetic is 1001', frames === 1001)
-  ok('tensor element count is 64064', frames * 64 === 64064)
+  ok('log-mel frame count arithmetic is 1001', frames === 1001)
+  ok('log-mel tensor element count is 64064', frames * 64 === 64064)
+  // And the waveform path submits the samples themselves.
+  ok('waveform element count is 480000', 480000 === 48000 * 10)
 
   // The decoder must be asked for 48 kHz, not the DSP default 22050.
   ok('the session decodes at the model rate',
@@ -426,6 +438,143 @@ section('16. Quality-lab compatibility is not disturbed (§6)')
       .includes("from '~/services/ai-lab/reportMapping'"))
   ok('CLAP did not fork a new lab system',
     !read('app/pages/dev/ai-benchmark/clap.vue').includes('pairResults'))
+}
+
+
+// =====================================================================
+section('17. The input format is DERIVED from the graph, not assumed')
+{
+  // THE FAILURE THIS PREVENTS
+  // -------------------------
+  // muzaiten/clap-htsat-base-onnx/audio.onnx takes [batch, 480000] raw
+  // waveform and computes its mel INTERNALLY. Feeding it a
+  // [1,1,1001,64] log-mel would not throw: 64064 floats would be
+  // accepted by a dynamic axis, read as audio samples, and returned as
+  // a finite, L2-normalised, meaningless 512-d vector. Every cosine
+  // and AUC downstream would be noise.
+
+  // The exact target model.
+  const target = derive(
+    [{ name: 'waveform', shape: [-1, 480000], type: 'FLOAT' }],
+    [{ name: 'embedding', shape: [-1, 512], type: 'FLOAT' }],
+  )
+  ok('audio.onnx is detected as WAVEFORM', target.kind === 'WAVEFORM')
+  ok('audio.onnx window is 480000 samples', target.samples === 480000)
+  ok('audio.onnx shape is [1,480000]',
+    JSON.stringify(target.concrete) === '[1,480000]')
+  ok('audio.onnx embedding dim is 512', target.embed === 512)
+
+  // The raw HTSAT tower must still take the log-mel path.
+  const logmel = derive(
+    [{ name: 'input', shape: [1, 1, 1001, 64], type: 'FLOAT' }],
+    [{ name: 'o', shape: [1, 512], type: 'FLOAT' }],
+  )
+  ok('a rank-4 input is detected as LOG_MEL', logmel.kind === 'LOG_MEL')
+  ok('log-mel shape is preserved',
+    JSON.stringify(logmel.concrete) === '[1,1,1001,64]')
+  ok('log-mel keeps 64 bins', logmel.mels === 64)
+
+  // A rank-3 log-mel (no channel axis) is still a log-mel.
+  ok('a rank-3 input is LOG_MEL',
+    derive([{ name: 'i', shape: [1, 1001, 64], type: 'FLOAT' }],
+      [{ name: 'o', shape: [1, 512], type: 'FLOAT' }]).kind === 'LOG_MEL')
+
+  // Dynamic axes fall back to the LAION clip length.
+  const dyn = derive(
+    [{ name: 'w', shape: [-1, -1], type: 'FLOAT' }],
+    [{ name: 'o', shape: [-1, 512], type: 'FLOAT' }],
+  )
+  ok('a fully dynamic rank-2 input defaults to 10 s at 48 kHz',
+    dyn.kind === 'WAVEFORM' && dyn.samples === 480000)
+
+  // Anything inconclusive must be UNKNOWN, never a guess.
+  ok('rank 1 is UNKNOWN',
+    derive([{ name: 'x', shape: [-1], type: 'FLOAT' }],
+      [{ name: 'o', shape: [1, 512], type: 'FLOAT' }]).kind === 'UNKNOWN')
+  ok('an implausibly short rank-2 input is UNKNOWN',
+    derive([{ name: 'x', shape: [1, 3], type: 'FLOAT' }],
+      [{ name: 'o', shape: [1, 512], type: 'FLOAT' }]).kind === 'UNKNOWN')
+  ok('an implausibly wide mel axis is UNKNOWN',
+    derive([{ name: 'x', shape: [1, 1, 10, 4096], type: 'FLOAT' }],
+      [{ name: 'o', shape: [1, 512], type: 'FLOAT' }]).kind === 'UNKNOWN')
+  ok('a graph with no inputs is UNKNOWN',
+    derive([], [{ name: 'o', shape: [1, 512], type: 'FLOAT' }]).kind === 'UNKNOWN')
+  ok('a graph with no outputs is UNKNOWN',
+    derive([{ name: 'w', shape: [1, 480000], type: 'FLOAT' }], []).kind === 'UNKNOWN')
+
+  // ---- the Kotlin must agree with the port ----
+  ok('Kotlin defines the same clip length',
+    /EXPECTED_WAVEFORM_SAMPLES\s*=\s*480_000/.test(contractSrc))
+  ok('Kotlin uses the same short-waveform floor',
+    /MIN_WAVEFORM_SAMPLES\s*=\s*8_000/.test(contractSrc))
+  ok('Kotlin branches on rank 2', /rank == 2/.test(contractSrc))
+  ok('Kotlin branches on rank 3 or 4', /rank == 3 \|\| rank == 4/.test(contractSrc))
+  ok('Kotlin refuses an implausibly wide mel axis', /melAxis > 512/.test(contractSrc))
+
+  // ---- the adapter must actually USE the branch ----
+  ok('the adapter feeds raw samples to a waveform graph',
+    /InputKind\.WAVEFORM -> windowPcm/.test(adapterSrc))
+  ok('the adapter computes log-mel only for a log-mel graph',
+    /else -> frontEnd\.toNchwTimeMajor\(frontEnd\.logMel\(windowPcm\)\)/.test(adapterSrc))
+  ok('the adapter refuses to infer on an UNKNOWN contract',
+    /InputKind\.UNKNOWN[\s\S]{0,300}Refusing to run inference/.test(adapterSrc))
+  ok('the contract is derived from the LIVE graph at load',
+    /ClapGraphContract\.derive\(info\.inputs, info\.outputs\)/.test(adapterSrc))
+  ok('the contract is cleared on unload',
+    /graphContract = null/.test(adapterSrc))
+  ok('the reported input type follows the contract',
+    /InputKind\.WAVEFORM -> "waveform"/.test(adapterSrc))
+
+  // ---- the session must not force a log-mel shape ----
+  ok('the session no longer hardcodes a 4-D shape',
+    !/inputShape = listOf\(1L, 1L, frames\.toLong\(\)/.test(sessionSrc))
+  ok('the session declares the derived format',
+    /InputKind\.WAVEFORM -> InputFormat\.RAW_WAVEFORM/.test(sessionSrc))
+  ok('the session reloads when the live graph disagrees',
+    /RELOAD_WITH_GRAPH_SHAPE/.test(sessionSrc))
+  ok('the first session is released before reloading',
+    /RELOAD_WITH_GRAPH_SHAPE[\s\S]{0,600}model\.unload\(\)/.test(sessionSrc))
+}
+
+// =====================================================================
+section('18. Short audio is padded the way the reference pads it')
+{
+  // LAION-CLAP infers with data_filling="repeatpad" (hook.py:146,183):
+  // whole copies of the clip, then a ZERO tail. Not reflect, and not
+  // all-silence. Both alternatives feed the model a distribution it
+  // was never trained on.
+  ok('fitToClip repeats whole copies',
+    /repeat\(repeats\)[\s\S]{0,200}System\.arraycopy/.test(frontEndSrc))
+  ok('the remainder is left as zeros',
+    /Remainder stays zero/.test(frontEndSrc))
+  ok('the reference rule is cited', frontEndSrc.includes('repeatpad'))
+  ok('fitToClip truncates when too long',
+    /pcm\.size > target\) return pcm\.copyOf\(target\)/.test(frontEndSrc))
+  ok('short audio is no longer reflect-padded into the clip',
+    !/for \(i in 0 until target\) out\[i\] = reflectSample/.test(frontEndSrc))
+  // reflectSample must survive for STFT centre padding, which is a
+  // different thing entirely.
+  ok('reflect padding is still used for the STFT frame',
+    /frame\[i\] = reflectSample/.test(frontEndSrc))
+}
+
+// =====================================================================
+section('19. Validation reports the real graph contract (§2)')
+{
+  for (const c of [
+    'input name', 'input dtype is float32', 'input rank',
+    'input dimensions resolved', 'output name', 'output dimension',
+  ]) {
+    ok(`validates "${c}"`, adapterSrc.includes(`"${c}"`))
+  }
+  ok('an undeterminable format fails validation',
+    /input format determined from graph[\s\S]{0,400}ok = false/.test(adapterSrc))
+  const page = read('app/pages/dev/ai-benchmark/clap.vue')
+  ok('the UI shows the derived contract', page.includes('MODEL CONTRACT'))
+  ok('the UI shows the input shape', page.includes('INPUT SHAPE'))
+  ok('the UI shows NORMALIZED', page.includes('NORMALIZED'))
+  ok('the UI explains an internal-mel graph',
+    page.includes('computes its own mel spectrogram'))
 }
 
 console.log(`\n${'='.repeat(60)}`)

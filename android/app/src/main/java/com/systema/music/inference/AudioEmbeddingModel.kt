@@ -109,6 +109,12 @@ data class EmbeddingModelMetadata(
     val outputNames: List<String> = emptyList(),
     val supportsText: Boolean = false,
     val notes: String? = null,
+    /**
+     * How the input format was DERIVED from the graph, in plain words.
+     * Shown verbatim so a reader can see the reasoning rather than
+     * trusting a label.
+     */
+    val architectureNote: String? = null,
 ) {
     fun toJs() = com.getcapacitor.JSObject().apply {
         put("id", modelId)
@@ -118,6 +124,7 @@ data class EmbeddingModelMetadata(
         put("format", format)
         put("sampleRate", sampleRate)
         put("inputType", inputType)
+        put("architectureNote", architectureNote ?: "")
         put("embeddingDimension", embeddingDimension ?: -1)
         put("sizeBytes", sizeBytes)
         put("sha256", sha256 ?: "")

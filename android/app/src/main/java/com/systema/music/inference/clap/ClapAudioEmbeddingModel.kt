@@ -73,6 +73,15 @@ class ClapAudioEmbeddingModel(
     @Volatile private var provenDimension: Int? = null
     @Volatile private var status: String = "IMPORTED"
 
+    /**
+     * What the loaded graph actually wants (§2). Null until load()
+     * has read the real signatures; nothing may infer before then.
+     */
+    @Volatile private var graphContract: ClapGraphContract? = null
+
+    /** The derived contract, or null when nothing is loaded. */
+    fun contract(): ClapGraphContract? = graphContract
+
     override val modelId: String get() = descriptor.modelId
     override val family: String get() = FAMILY
 
@@ -96,7 +105,13 @@ class ClapAudioEmbeddingModel(
         architecture = "LAION-CLAP audio tower (HTSAT / PANN variants)",
         format = "onnx",
         sampleRate = descriptor.inputSampleRate ?: frontEnd.sampleRate,
-        inputType = "log_mel_spectrogram",
+        // Reported from the derived contract, not from a constant: a
+        // waveform export and a log-mel export are both "CLAP".
+        inputType = when (graphContract?.inputKind) {
+            ClapGraphContract.InputKind.WAVEFORM -> "waveform"
+            ClapGraphContract.InputKind.LOG_MEL -> "log_mel_spectrogram"
+            else -> "unknown"
+        },
         // Null until a real forward pass proves it. Never assumed.
         embeddingDimension = provenDimension,
         sizeBytes = descriptor.sizeBytes,
@@ -106,11 +121,24 @@ class ClapAudioEmbeddingModel(
         inputNames = loadedInputNames,
         outputNames = loadedOutputNames,
         supportsText = supportsText(),
-        notes =
-            "Preprocessing: ${frontEnd.sampleRate} Hz mono, n_fft ${frontEnd.nFft}, " +
-                "hop ${frontEnd.hopSize}, ${frontEnd.melBins} mels, " +
-                "fmin ${frontEnd.fMin.toInt()}, fmax ${frontEnd.fMax.toInt()}, " +
-                "10*log10 power, Slaney mel. Read from HTSAT-tiny.json, not assumed.",
+        notes = when (graphContract?.inputKind) {
+            ClapGraphContract.InputKind.WAVEFORM ->
+                "Preprocessing: decode to mono, resample to " +
+                    "${descriptor.inputSampleRate ?: frontEnd.sampleRate} Hz, " +
+                    "${graphContract?.waveformSamples ?: 0} samples per window. " +
+                    "The GRAPH computes its own spectrogram, so SYSTEMA applies " +
+                    "no mel transform. Short audio is repeat-padded, matching " +
+                    "LAION-CLAP's data_filling=repeatpad."
+            ClapGraphContract.InputKind.LOG_MEL ->
+                "Preprocessing: ${frontEnd.sampleRate} Hz mono, n_fft ${frontEnd.nFft}, " +
+                    "hop ${frontEnd.hopSize}, ${frontEnd.melBins} mels, " +
+                    "fmin ${frontEnd.fMin.toInt()}, fmax ${frontEnd.fMax.toInt()}, " +
+                    "10*log10 power, Slaney mel. Verified against librosa to 3e-5 dB."
+            else ->
+                "Preprocessing undetermined: the model has not been loaded, or " +
+                    "its input format could not be read from the graph."
+        },
+        architectureNote = graphContract?.rationale,
     )
 
     override suspend fun load(): EmbeddingModelLoadResult = mutex.withLock {
@@ -160,6 +188,24 @@ class ClapAudioEmbeddingModel(
         loaded = true
         loadedInputNames = info.inputNames
         loadedOutputNames = info.outputNames
+
+        // DERIVE THE PREPROCESSING FROM THE GRAPH, NEVER FROM THE NAME
+        // ------------------------------------------------------------
+        // Some CLAP exports take a raw 48 kHz waveform and compute the
+        // mel internally; others take an externally computed log-mel.
+        // Both are "CLAP". Only the graph knows which this is, and
+        // getting it wrong yields a finite, normalised, meaningless
+        // vector rather than an error — so it is read, not assumed.
+        val derived = ClapGraphContract.derive(info.inputs, info.outputs)
+        graphContract = derived
+        ClapLog.event(
+            ClapLog.CONTRACT_DERIVED,
+            "modelId" to descriptor.modelId,
+            "inputKind" to derived.inputKind.name,
+            "inputName" to derived.inputName,
+            "inputShape" to derived.inputShape.joinToString("x"),
+            "outputShape" to derived.outputShape.joinToString("x"),
+        )
 
         val after = MemorySample.capture(context)
         ClapLog.event(
@@ -215,18 +261,75 @@ class ClapAudioEmbeddingModel(
             if (rate != null && rate > 0) "$rate Hz" else "Model declares no sample rate.",
         )
 
+        // ---- THE GRAPH CONTRACT (§2) ----
+        // Each of these is read off the real graph. A model whose
+        // input format cannot be determined is refused here, before
+        // any audio is touched, rather than producing a meaningless
+        // vector later.
+        val contract = graphContract
+        if (contract == null || contract.inputKind == ClapGraphContract.InputKind.UNKNOWN) {
+            checks += ValidationCheck(
+                "input format determined from graph",
+                false,
+                contract?.rationale ?: "No contract was derived at load time.",
+            )
+            return EmbeddingValidationReport(
+                ok = false,
+                checks = checks,
+                embeddingDimension = null,
+                failureCode = InferenceErrorCode.MODEL_INVALID,
+                failureMessage = contract?.rationale
+                    ?: "The model's input format could not be determined.",
+            )
+        }
+
+        checks += ValidationCheck(
+            "input name", contract.inputName.isNotBlank(), "'${contract.inputName}'",
+        )
+        checks += ValidationCheck(
+            "input dtype is float32",
+            contract.inputType.contains("FLOAT", ignoreCase = true),
+            contract.inputType,
+        )
+        checks += ValidationCheck(
+            "input rank",
+            contract.inputShape.isNotEmpty(),
+            "rank ${contract.inputShape.size} ${contract.inputShape}",
+        )
+        checks += ValidationCheck(
+            "input dimensions resolved",
+            contract.concreteInputShape() != null,
+            contract.concreteInputShape()?.toString()
+                ?: "Could not resolve every input dimension.",
+        )
+        checks += ValidationCheck(
+            "input format determined from graph",
+            true,
+            contract.rationale,
+        )
+        checks += ValidationCheck(
+            "output name", contract.outputName.isNotBlank(), "'${contract.outputName}'",
+        )
+        checks += ValidationCheck(
+            "output dimension",
+            contract.outputShape.isNotEmpty(),
+            contract.embeddingDimension?.let { "$it (declared by the graph)" }
+                ?: "dynamic ${contract.outputShape}; measured by the probe below",
+        )
+
         ClapLog.event(ClapLog.VALIDATE, "modelId" to descriptor.modelId)
 
         // A deterministic, non-degenerate probe. Silence could produce
-        // a legitimately zero embedding and mask a real fault.
-        val probeSamples = frontEnd.fitToClip(
-            FloatArray(frontEnd.sampleRate) { i ->
-                (sqrt(2.0) * kotlin.math.sin(2.0 * Math.PI * 440.0 * i / frontEnd.sampleRate) * 0.1).toFloat()
-            },
-        )
+        // a legitimately zero embedding and mask a real fault, so this
+        // is a 440 Hz tone. One second of it; embedWindowsInternal
+        // fits it to whatever window length the contract requires.
+        val probeRate = descriptor.inputSampleRate ?: frontEnd.sampleRate
+        val probeSamples = FloatArray(probeRate) { i ->
+            (sqrt(2.0) * kotlin.math.sin(2.0 * Math.PI * 440.0 * i / probeRate) * 0.1).toFloat()
+        }
 
         val result = try {
-            embedWindowsInternal(probeSamples, frontEnd.sampleRate, maxWindowsOverride = 1)
+            embedWindowsInternal(probeSamples, probeRate, maxWindowsOverride = 1)
         } catch (t: Throwable) {
             checks += ValidationCheck("forward pass", false, "${t.javaClass.simpleName}: ${t.message}")
             return EmbeddingValidationReport(
@@ -332,7 +435,31 @@ class ClapAudioEmbeddingModel(
         }
         preprocessingMs += (System.nanoTime() - preStart) / 1_000_000.0
 
-        val clip = ClapMelFrontEnd.DEFAULT_CLIP_SAMPLES
+        // The window length is whatever the GRAPH asks for. For a
+        // waveform model that is its fixed sample count; for a log-mel
+        // model it is the clip that produces the expected frame count.
+        val contract = graphContract ?: throw InferenceException(
+            InferenceErrorCode.MODEL_INVALID,
+            "The graph contract has not been derived. load() must run first.",
+        )
+        if (contract.inputKind == ClapGraphContract.InputKind.UNKNOWN) {
+            throw InferenceException(
+                InferenceErrorCode.MODEL_INVALID,
+                "Refusing to run inference: the model's input format could not " +
+                    "be determined. ${contract.rationale}",
+            )
+        }
+
+        val clip = when (contract.inputKind) {
+            ClapGraphContract.InputKind.WAVEFORM ->
+                contract.waveformSamples ?: ClapMelFrontEnd.DEFAULT_CLIP_SAMPLES
+            // A log-mel graph fixes the FRAME count, so the clip is the
+            // audio length that yields it: frames = samples/hop + 1.
+            ClapGraphContract.InputKind.LOG_MEL ->
+                contract.melFrames?.let { (it - 1) * frontEnd.hopSize }
+                    ?: ClapMelFrontEnd.DEFAULT_CLIP_SAMPLES
+            ClapGraphContract.InputKind.UNKNOWN -> ClapMelFrontEnd.DEFAULT_CLIP_SAMPLES
+        }
         val stride = clip / WINDOW_STRIDE_DIVISOR
         val cap = maxWindowsOverride ?: maxWindows
 
@@ -358,8 +485,13 @@ class ClapAudioEmbeddingModel(
             if (windowPcm.isEmpty()) continue
 
             val p0 = System.nanoTime()
-            val mel = frontEnd.logMel(windowPcm)
-            val tensor = frontEnd.toNchwTimeMajor(mel)
+            // THE BRANCH THIS PHASE EXISTS FOR.
+            // A waveform graph gets the samples themselves; only a
+            // log-mel graph gets a spectrogram computed out here.
+            val tensor = when (contract.inputKind) {
+                ClapGraphContract.InputKind.WAVEFORM -> windowPcm
+                else -> frontEnd.toNchwTimeMajor(frontEnd.logMel(windowPcm))
+            }
             preprocessingMs += (System.nanoTime() - p0) / 1_000_000.0
 
             val out = try {
@@ -371,8 +503,8 @@ class ClapAudioEmbeddingModel(
                     throwable = t,
                     modelId = descriptor.modelId,
                     modelSizeBytes = descriptor.sizeBytes,
-                    inputShape = listOf(1L, 1L, mel[0].size.toLong(), mel.size.toLong()),
-                    inputType = "log_mel_spectrogram",
+                    inputShape = contract.concreteInputShape() ?: listOf(tensor.size.toLong()),
+                    inputType = contract.inputKind.name,
                     sampleRate = target,
                     audioDurationSec = durationSec,
                     memoryBeforeKb = before.totalPssKb,
@@ -467,6 +599,9 @@ class ClapAudioEmbeddingModel(
             loaded = false
             loadedInputNames = emptyList()
             loadedOutputNames = emptyList()
+            // The contract describes a LOADED graph. Keeping it after
+            // unload would let a stale format outlive the session.
+            graphContract = null
             val after = MemorySample.capture(context)
             ClapLog.event(ClapLog.UNLOAD_SUCCESS, "modelId" to descriptor.modelId)
             ClapLog.event(ClapLog.MEMORY_AFTER, "stage" to "unload", "pssKb" to after.totalPssKb)

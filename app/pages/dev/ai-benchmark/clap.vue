@@ -550,6 +550,84 @@ function sizeMb(bytes: number | null | undefined): string {
               {{ loadError.code }} — {{ loadError.message }}
             </div>
 
+            <div
+              v-if="loadResult?.graphContract"
+              class="border border-line bg-surface-2 px-4 py-3 space-y-1"
+            >
+              <p class="label text-fg-muted mb-2">
+                MODEL CONTRACT (read from the graph)
+              </p>
+              <dl class="space-y-0.5 text-micro font-mono">
+                <div class="flex gap-2">
+                  <dt class="text-fg-muted w-32 shrink-0">
+                    MODEL
+                  </dt>
+                  <dd class="text-fg break-all">
+                    {{ loadResult.metadata.name }}
+                  </dd>
+                </div>
+                <div class="flex gap-2">
+                  <dt class="text-fg-muted w-32 shrink-0">
+                    FORMAT
+                  </dt>
+                  <dd class="text-fg">
+                    {{ loadResult.metadata.format.toUpperCase() }}
+                  </dd>
+                </div>
+                <div class="flex gap-2">
+                  <dt class="text-fg-muted w-32 shrink-0">
+                    INPUT
+                  </dt>
+                  <dd class="text-fg break-all">
+                    {{ loadResult.graphContract.inputName }}
+                  </dd>
+                </div>
+                <div class="flex gap-2">
+                  <dt class="text-fg-muted w-32 shrink-0">
+                    INPUT SHAPE
+                  </dt>
+                  <dd class="text-fg">
+                    [{{ (loadResult.graphContract.concreteInputShape
+                      ?? loadResult.graphContract.inputShape).join(',') }}]
+                  </dd>
+                </div>
+                <div class="flex gap-2">
+                  <dt class="text-fg-muted w-32 shrink-0">
+                    INPUT TYPE
+                  </dt>
+                  <dd class="text-fg">
+                    {{ loadResult.graphContract.inputKind }}
+                  </dd>
+                </div>
+                <div class="flex gap-2">
+                  <dt class="text-fg-muted w-32 shrink-0">
+                    SAMPLE RATE
+                  </dt>
+                  <dd class="text-fg">
+                    {{ loadResult.metadata.sampleRate }} Hz
+                  </dd>
+                </div>
+                <div class="flex gap-2">
+                  <dt class="text-fg-muted w-32 shrink-0">
+                    OUTPUT
+                  </dt>
+                  <dd class="text-fg">
+                    [{{ loadResult.graphContract.outputShape.join(',') }}]
+                  </dd>
+                </div>
+              </dl>
+              <p class="pt-2 text-micro text-fg-faint max-w-[76ch] leading-relaxed">
+                {{ loadResult.graphContract.rationale }}
+              </p>
+              <p
+                v-if="loadResult.graphContract.inputKind === 'WAVEFORM'"
+                class="text-micro text-fg-muted max-w-[76ch] leading-relaxed"
+              >
+                This graph computes its own mel spectrogram, so SYSTEMA feeds it
+                raw 48 kHz mono samples and applies no log-mel transform.
+              </p>
+            </div>
+
             <dl v-if="loadResult" class="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div>
                 <dt class="label text-fg-muted">
@@ -628,6 +706,11 @@ function sizeMb(bytes: number | null | undefined): string {
               <p v-if="validation.ok" class="text-small text-fg-muted">
                 Embedding dimension measured from a real forward pass:
                 <strong class="text-fg">{{ validation.embeddingDimension }}</strong>
+                · NORMALIZED:
+                <strong class="text-fg">
+                  {{ validation.checks.some(c => /normali[sz]able/.test(c.name) && c.passed)
+                    ? 'yes' : 'no' }}
+                </strong>
               </p>
               <ul class="space-y-1">
                 <li

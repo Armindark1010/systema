@@ -257,19 +257,39 @@ class ClapMelFrontEnd(
     }
 
     /**
-     * Trims or reflect-pads [pcm] to exactly [target] samples.
+     * Trims or pads [pcm] to exactly [target] samples, using the
+     * reference implementation's "repeatpad" rule.
      *
-     * CLAP's audio tower expects a fixed 10-second clip. Silence
-     * padding would bias the embedding toward "quiet", so short audio
-     * is reflected — the same choice the reference makes for short
-     * inputs.
+     * WHY REPEATPAD AND NOT REFLECT OR SILENCE
+     * ----------------------------------------
+     * LAION-CLAP's inference path calls get_audio_features with
+     * data_filling="repeatpad" (hook.py:146 and :183). That routine
+     * (training/data.py:472-482) does exactly this:
+     *
+     *     n_repeat  = int(max_len / len(audio))   // floor
+     *     audio     = audio.repeat(n_repeat)      // whole copies
+     *     audio     = F.pad(audio, (0, max_len - len(audio)),
+     *                       mode="constant", value=0)
+     *
+     * So the clip is tiled with WHOLE copies and the remainder is
+     * ZERO-padded — the tail is not a partial copy. Reflecting, or
+     * padding the whole gap with silence, would both feed the model a
+     * distribution it was never trained on. This mirrors the reference
+     * byte for byte rather than approximating it.
      */
     fun fitToClip(pcm: FloatArray, target: Int = DEFAULT_CLIP_SAMPLES): FloatArray {
         if (pcm.size == target) return pcm
         if (pcm.size > target) return pcm.copyOf(target)
-        if (pcm.isEmpty()) return FloatArray(target)
+        // Zero-filled: this is also the "constant 0" tail padding.
         val out = FloatArray(target)
-        for (i in 0 until target) out[i] = reflectSample(pcm, i)
+        if (pcm.isEmpty()) return out
+        val repeats = target / pcm.size
+        var offset = 0
+        repeat(repeats) {
+            System.arraycopy(pcm, 0, out, offset, pcm.size)
+            offset += pcm.size
+        }
+        // Remainder stays zero, exactly as F.pad(..., value=0) leaves it.
         return out
     }
 }

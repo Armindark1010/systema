@@ -242,6 +242,30 @@ export interface ClapModelMetadata {
   notes: string
   inputNames: string[]
   outputNames: string[]
+  /** How the input format was derived from the graph. */
+  architectureNote?: string
+}
+
+/**
+ * What the imported ONNX graph actually expects, derived from its own
+ * signatures rather than assumed from the model's name (§1, §2).
+ */
+export interface ClapGraphContract {
+  inputName: string
+  inputShape: number[]
+  inputType: string
+  outputName: string
+  outputShape: number[]
+  /** WAVEFORM = the graph computes its own mel. LOG_MEL = we compute it. */
+  inputKind: 'WAVEFORM' | 'LOG_MEL' | 'UNKNOWN'
+  /** Samples per window for WAVEFORM models; -1 otherwise. */
+  waveformSamples: number
+  melBins: number
+  melFrames: number
+  embeddingDimension: number
+  /** Plain-language explanation of how the format was determined. */
+  rationale: string
+  concreteInputShape?: number[]
 }
 
 export interface ClapValidationCheck {
@@ -278,6 +302,8 @@ export interface ClapLoadResult {
   metadata: ClapModelMetadata
   inputNames: string[]
   outputNames: string[]
+  /** Present once the graph has been read. */
+  graphContract?: ClapGraphContract
 }
 
 /** Result of the ONE-TRACK test (§5). */
