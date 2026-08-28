@@ -247,6 +247,31 @@ const sustainedIterations = ref(20)
         </div>
       </section>
 
+      <!-- ---- Production candidates (Phase 18) ----------- -->
+      <section class="border border-line bg-surface">
+        <div class="border-b border-line px-5 py-3">
+          <p class="label text-fg-muted">
+            PRODUCTION CANDIDATES &amp; CLAP FEASIBILITY
+          </p>
+        </div>
+        <div class="px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+          <p class="text-small text-fg-muted max-w-[64ch] leading-relaxed">
+            Phase 18 evaluation of what SYSTEMA should use for music similarity
+            and natural-language search — architecture, ONNX availability,
+            licensing and shared text/audio space for CLAP-class models.
+            Research only: no candidate was executed, every model but YAMNet
+            reads NOT TESTED, and no production model was selected.
+          </p>
+          <button
+            type="button"
+            class="sys-btn-outline shrink-0"
+            @click="router.push('/dev/ai-benchmark/production-candidates')"
+          >
+            PRODUCTION LAB →
+          </button>
+        </div>
+      </section>
+
       <!-- ---- Environment -------------------------------- -->
       <LabBanner
         v-if="lab.environmentWarning"
