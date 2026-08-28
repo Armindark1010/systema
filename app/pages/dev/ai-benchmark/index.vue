@@ -272,6 +272,31 @@ const sustainedIterations = ref(20)
         </div>
       </section>
 
+      <!-- ---- Teacher & distillation (Phase 19) ---------- -->
+      <section class="border border-line bg-surface">
+        <div class="border-b border-line px-5 py-3">
+          <p class="label text-fg-muted">
+            TEACHER MODELS &amp; DISTILLATION
+          </p>
+        </div>
+        <div class="px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+          <p class="text-small text-fg-muted max-w-[64ch] leading-relaxed">
+            Phase 19 investigation into distilling a music/text-aware teacher
+            (LAION-CLAP, DCLAP, M2D-CLAP) into a small on-device student.
+            Teacher weights could not be obtained, so no teacher inference,
+            text→audio retrieval or device benchmark exists. YAMNet is not
+            replaced and no production model was selected.
+          </p>
+          <button
+            type="button"
+            class="sys-btn-outline shrink-0"
+            @click="router.push('/dev/ai-benchmark/teachers')"
+          >
+            TEACHER LAB →
+          </button>
+        </div>
+      </section>
+
       <!-- ---- Environment -------------------------------- -->
       <LabBanner
         v-if="lab.environmentWarning"
