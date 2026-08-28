@@ -292,10 +292,14 @@ class PlayerPlugin : Plugin() {
     @PluginMethod
     fun seekTo(call: PluginCall) {
         val position = call.getLong("positionMs")
+            ?: call.getDouble("positionMs")?.toLong()
+            ?: call.getInt("positionMs")?.toLong()
         if (position == null) {
+            Log.w(TAG, "seekTo: missing or invalid positionMs in ${call.data}")
             rejectInvalid(call, "seekTo requires positionMs.")
             return
         }
+        Log.i(TAG, "seekTo: positionMs=$position")
         engine.seekTo(position)
         call.resolve()
     }
@@ -304,10 +308,14 @@ class PlayerPlugin : Plugin() {
     @PluginMethod
     fun seekBy(call: PluginCall) {
         val delta = call.getLong("deltaMs")
+            ?: call.getDouble("deltaMs")?.toLong()
+            ?: call.getInt("deltaMs")?.toLong()
         if (delta == null) {
+            Log.w(TAG, "seekBy: missing or invalid deltaMs in ${call.data}")
             rejectInvalid(call, "seekBy requires deltaMs.")
             return
         }
+        Log.i(TAG, "seekBy: deltaMs=$delta")
         engine.seekBy(delta)
         call.resolve()
     }

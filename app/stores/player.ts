@@ -422,13 +422,20 @@ export const usePlayerStore = defineStore('player', () => {
     if (!Number.isFinite(timeInSecondsOrMs)) return
 
     const dur = duration.value || (currentTrack.value?.duration ?? 0)
-    // If the value is in milliseconds (greater than duration when duration > 0)
-    const seconds = dur > 0 && timeInSecondsOrMs > dur && timeInSecondsOrMs > 1000
+    // If the value is in milliseconds (greater than duration when duration > 0, or > 1000 when dur <= 0)
+    const seconds = (dur > 0 && timeInSecondsOrMs > dur) || (dur <= 0 && timeInSecondsOrMs > 1000)
       ? timeInSecondsOrMs / 1000
       : timeInSecondsOrMs
 
     const floored = Math.max(0, seconds)
     currentTime.value = dur > 0 ? Math.min(floored, dur) : floored
+  }
+
+  function seekMs(timeInMs: number) {
+    if (!Number.isFinite(timeInMs)) return
+    const seconds = Math.max(0, timeInMs / 1000)
+    const dur = duration.value || (currentTrack.value?.duration ?? 0)
+    currentTime.value = dur > 0 ? Math.min(seconds, dur) : seconds
   }
 
   function seekForward(seconds = 10) {
@@ -750,6 +757,7 @@ export const usePlayerStore = defineStore('player', () => {
     next,
     previous,
     seek,
+    seekMs,
     seekForward,
     seekBackward,
     seekToPct,

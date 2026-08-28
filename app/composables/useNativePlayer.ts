@@ -100,6 +100,7 @@ export function useNativePlayer() {
   /** Ensures a denial is reported once, not on every native event. */
   let notificationPermissionLogged = false
   let lastResyncAt = 0
+  let lastSeekAt = 0
   let seekTimer: ReturnType<typeof setTimeout> | null = null
   let pendingSeekMs: number | null = null
 
@@ -171,6 +172,10 @@ export function useNativePlayer() {
       // than stuttering on every sporadic event.
       const nativeSeconds = snapshot.positionMs / 1000
       const drift = Math.abs(nativeSeconds - player.currentTime)
+      if (performance.now() - lastSeekAt < 800) {
+        // Suppress stale in-flight snapshots immediately after a user seek
+        return
+      }
       if (!snapshot.isPlaying || drift > 1) {
         player.currentTime = nativeSeconds
       }
@@ -342,6 +347,7 @@ export function useNativePlayer() {
   }
 
   function throttledSeek(positionMs: number) {
+    lastSeekAt = performance.now()
     pendingSeekMs = positionMs
     if (seekTimer) return
     // Leading edge: the first seek of a drag goes out immediately so a
@@ -429,9 +435,14 @@ export function useNativePlayer() {
             break
 
           case 'seek':
-          case 'seekToPct':
-            throttledSeek(player.currentTime * 1000)
+          case 'seekMs':
+          case 'seekToPct': {
+            const targetMs = name === 'seekMs' && typeof args[0] === 'number'
+              ? Math.max(0, Math.round(args[0]))
+              : Math.max(0, Math.round(player.currentTime * 1000))
+            throttledSeek(targetMs)
             break
+          }
 
           case 'seekForward':
           case 'seekBackward': {

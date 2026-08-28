@@ -16,9 +16,11 @@ const isDragging = ref(false)
 const localPct = ref(0)
 const trackRef = ref<HTMLElement | null>(null)
 let activePointerId: number | null = null
+let rafId: number | null = null
+let pendingSeekMs: number | null = null
 
 const pct = computed(() => {
-  if (!props.durationMs) return 0
+  if (!props.durationMs || props.durationMs <= 0) return 0
   return Math.min(100, Math.max(0, (props.currentMs / props.durationMs) * 100))
 })
 
@@ -29,40 +31,107 @@ function formatMs(ms: number): string {
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 }
 
-const currentLabel = computed(() => formatMs(props.currentMs))
+const displayMs = computed(() => {
+  if (isDragging.value) {
+    return (localPct.value / 100) * props.durationMs
+  }
+  return props.currentMs
+})
+
+const currentLabel = computed(() => formatMs(displayMs.value))
 const durationLabel = computed(() => formatMs(props.durationMs))
 
-function pctFromPointer(event: PointerEvent): number {
+function getPctFromClientX(clientX: number): number {
   const rect = trackRef.value?.getBoundingClientRect()
-  if (!rect?.width) return 0
-  return Math.min(100, Math.max(0, ((event.clientX - rect.left) / rect.width) * 100))
+  if (!rect || rect.width <= 0) return 0
+  const clampedX = Math.max(rect.left, Math.min(rect.right, clientX))
+  return Math.min(100, Math.max(0, ((clampedX - rect.left) / rect.width) * 100))
 }
 
-function seekToPointer(event: PointerEvent) {
-  localPct.value = pctFromPointer(event)
-  // Emit immediately for both taps and drags. `progressMs` in usePlayer is
-  // the source of truth, so the timestamp, lyrics, and visual position agree.
-  emit('seek', (localPct.value / 100) * props.durationMs)
+function flushThrottledSeek() {
+  if (pendingSeekMs !== null) {
+    emit('seek', pendingSeekMs)
+    pendingSeekMs = null
+  }
+  rafId = null
+}
+
+function scheduleSeek(targetMs: number) {
+  pendingSeekMs = targetMs
+  if (rafId === null) {
+    rafId = requestAnimationFrame(flushThrottledSeek)
+  }
+}
+
+function onWindowPointerMove(event: PointerEvent) {
+  if (!isDragging.value || (activePointerId !== null && event.pointerId !== activePointerId)) return
+  const newPct = getPctFromClientX(event.clientX)
+  localPct.value = newPct
+  scheduleSeek((newPct / 100) * props.durationMs)
+}
+
+function onWindowPointerUp(event: PointerEvent) {
+  if (!isDragging.value || (activePointerId !== null && event.pointerId !== activePointerId)) return
+  const finalPct = getPctFromClientX(event.clientX)
+  localPct.value = finalPct
+  isDragging.value = false
+  activePointerId = null
+
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId)
+    rafId = null
+  }
+  pendingSeekMs = null
+
+  removeWindowListeners()
+
+  if (trackRef.value?.hasPointerCapture?.(event.pointerId)) {
+    try {
+      trackRef.value.releasePointerCapture(event.pointerId)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // Guaranteed final seek commit
+  emit('seek', (finalPct / 100) * props.durationMs)
+}
+
+function addWindowListeners() {
+  if (import.meta.client) {
+    window.addEventListener('pointermove', onWindowPointerMove, { passive: false })
+    window.addEventListener('pointerup', onWindowPointerUp, { passive: false })
+    window.addEventListener('pointercancel', onWindowPointerUp, { passive: false })
+  }
+}
+
+function removeWindowListeners() {
+  if (import.meta.client) {
+    window.removeEventListener('pointermove', onWindowPointerMove)
+    window.removeEventListener('pointerup', onWindowPointerUp)
+    window.removeEventListener('pointercancel', onWindowPointerUp)
+  }
 }
 
 function onPointerDown(event: PointerEvent) {
   if (!props.durationMs || (event.pointerType === 'mouse' && event.button !== 0)) return
+
   activePointerId = event.pointerId
   isDragging.value = true
-  trackRef.value?.setPointerCapture?.(event.pointerId)
-  seekToPointer(event)
-}
 
-function onPointerMove(event: PointerEvent) {
-  if (!isDragging.value || event.pointerId !== activePointerId) return
-  seekToPointer(event)
-}
+  try {
+    trackRef.value?.setPointerCapture?.(event.pointerId)
+  } catch {
+    /* fallback to window listeners */
+  }
 
-function finishPointer(event: PointerEvent) {
-  if (!isDragging.value || event.pointerId !== activePointerId) return
-  if (trackRef.value?.hasPointerCapture?.(event.pointerId)) trackRef.value.releasePointerCapture(event.pointerId)
-  activePointerId = null
-  isDragging.value = false
+  const initialPct = getPctFromClientX(event.clientX)
+  localPct.value = initialPct
+
+  addWindowListeners()
+
+  const targetMs = (initialPct / 100) * props.durationMs
+  emit('seek', targetMs)
 }
 
 function onKeySeek(event: KeyboardEvent) {
@@ -83,10 +152,18 @@ function onKeySeek(event: KeyboardEvent) {
   event.preventDefault()
   emit('seek', Math.max(0, Math.min(props.durationMs, next)))
 }
+
+onBeforeUnmount(() => {
+  removeWindowListeners()
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId)
+    rafId = null
+  }
+})
 </script>
 
 <template>
-  <div class="player-progress">
+  <div class="player-progress" data-player-no-swipe>
     <div
       ref="trackRef"
       class="player-progress-track"
@@ -94,15 +171,11 @@ function onKeySeek(event: KeyboardEvent) {
       role="slider"
       :aria-valuemin="0"
       :aria-valuemax="durationMs"
-      :aria-valuenow="Math.round(currentMs)"
+      :aria-valuenow="Math.round(displayMs)"
       :aria-valuetext="`${currentLabel} of ${durationLabel}`"
       :aria-label="`Seek, ${currentLabel} of ${durationLabel}`"
       tabindex="0"
       @pointerdown.stop="onPointerDown"
-      @pointermove.stop="onPointerMove"
-      @pointerup.stop="finishPointer"
-      @pointercancel.stop="finishPointer"
-      @lostpointercapture="(event) => finishPointer(event as PointerEvent)"
       @keydown="onKeySeek"
     >
       <div class="player-progress-rail" />
@@ -125,12 +198,15 @@ function onKeySeek(event: KeyboardEvent) {
   flex-direction: column;
   gap: 0.3rem;
   flex-shrink: 0;
+  touch-action: none;
+  user-select: none;
 }
 
 .player-progress-times {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  user-select: none;
 }
 
 .player-progress-time {
@@ -147,12 +223,17 @@ function onKeySeek(event: KeyboardEvent) {
 
 .player-progress-track {
   position: relative;
-  height: 30px;
+  height: 36px;
   display: flex;
   align-items: center;
   cursor: pointer;
   touch-action: none;
+  user-select: none;
   outline: none;
+}
+
+.player-progress-track.is-dragging {
+  cursor: grabbing;
 }
 
 .player-progress-track:focus-visible .player-progress-rail {
@@ -163,15 +244,16 @@ function onKeySeek(event: KeyboardEvent) {
   position: absolute;
   left: 0;
   right: 0;
-  height: var(--player-progress-height);
+  height: var(--player-progress-height, 4px);
   background: var(--player-line);
   transition: background 160ms var(--player-ease-smooth);
+  pointer-events: none;
 }
 
 .player-progress-fill {
   position: absolute;
   left: 0;
-  height: var(--player-progress-height);
+  height: var(--player-progress-height, 4px);
   background: var(--player-fg);
   transition: width 80ms linear;
   pointer-events: none;
@@ -180,8 +262,8 @@ function onKeySeek(event: KeyboardEvent) {
 .player-progress-thumb {
   position: absolute;
   top: 50%;
-  width: var(--player-progress-thumb);
-  height: var(--player-progress-thumb);
+  width: var(--player-progress-thumb, 14px);
+  height: var(--player-progress-thumb, 14px);
   background: var(--player-fg);
   border: 2px solid var(--player-bg);
   border-radius: 999px;
@@ -189,19 +271,22 @@ function onKeySeek(event: KeyboardEvent) {
   box-shadow: 0 1px 4px rgba(0,0,0,0.4);
   transition: transform 160ms var(--player-ease-smooth), left 80ms linear;
   will-change: left, transform;
+  pointer-events: none;
 }
 
 .player-progress-track.is-dragging .player-progress-fill,
 .player-progress-track.is-dragging .player-progress-thumb {
-  transition: none;
+  transition: none !important;
 }
 
+.player-progress-track:hover .player-progress-thumb,
 .player-progress-track:active .player-progress-thumb,
+.player-progress-track.is-dragging .player-progress-thumb,
 .player-progress-track:focus-visible .player-progress-thumb {
-  transform: translate(-50%, -50%) scale(1.2);
+  transform: translate(-50%, -50%) scale(1.25);
 }
 
 @media (min-width: 768px) {
-  .player-progress-track { height: 32px; }
+  .player-progress-track { height: 36px; }
 }
 </style>

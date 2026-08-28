@@ -20,6 +20,7 @@ const {
   next,
   prev,
   seek,
+  seekMs,
   seekForward,
   seekBackward,
   favorites,
@@ -99,7 +100,7 @@ function closeActiveSession() {
 }
 
 function onSeek(ms: number) {
-  seek(ms)
+  seekMs(ms)
 }
 
 /**

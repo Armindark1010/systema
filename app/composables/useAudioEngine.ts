@@ -16,7 +16,7 @@ let noiseBuf: AudioBuffer | null = null
 let level = 0.8
 
 // the currently sounding voice graph
-let live: { stop: () => void } | null = null
+let live: { stop: () => void; seek: (targetStep: number) => void } | null = null
 
 function hash(s: string): number {
   let h = 2166136261
@@ -150,6 +150,10 @@ function start(track: Track) {
   }, 400)
 
   live = {
+    seek(targetStep: number) {
+      step = targetStep
+      nextTime = c.currentTime + 0.05
+    },
     stop() {
       clearInterval(timer)
       try {
@@ -167,6 +171,13 @@ function stop() {
   live = null
 }
 
+function seek(seconds: number) {
+  if (!ctx || !live || !Number.isFinite(seconds)) return
+  // Beat duration is roughly 0.5s - 1s, chord duration is beat * 8 (~4-8s)
+  const targetStep = Math.max(0, Math.floor(seconds / 5))
+  live.seek(targetStep)
+}
+
 function setPaused(paused: boolean) {
   if (!ctx || !live) return
   if (paused && ctx.state === 'running') void ctx.suspend()
@@ -179,5 +190,5 @@ function setLevel(v: number) {
 }
 
 export function useAudioEngine() {
-  return { start, stop, setPaused, setLevel }
+  return { start, stop, seek, setPaused, setLevel }
 }

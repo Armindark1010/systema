@@ -153,6 +153,15 @@ export function usePlayerEngine() {
       },
       { immediate: true },
     )
+
+    // Synchronize seek actions with audio engine
+    player.$onAction(({ name, after }) => {
+      if (name === 'seek' || name === 'seekMs' || name === 'seekToPct' || name === 'seekForward' || name === 'seekBackward') {
+        after(() => {
+          engine.seek(player.currentTime)
+        })
+      }
+    })
   }
 
   return {

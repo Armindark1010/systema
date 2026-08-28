@@ -786,16 +786,11 @@ class PlayerEngine private constructor(context: Context) {
         try {
             val p = player ?: return@onMain
             if (p.mediaItemCount == 0) return@onMain
-            val duration = seekableDurationMs(p)
-            // Negative requests always clamp; the upper bound only
-            // applies once it is real.
-            val target = if (duration != null) {
-                positionMs.coerceIn(0, duration)
-            } else {
-                positionMs.coerceAtLeast(0)
-            }
-            p.seekTo(target)
-            emitSnapshot()
+            val dur = seekableDurationMs(p)
+            val target = if (dur != null) positionMs.coerceIn(0, dur) else positionMs.coerceAtLeast(0)
+            val index = p.currentMediaItemIndex
+            Log.i(TAG, "seekTo: index=$index, targetMs=$target")
+            if (index >= 0) p.seekTo(index, target) else p.seekTo(target)
         } catch (t: Throwable) {
             // An out-of-range seek against a timeline that changed
             // underneath us must not take the session down.
@@ -811,8 +806,12 @@ class PlayerEngine private constructor(context: Context) {
             val duration = seekableDurationMs(p)
             val raw = p.currentPosition + deltaMs
             val target = if (duration != null) raw.coerceIn(0, duration) else raw.coerceAtLeast(0)
-            p.seekTo(target)
-            emitSnapshot()
+            val index = p.currentMediaItemIndex
+            if (index >= 0) {
+                p.seekTo(index, target)
+            } else {
+                p.seekTo(target)
+            }
         } catch (t: Throwable) {
             Log.w(TAG, "seekBy failed", t)
         }

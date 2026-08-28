@@ -33,6 +33,7 @@ export function usePlayer() {
     prev: store.previous,
     previous: store.previous,
     seek: store.seek,
+    seekMs: store.seekMs,
     seekForward: store.seekForward,
     seekBackward: store.seekBackward,
     seekToPct: store.seekToPct,
