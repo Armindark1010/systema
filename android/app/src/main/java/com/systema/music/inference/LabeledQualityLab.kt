@@ -59,6 +59,12 @@ class LabeledQualityLab(
         const val EVENT_PAIR_COMPLETED = "labeledEvalPairCompleted"
         const val EVENT_MEMORY = "labeledEvalMemory"
         const val EVENT_FINISHED = "labeledEvalFinished"
+
+        /**
+         * Below this, a fixed trailing dimension is not a waveform
+         * window. 8000 samples is a sixth of a second at 48 kHz.
+         */
+        private const val MIN_WINDOW_SAMPLES = 8_000L
     }
 
     private val mutex = Mutex()
@@ -114,7 +120,18 @@ class LabeledQualityLab(
         cancelRequested.set(false)
         running.set(true)
 
-        val config = AudioAnalysisConfig()
+        // Decode AT THE MODEL'S OWN RATE.
+        //
+        // The default here is 22050 Hz, inherited from the Phase 13
+        // analyser. Feeding that to a 48 kHz model and resampling
+        // afterwards would upsample: it cannot restore the 11-24 kHz
+        // band the model was trained on, and it would silently make
+        // every "10 second" window the wrong duration. Decoding at the
+        // declared rate keeps window length and content both honest.
+        val config = AudioAnalysisConfig(
+            targetSampleRate = descriptor.inputSampleRate
+                ?: AudioAnalysisConfig().targetSampleRate,
+        )
         val decoder = PcmDecoder(context, config)
         val env = EnvironmentSnapshot.capture(context)
         val audit = MemoryLifecycleAudit(context)
@@ -428,6 +445,35 @@ class LabeledQualityLab(
 
         val durationSec = totalSamples.toDouble() / config.targetSampleRate
 
+        // ---- FIXED-WINDOW MODELS TAKE THE WINDOWED PATH ----
+        // A model whose input is a FIXED [1, N] waveform (CLAP's
+        // audio.onnx is [batch, 480000]) cannot be handed a whole
+        // track. Doing so previously produced a tensor declared
+        // [28, 480000] against a 13,840,300-sample buffer: integer
+        // division dropped the 400,300-sample remainder and ORT
+        // rejected it with an arithmetic error that named neither the
+        // track nor the real cause.
+        //
+        // Such a model is windowed here with the SAME geometry the
+        // single-track test verified on this device: 10 s windows, 5 s
+        // stride, one window per inference, mean-pooled then L2. The
+        // frame-embedding path below is untouched and still serves
+        // YAMNet, whose graph emits [frames, dim] for a whole clip.
+        val windowSamples = fixedWindowSamplesFor(descriptor)
+        if (windowSamples != null) {
+            return embedByWindows(
+                track = track,
+                index = index,
+                pcm = pcm,
+                pcmSampleRate = config.targetSampleRate,
+                windowSamples = windowSamples,
+                descriptor = descriptor,
+                rt = rt,
+                decodeMs = decodeMs,
+                durationSec = durationSec,
+            )
+        }
+
         // ---- PREPARE ----
         val prepared = try {
             ModelInputPreparer.prepare(pcm, config.targetSampleRate, descriptor)
@@ -530,6 +576,183 @@ class LabeledQualityLab(
             errorMessage = null,
         )
     }
+
+    /**
+     * Samples per window when the model demands a FIXED-LENGTH
+     * waveform, or null when it does not.
+     *
+     * Returns non-null only for a rank-2 waveform input whose trailing
+     * dimension is fixed and long enough to be audio — the shape
+     * CLAP's audio.onnx declares, [batch, 480000]. Everything else,
+     * including YAMNet's frame-emitting graph, returns null and keeps
+     * the original path.
+     */
+    private fun fixedWindowSamplesFor(descriptor: ModelDescriptor): Int? {
+        if (descriptor.inputFormat != InputFormat.RAW_WAVEFORM) return null
+        val shape = descriptor.inputShape
+        if (shape.size != 2) return null
+        val trailing = shape[1]
+        // A fixed trailing dim below this is not a waveform window;
+        // refusing to treat it as one avoids inventing a geometry.
+        if (trailing < MIN_WINDOW_SAMPLES) return null
+        return trailing.toInt()
+    }
+
+    /**
+     * Embeds a track as overlapping fixed-length windows.
+     *
+     * WHY THIS EXISTS
+     * ---------------
+     * The single-tensor path assumes the graph accepts a whole clip
+     * and returns [frames, dim]. A fixed-input model accepts neither:
+     * it takes exactly N samples per call. Handing it a whole track
+     * relied on the runtime resolving a dynamic batch axis by
+     * division, which silently truncated the remainder.
+     *
+     * The geometry is the one already verified on-device by the
+     * single-track test: window = the model's declared length, stride
+     * = half of it (50% overlap), one window per inference, mean-pool
+     * then L2. Memory holds ONE window and ONE running sum, never a
+     * list of per-window embeddings.
+     */
+    private suspend fun embedByWindows(
+        track: TrackRef,
+        index: Int,
+        pcm: FloatArray,
+        pcmSampleRate: Int,
+        windowSamples: Int,
+        descriptor: ModelDescriptor,
+        rt: InferenceRuntime,
+        decodeMs: Double,
+        durationSec: Double,
+    ): TrackEmbeddingRow {
+        val prepStart = System.nanoTime()
+        val targetRate = descriptor.inputSampleRate ?: pcmSampleRate
+        val audio = if (targetRate == pcmSampleRate) {
+            pcm
+        } else {
+            ModelInputPreparer.resampleLinear(pcm, pcmSampleRate, targetRate)
+        }
+        var preprocessingMs = (System.nanoTime() - prepStart) / 1_000_000.0
+
+        val stride = (windowSamples / 2).coerceAtLeast(1)
+        var sum: DoubleArray? = null
+        var windows = 0
+        var inferenceMs = 0.0
+        var tensorMs = 0.0
+
+        var start = 0
+        while (start < audio.size) {
+            if (cancelRequested.get()) {
+                return TrackEmbeddingRow.failed(
+                    index, track.trackId, "CANCELLED",
+                    "Stopped after $windows window(s), before a full embedding.",
+                )
+            }
+
+            val p0 = System.nanoTime()
+            val end = minOf(start + windowSamples, audio.size)
+            val length = end - start
+            // EXACTLY windowSamples every time. A short tail is padded
+            // rather than submitted at its natural length, because the
+            // declared shape is fixed and a partial buffer is what
+            // caused the original mismatch.
+            val window = FloatArray(windowSamples)
+            System.arraycopy(audio, start, window, 0, length)
+            preprocessingMs += (System.nanoTime() - p0) / 1_000_000.0
+
+            val out = try {
+                rt.infer(window)
+            } catch (e: InferenceException) {
+                return TrackEmbeddingRow.failed(
+                    index, track.trackId, e.code.name,
+                    "Window ${windows + 1} (offset $start, $windowSamples samples): " +
+                        (e.message ?: ""),
+                )
+            } catch (e: Throwable) {
+                return TrackEmbeddingRow.failed(
+                    index, track.trackId,
+                    InferenceErrorCode.MODEL_INFERENCE_FAILED.name,
+                    e.message ?: "Inference failed.",
+                )
+            }
+            inferenceMs += out.inferenceMs
+            tensorMs += out.tensorMs
+
+            val vec = out.output
+            val acc = sum ?: DoubleArray(vec.size).also { sum = it }
+            if (vec.size != acc.size) {
+                return TrackEmbeddingRow.failed(
+                    index, track.trackId, "EMBEDDING_SHAPE_INVALID",
+                    "Window ${windows + 1} produced ${vec.size} values but the " +
+                        "previous window produced ${acc.size}.",
+                )
+            }
+            for (i in vec.indices) acc[i] += vec[i].toDouble()
+            windows++
+
+            // The final window has been emitted once the clip reaches
+            // the end of the audio; advancing further would only
+            // re-embed padding.
+            if (end >= audio.size) break
+            start += stride
+        }
+
+        val acc = sum
+        if (acc == null || windows == 0) {
+            return TrackEmbeddingRow.failed(
+                index, track.trackId, "EMBEDDING_UNAVAILABLE",
+                "No window produced an embedding.",
+            )
+        }
+
+        val aggStart = System.nanoTime()
+        val pooled = FloatArray(acc.size) { (acc[it] / windows).toFloat() }
+        var sq = 0.0
+        for (v in pooled) sq += v.toDouble() * v.toDouble()
+        val preNormL2 = kotlin.math.sqrt(sq)
+        if (preNormL2 <= 0.0) {
+            return TrackEmbeddingRow.failed(
+                index, track.trackId, "DEGENERATE_EMBEDDING",
+                "The pooled vector had zero magnitude; it has no direction to compare.",
+            )
+        }
+        val normalised = FloatArray(pooled.size) { (pooled[it] / preNormL2).toFloat() }
+        val aggregationMs = (System.nanoTime() - aggStart) / 1_000_000.0
+
+        val norm = EmbeddingSimilarity.l2Norm(normalised)
+        if (kotlin.math.abs(norm - 1.0) > EmbeddingSimilarity.NORM_TOLERANCE) {
+            return TrackEmbeddingRow.failed(
+                index, track.trackId, "EMBEDDING_NOT_NORMALISED",
+                "The pooled vector has L2 norm $norm, which is not 1.",
+            )
+        }
+
+        return TrackEmbeddingRow(
+            index = index,
+            trackId = track.trackId,
+            ok = true,
+            vector = normalised,
+            dimension = normalised.size,
+            // One embedding per WINDOW here, rather than per model
+            // frame. Reported honestly so the two paths are not
+            // confused when reading a report.
+            frameCount = windows,
+            frameDimension = normalised.size,
+            l2Norm = norm,
+            preNormL2 = preNormL2,
+            decodeMs = decodeMs,
+            preprocessingMs = preprocessingMs,
+            inferenceMs = inferenceMs,
+            tensorMs = tensorMs,
+            aggregationMs = aggregationMs,
+            totalMs = decodeMs + preprocessingMs + inferenceMs + tensorMs,
+            audioDurationSec = durationSec,
+            errorCode = null,
+            errorMessage = null,
+        )
+    }
+
 }
 
 /**

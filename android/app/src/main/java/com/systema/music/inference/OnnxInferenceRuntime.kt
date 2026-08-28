@@ -471,7 +471,40 @@ class OnnxInferenceRuntime : InferenceRuntime {
             return longArrayOf(actualElements.toLong())
         }
         val known = declared.filter { it > 0 }.fold(1L) { a, b -> a * b }
-        val inferred = if (known > 0) actualElements / known else actualElements.toLong()
+
+        // INTEGER DIVISION MUST NOT SILENTLY DROP A REMAINDER.
+        // ---------------------------------------------------
+        // This previously computed actualElements / known and returned
+        // the result even when the division was inexact. A 288.34 s
+        // track (13,840,300 samples) against a declared [-1, 480000]
+        // produced [28, 480000] = 13,440,000 elements — 400,300 samples
+        // short — and ORT rejected the tensor with an arithmetic error
+        // that said nothing about the real cause.
+        //
+        // A shape that does not account for every supplied element is
+        // wrong by definition, so it is refused here with an
+        // explanation instead of being handed to the runtime.
+        if (known <= 0L) {
+            throw InferenceException(
+                InferenceErrorCode.INPUT_SHAPE_MISMATCH,
+                "Model input shape $declared has no usable fixed dimension, so the " +
+                    "dynamic axis cannot be resolved.",
+            )
+        }
+        if (actualElements.toLong() % known != 0L) {
+            val whole = actualElements / known
+            throw InferenceException(
+                InferenceErrorCode.INPUT_SHAPE_MISMATCH,
+                "Input buffer of $actualElements element(s) does not divide evenly " +
+                    "into the declared shape $declared. The fixed dimensions require " +
+                    "a multiple of $known, but $actualElements leaves " +
+                    "${actualElements.toLong() % known} left over " +
+                    "($whole full block(s) plus a partial one). The caller must " +
+                    "window the input to an exact multiple rather than relying on " +
+                    "the runtime to round it off.",
+            )
+        }
+        val inferred = actualElements / known
         return declared.map { if (it <= 0) inferred else it }.toLongArray()
     }
 

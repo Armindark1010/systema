@@ -34,6 +34,13 @@ import { resolve } from 'node:path'
 import { CLAP_HTSAT_TINY, hzToMel, logMel, melToHz } from './clap-melref/melPort'
 import { derive } from './clap-melref/graphContractPort'
 import { coverageSec, runStream, windowBudget } from './clap-melref/streamingPort'
+import {
+  ShapeMismatchError,
+  elementCount,
+  fixedWindowSamplesFor,
+  resolveShape,
+  windowLengths,
+} from './clap-melref/tensorShapePort'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const read = (p: string) => readFileSync(resolve(ROOT, p), 'utf8')
@@ -783,6 +790,175 @@ section('23. Duration is selectable and reported honestly')
     /TEST ONE TRACK — /.test(page))
   ok('full track is not the default',
     page.includes('CLAP_DEFAULT_DURATION_SEC'))
+}
+
+// =====================================================================
+section('24. Declared tensor shape must match the supplied buffer')
+{
+  // THE REPORTED FAILURE, EXACTLY:
+  //   "Shape [28, 480000], requires 13440000 elements but the buffer
+  //    has 13840300 elements."
+  // 13,840,300 samples is 288.34 s at 48 kHz — the WHOLE track. The
+  // labelled lab submitted it as a single tensor, and resolveShape
+  // divided 13840300 / 480000 = 28, discarding 400,300 samples.
+  const FAILING = 13_840_300
+
+  ok('the failing buffer is the whole 288.34 s track',
+    Math.abs(FAILING / 48000 - 288.34) < 0.01)
+
+  // THE REGRESSION TEST THE USER ASKED FOR: a declared element count
+  // that differs from the buffer length must FAIL, not be rounded.
+  let threw = false
+  try {
+    resolveShape([-1, 480000], FAILING)
+  } catch (e) {
+    threw = e instanceof ShapeMismatchError
+  }
+  ok('an inexact division is refused, not truncated', threw)
+
+  // And it must not silently produce the old wrong answer.
+  let produced: number[] | null = null
+  try {
+    produced = resolveShape([-1, 480000], FAILING)
+  } catch { /* expected */ }
+  ok('[28, 480000] is never returned for this buffer', produced === null)
+
+  // Exact multiples still resolve normally.
+  const exact = resolveShape([-1, 480000], 28 * 480000)
+  ok('an exact multiple still resolves', JSON.stringify(exact) === '[28,480000]')
+  ok('the resolved shape accounts for every element',
+    elementCount(exact) === 28 * 480000)
+
+  // A single window, the shape CLAP actually receives.
+  const one = resolveShape([-1, 480000], 480000)
+  ok('one window resolves to [1, 480000]', JSON.stringify(one) === '[1,480000]')
+  ok('one window accounts for every element', elementCount(one) === 480000)
+
+  // THE GENERAL INVARIANT, swept: for any buffer and any fixed
+  // trailing dim, either the shape covers the buffer exactly or the
+  // call throws. It must never return a shape that covers less.
+  let violations = 0
+  for (const fixed of [480000, 16000, 1024, 64]) {
+    for (const extra of [0, 1, 7, 999, 400300]) {
+      const n = fixed * 3 + extra
+      try {
+        const shp = resolveShape([-1, fixed], n)
+        if (elementCount(shp) !== n) violations++
+      } catch (e) {
+        if (!(e instanceof ShapeMismatchError)) violations++
+        if (extra === 0) violations++ // exact cases must NOT throw
+      }
+    }
+  }
+  ok('shape always covers the buffer exactly, or throws', violations === 0,
+    `${violations} violation(s)`)
+
+  // Fully dynamic and fully fixed shapes are unaffected.
+  ok('a fully fixed shape passes through',
+    JSON.stringify(resolveShape([1, 480000], 480000)) === '[1,480000]')
+  ok('multiple dynamic axes fall back to a flat vector',
+    JSON.stringify(resolveShape([-1, -1], 1234)) === '[1234]')
+}
+
+// =====================================================================
+section('25. The labelled lab windows fixed-input models')
+{
+  // The root cause was architectural: the labelled evaluator was
+  // written for YAMNet, whose graph takes a whole clip and returns
+  // [frames, dim]. CLAP's audio.onnx takes exactly 480000 samples per
+  // call, so a whole track cannot be one tensor.
+  const lab = read(`${KOTLIN}/LabeledQualityLab.kt`)
+
+  ok('the lab detects a fixed-length waveform input',
+    /fun fixedWindowSamplesFor/.test(lab))
+  ok('the lab has a windowed embedding path',
+    /suspend fun embedByWindows/.test(lab))
+  ok('the windowed path is taken before single-tensor prepare',
+    lab.indexOf('fixedWindowSamplesFor(descriptor)') <
+      lab.indexOf('ModelInputPreparer.prepare(pcm'))
+  ok('every window tensor is exactly the declared length',
+    /val window = FloatArray\(windowSamples\)/.test(lab))
+  ok('windows overlap 50%', /val stride = \(windowSamples \/ 2\)/.test(lab))
+  ok('one running sum, not a list of embeddings',
+    /var sum: DoubleArray\? = null/.test(lab) &&
+    !/embeddings\.add\(vec\)/.test(lab))
+  ok('the pooled vector is L2 normalised', /preNormL2/.test(lab))
+  ok('a per-window failure names the offset',
+    /Window \$\{windows \+ 1\} \(offset \$start/.test(lab))
+  ok('cancellation is honoured mid-track',
+    /cancelRequested\.get\(\)[\s\S]{0,200}Stopped after \$windows window/.test(lab))
+
+  // The YAMNet path must be untouched.
+  ok('the frame-embedding path still exists',
+    /result\.embeddingFrames/.test(lab))
+  ok('YAMNet still uses FrameEmbeddingAggregator',
+    /FrameEmbeddingAggregator\.aggregate\(/.test(lab))
+
+  // Detection must be precise: only rank-2 fixed waveforms.
+  ok('a dynamic-length waveform is NOT windowed',
+    fixedWindowSamplesFor([-1, -1], 'RAW_WAVEFORM') === null)
+  ok('a log-mel input is NOT windowed',
+    fixedWindowSamplesFor([1, 1, 1001, 64], 'LOG_MEL_SPECTROGRAM') === null)
+  ok('a rank-4 waveform claim is NOT windowed',
+    fixedWindowSamplesFor([1, 1, 1001, 64], 'RAW_WAVEFORM') === null)
+  ok('an implausibly short fixed dim is NOT windowed',
+    fixedWindowSamplesFor([-1, 512], 'RAW_WAVEFORM') === null)
+  ok('CLAP audio.onnx IS windowed',
+    fixedWindowSamplesFor([-1, 480000], 'RAW_WAVEFORM') === 480000)
+
+  // The failing track must now produce the geometry the device already
+  // verified in the single-track test: 57 windows.
+  const lengths = windowLengths(13_840_300, 480000)
+  ok('the failing track yields 57 windows', lengths.length === 57,
+    `got ${lengths.length}`)
+  ok('every submitted tensor is exactly 480000 samples',
+    lengths.every(l => l === 480000))
+  ok('this matches the verified single-track result', lengths.length === 57)
+
+  // Each individual window resolves cleanly — the original error is
+  // impossible by construction now.
+  let allResolve = true
+  for (const l of lengths) {
+    try {
+      if (elementCount(resolveShape([-1, 480000], l)) !== l) allResolve = false
+    } catch { allResolve = false }
+  }
+  ok('every window resolves to a shape matching its buffer', allResolve)
+
+  // Short tracks still produce one full window, not a partial tensor.
+  const shortT = windowLengths(3 * 48000, 480000)
+  ok('a 3 s track still submits one full 480000-sample window',
+    shortT.length === 1 && shortT[0] === 480000)
+
+  // SAMPLE RATE. The lab defaulted to AudioAnalysisConfig()'s 22050 Hz,
+  // inherited from the Phase 13 analyser. At that rate a 480000-sample
+  // window is 21.8 s of audio, not 10 s — the window would be right in
+  // samples and wrong in seconds.
+  ok('the lab decodes at the model\'s declared rate',
+    /targetSampleRate = descriptor\.inputSampleRate/.test(lab))
+  ok('a bare AudioAnalysisConfig() no longer feeds the decoder',
+    !/val config = AudioAnalysisConfig\(\)\s*\n\s*val decoder/.test(lab))
+  ok('480000 samples is 10 s only at 48 kHz',
+    Math.abs(480000 / 48000 - 10) < 1e-9 &&
+    Math.abs(480000 / 22050 - 21.77) < 0.01)
+}
+
+// =====================================================================
+section('26. The runtime refuses inexact shapes everywhere')
+{
+  const rtSrc = read(`${KOTLIN}/OnnxInferenceRuntime.kt`)
+  const norm = rtSrc.replace(/\/\/\s*/g, ' ')
+
+  ok('resolveShape rejects a non-zero remainder',
+    /actualElements(\.toLong\(\))? % known != 0L?/.test(rtSrc))
+  ok('the refusal is an INPUT_SHAPE_MISMATCH',
+    /INPUT_SHAPE_MISMATCH/.test(rtSrc))
+  ok('the message reports the remainder', /remainder/i.test(norm))
+  ok('the message reports the buffer size', /buffer/i.test(norm))
+  ok('nothing is truncated to force a fit',
+    !/actualElements \/ known\s*\n?\s*\}\s*$/.test(rtSrc))
+  ok('a zero or negative known product is refused',
+    /known <= 0/.test(rtSrc))
 }
 
 console.log(`\n${'='.repeat(60)}`)
