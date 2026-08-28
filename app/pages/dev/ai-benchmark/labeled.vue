@@ -61,6 +61,29 @@ import {
   seededLabelMap,
   SEEDED_LABELS,
 } from '~/data/labeledPairs'
+import {
+  buildDataset,
+  countByLabel,
+  emptyDataset,
+  fromPositionalLabels,
+  loadDataset,
+  mergeDatasets,
+  parseDataset,
+  saveDataset,
+  toPositionalLabels,
+  validateDataset,
+  type DatasetTrack,
+  type LabelDataset,
+} from '~/services/ai-lab/labelDataset'
+import {
+  copyToClipboard,
+  downloadText,
+  toJson,
+  toMarkdown,
+  toPlainText,
+  toSummary,
+  type EvaluationReportInput,
+} from '~/services/ai-lab/reportExport'
 
 definePageMeta({ layout: 'dev' })
 useHead({ title: 'Labelled quality evaluation' })
@@ -125,6 +148,294 @@ const showLabeller = ref(false)
 
 function resetLabels() {
   labels.value = {}
+}
+
+// ---- Phase 20: persistent dataset (§12) -----------------------
+//
+// Labels used to live only in the ref above, so a refresh, a route
+// change or a rerun destroyed hours of human judgement. They are
+// research data, so they are now persisted by STABLE TRACK ID and
+// survive all three.
+//
+// Positional "i:j" keys are converted at this boundary and never
+// stored: they are only valid for one exact selection order.
+
+const datasetStatus = ref<string | null>(null)
+const importSummary = ref<ImportSummary | null>(null)
+const pendingImport = ref<LabelDataset | null>(null)
+const importIsMerge = ref(true)
+const confirmReplace = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
+
+interface ImportSummary {
+  ok: boolean
+  issues: { severity: string, code: string, message: string }[]
+  trackCount: number
+  pairCount: number
+  counts: { same: number, similar: number, different: number }
+  missingTracks: string[]
+  duplicates: string[]
+  conflicts: { pairId: string, existingLabel: string, incomingLabel: string }[]
+  added: number
+  unchanged: number
+}
+
+/** Tracks currently selected, as portable dataset records. */
+function currentDatasetTracks(): DatasetTrack[] {
+  return selected.value.map((id) => {
+    const t = tracks.value.find(x => x.id === id)
+    return {
+      id,
+      title: t?.title ?? id,
+      uri: t?.uri ?? undefined,
+      artist: (t as any)?.artist ?? undefined,
+    }
+  })
+}
+
+/** The complete dataset: persisted pairs merged with on-screen labels. */
+function currentDataset(): LabelDataset {
+  const stored = loadDataset() ?? emptyDataset()
+  const live = buildDataset(
+    currentDatasetTracks(),
+    fromPositionalLabels(selected.value, labels.value),
+  )
+  // Live edits win over the stored copy for the same pair, because the
+  // on-screen state is what the human most recently decided.
+  return mergeDatasets(live, stored).dataset
+}
+
+function persistLabels() {
+  // Deliberately unguarded. The storage adapter already handles the
+  // quota / private-mode failure internally, so wrapping this again
+  // would only add a second silent swallow point on the page that the
+  // white-screen regression exists to keep clear.
+  saveDataset(currentDataset())
+}
+
+// Autosave. Deep watch is safe here: `labels` holds only small
+// {label, source} records, never embeddings or tensors.
+watch(labels, () => {
+  if (Object.keys(labels.value).length > 0) persistLabels()
+}, { deep: true })
+
+/** Re-applies stored labels whenever the selection changes. */
+function restoreLabelsForSelection() {
+  const stored = loadDataset()
+  if (!stored || selected.value.length < 2) return
+  const restored = toPositionalLabels(selected.value, stored.pairs)
+  const n = Object.keys(restored).length
+  if (n === 0) return
+  labels.value = { ...restored, ...labels.value }
+  datasetStatus.value = `Restored ${n} saved label${n === 1 ? '' : 's'} for this selection.`
+}
+
+watch(selected, () => { restoreLabelsForSelection() }, { deep: true })
+onMounted(() => {
+  const stored = loadDataset()
+  if (stored && stored.pairs.length) {
+    datasetStatus.value
+      = `${stored.pairs.length} saved label(s) available across ${stored.tracks.length} track(s).`
+  }
+  restoreLabelsForSelection()
+})
+
+function exportDataset() {
+  const d = currentDataset()
+  if (d.pairs.length === 0) {
+    datasetStatus.value = 'Nothing to export — no labels recorded yet.'
+    return
+  }
+  saveDataset(d)
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  downloadText(`systema-labels-${stamp}.json`, JSON.stringify(d, null, 2))
+  datasetStatus.value = `Exported ${d.pairs.length} pair(s) and ${d.tracks.length} track(s).`
+}
+
+function backupDataset() {
+  exportDataset()
+}
+
+function chooseImportFile(merge: boolean) {
+  importIsMerge.value = merge
+  confirmReplace.value = false
+  fileInput.value?.click()
+}
+
+async function onImportFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+
+  const text = await file.text()
+  const { data, parseError } = parseDataset(text)
+  if (parseError) {
+    importSummary.value = {
+      ok: false,
+      issues: [{ severity: 'ERROR', code: 'BAD_JSON', message: `Invalid JSON: ${parseError}` }],
+      trackCount: 0, pairCount: 0, counts: { same: 0, similar: 0, different: 0 },
+      missingTracks: [], duplicates: [], conflicts: [], added: 0, unchanged: 0,
+    }
+    pendingImport.value = null
+    return
+  }
+
+  const v = validateDataset(data)
+  // Validate BEFORE applying anything: an invalid file must change nothing.
+  if (!v.ok) {
+    importSummary.value = {
+      ok: false, issues: v.issues, trackCount: v.trackCount, pairCount: v.pairCount,
+      counts: v.counts, missingTracks: v.missingTrackRefs, duplicates: v.duplicatePairIds,
+      conflicts: [], added: 0, unchanged: 0,
+    }
+    pendingImport.value = null
+    return
+  }
+
+  const incoming = data as LabelDataset
+  const existing = loadDataset() ?? emptyDataset()
+  const preview = mergeDatasets(existing, incoming)
+
+  pendingImport.value = incoming
+  importSummary.value = {
+    ok: true, issues: v.issues, trackCount: v.trackCount, pairCount: v.pairCount,
+    counts: v.counts, missingTracks: v.missingTrackRefs, duplicates: v.duplicatePairIds,
+    conflicts: preview.conflicts, added: preview.added, unchanged: preview.unchanged,
+  }
+}
+
+function applyImport() {
+  const incoming = pendingImport.value
+  if (!incoming) return
+
+  if (importIsMerge.value) {
+    const existing = loadDataset() ?? emptyDataset()
+    const merged = mergeDatasets(existing, incoming)
+    saveDataset(merged.dataset)
+    datasetStatus.value
+      = `Merged: ${merged.added} added, ${merged.unchanged} unchanged, `
+      + `${merged.conflicts.length} conflict(s) kept as existing.`
+  }
+  else {
+    // Destructive, and never the default. Guarded by an explicit
+    // confirmation checkbox in the template.
+    if (!confirmReplace.value) {
+      datasetStatus.value = 'REPLACE requires explicit confirmation.'
+      return
+    }
+    saveDataset(incoming)
+    datasetStatus.value = `Replaced dataset with ${incoming.pairs.length} pair(s).`
+  }
+
+  pendingImport.value = null
+  importSummary.value = null
+  confirmReplace.value = false
+  labels.value = {}
+  restoreLabelsForSelection()
+}
+
+function cancelImport() {
+  pendingImport.value = null
+  importSummary.value = null
+  confirmReplace.value = false
+}
+
+// ---- Report export (§12) --------------------------------------
+
+function buildReportInput(): EvaluationReportInput {
+  const d = currentDataset()
+  const counts = countByLabel(d.pairs)
+  const r = report.value
+  const sep = (r?.separation ?? liveSeparation.value) as any
+  const mem = memoryTimeline.value
+  // The native timeline reports KB; the report is stated in MB.
+  // `null` when a checkpoint is absent, never 0 — a missing sample and
+  // a genuine 0 MB reading must not render the same way.
+  const toMb = (kb: number | null | undefined) =>
+    typeof kb === 'number' && Number.isFinite(kb) ? kb / 1024 : null
+  const at = (name: string) =>
+    toMb(mem.find(m => m.checkpoint === name)?.sample?.totalPssKb)
+
+  const baseline = at('BEFORE_MODEL_LOAD')
+  const post = at('AFTER_SESSION_CLEANUP')
+  const peakKb = mem.length
+    ? Math.max(...mem.map(m => m.runningPeakKb ?? m.sample?.totalPssKb ?? 0))
+    : null
+  const peak = peakKb ? toMb(peakKb) : null
+
+  return {
+    phase: 'Phase 20',
+    timestamp: new Date().toISOString(),
+    modelId: modelId.value || null,
+    modelName: models.value.find(m => m.id === modelId.value)?.name ?? null,
+    deviceLabel: null,
+    osVersion: null,
+    // Only a completed native run counts. No run => not verified.
+    deviceVerified: Boolean(report.value) && available,
+    datasetVersion: d.datasetVersion,
+    trackCount: d.tracks.length,
+    pairCount: d.pairs.length,
+    counts,
+    sameVsDifferentAuc: sep?.sameVsDifferentAuc ?? null,
+    similarVsDifferentAuc: sep?.similarVsDifferentAuc ?? null,
+    sameVsSimilarAuc: sep?.sameVsSimilarAuc ?? null,
+    overlapPercent: sep?.overlapPercent ?? null,
+    classStats: (liveClasses.value ?? []).map(c => ({
+      label: String((c as any).label ?? ''),
+      count: Number((c as any).count ?? 0),
+      mean: (c as any).meanCosine ?? null,
+      median: (c as any).medianCosine ?? null,
+      min: (c as any).minCosine ?? null,
+      max: (c as any).maxCosine ?? null,
+    })),
+    pairs: pairs.value.map(p => ({
+      trackA: String((p as any).trackA ?? ''),
+      trackB: String((p as any).trackB ?? ''),
+      label: String((p as any).label ?? ''),
+      cosine: (p as any).cosine ?? null,
+    })),
+    embeddingDimension: rows.value[0]?.dimension ?? null,
+    pooling: 'MEAN',
+    memory: {
+      baselinePssMb: baseline,
+      peakPssMb: peak,
+      postCleanupPssMb: post,
+      retainedMb: baseline !== null && post !== null ? post - baseline : null,
+      classification: post !== null && baseline !== null
+        ? (post - baseline <= 0 ? 'RELEASED' : 'SEE MEMORY AUDIT')
+        : null,
+    },
+    verdict: report.value ? 'See separation metrics above' : 'NOT MEASURED — no run completed',
+    warnings: [],
+    blockers: [],
+    nextAction: 'Human decision required. No production model selected.',
+  }
+}
+
+async function copyReport() {
+  const ok = await copyToClipboard(toMarkdown(buildReportInput()))
+  datasetStatus.value = ok ? 'Report copied to clipboard.' : 'Clipboard unavailable.'
+}
+
+async function copySummary() {
+  const ok = await copyToClipboard(toSummary(buildReportInput()))
+  datasetStatus.value = ok ? 'Summary copied to clipboard.' : 'Clipboard unavailable.'
+}
+
+function exportReport(format: 'json' | 'md' | 'txt') {
+  const input = buildReportInput()
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  if (format === 'json') {
+    downloadText(`systema-report-${stamp}.json`, toJson(input), 'application/json')
+  }
+  else if (format === 'md') {
+    downloadText(`systema-report-${stamp}.md`, toMarkdown(input), 'text/markdown')
+  }
+  else {
+    downloadText(`systema-report-${stamp}.txt`, toPlainText(input), 'text/plain')
+  }
+  datasetStatus.value = `Report exported as ${format.toUpperCase()}.`
 }
 
 /**
@@ -648,6 +959,138 @@ const elapsedLabel = computed(() => {
             >
               CLEAR
             </button>
+          </div>
+
+          <!-- ---- Phase 20 §12: dataset persistence ------------- -->
+          <!--
+            Labels are research data. These controls exist so hours of
+            human judgement survive a refresh, a reinstall or a branch
+            switch. IMPORT & MERGE is the default; REPLACE is visually
+            separated and gated behind a confirmation.
+          -->
+          <div class="border border-line rounded p-3 space-y-3">
+            <p class="label text-fg-muted">DATASET — HUMAN LABELS ARE SAVED AUTOMATICALLY</p>
+
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="sys-btn-outline chip" @click="exportDataset">
+                EXPORT DATASET
+              </button>
+              <button
+                type="button"
+                class="sys-btn-outline chip"
+                :disabled="running"
+                @click="chooseImportFile(true)"
+              >
+                IMPORT DATASET
+              </button>
+              <button type="button" class="sys-btn-outline chip" @click="backupDataset">
+                BACKUP DATASET
+              </button>
+            </div>
+
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="sys-btn-outline chip" @click="copyReport">
+                COPY REPORT
+              </button>
+              <button type="button" class="sys-btn-outline chip" @click="copySummary">
+                COPY SUMMARY
+              </button>
+              <button type="button" class="sys-btn-outline chip" @click="exportReport('json')">
+                EXPORT REPORT (JSON)
+              </button>
+              <button type="button" class="sys-btn-outline chip" @click="exportReport('md')">
+                MARKDOWN
+              </button>
+              <button type="button" class="sys-btn-outline chip" @click="exportReport('txt')">
+                TEXT
+              </button>
+            </div>
+
+            <input
+              ref="fileInput"
+              type="file"
+              accept="application/json,.json"
+              class="hidden"
+              @change="onImportFile"
+            >
+
+            <p v-if="datasetStatus" class="text-micro text-fg-muted">
+              {{ datasetStatus }}
+            </p>
+
+            <!-- Validation summary shown BEFORE anything is applied -->
+            <div
+              v-if="importSummary"
+              class="border rounded p-3 space-y-2"
+              :class="importSummary.ok ? 'border-line' : 'border-danger'"
+            >
+              <p class="label" :class="importSummary.ok ? 'text-fg' : 'text-danger'">
+                {{ importSummary.ok ? 'IMPORT PREVIEW — NOTHING APPLIED YET' : 'IMPORT REJECTED' }}
+              </p>
+
+              <p v-if="importSummary.ok" class="text-micro text-fg-muted">
+                {{ importSummary.trackCount }} track(s), {{ importSummary.pairCount }} pair(s) —
+                SAME {{ importSummary.counts.same }} ·
+                SIMILAR {{ importSummary.counts.similar }} ·
+                DIFFERENT {{ importSummary.counts.different }}
+              </p>
+              <p v-if="importSummary.ok" class="text-micro text-fg-muted">
+                Would add {{ importSummary.added }}, leave {{ importSummary.unchanged }} unchanged.
+              </p>
+
+              <p
+                v-for="iss in importSummary.issues"
+                :key="iss.code + iss.message"
+                class="text-micro"
+                :class="iss.severity === 'ERROR' ? 'text-danger' : 'text-warning'"
+              >
+                {{ iss.severity }} · {{ iss.code }} — {{ iss.message }}
+              </p>
+
+              <div v-if="importSummary.conflicts.length" class="space-y-1">
+                <p class="text-micro text-warning">
+                  {{ importSummary.conflicts.length }} CONFLICT(S) — your existing label is
+                  kept. Nothing is overwritten.
+                </p>
+                <p
+                  v-for="c in importSummary.conflicts.slice(0, 8)"
+                  :key="c.pairId"
+                  class="text-micro text-fg-faint"
+                >
+                  {{ c.pairId }}: existing {{ c.existingLabel }} ≠ incoming {{ c.incomingLabel }}
+                </p>
+              </div>
+
+              <p v-if="importSummary.missingTracks.length" class="text-micro text-warning">
+                {{ importSummary.missingTracks.length }} referenced track(s) are missing from
+                the file.
+              </p>
+
+              <div v-if="importSummary.ok" class="flex flex-wrap items-center gap-2 pt-1">
+                <button type="button" class="sys-btn-outline chip" @click="applyImport">
+                  {{ importIsMerge ? 'APPLY IMPORT & MERGE' : 'APPLY REPLACE' }}
+                </button>
+                <button type="button" class="sys-btn-outline chip" @click="cancelImport">
+                  CANCEL
+                </button>
+              </div>
+
+              <!-- Destructive path, deliberately separated -->
+              <div v-if="importSummary.ok" class="border-t border-line pt-2 space-y-1">
+                <label class="flex items-center gap-2 text-micro text-danger">
+                  <input v-model="confirmReplace" type="checkbox">
+                  I understand REPLACE deletes all existing labels
+                </label>
+                <button
+                  type="button"
+                  class="sys-btn-outline chip border-danger text-danger"
+                  :disabled="!confirmReplace"
+                  @click="importIsMerge = false; applyImport()"
+                >
+                  REPLACE DATASET
+                </button>
+              </div>
+            </div>
           </div>
 
           <details class="text-micro text-fg-muted">
