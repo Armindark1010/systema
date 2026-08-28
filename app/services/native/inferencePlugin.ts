@@ -189,8 +189,143 @@ export interface ImportResult {
   outputs?: TensorSignature[]
   contract?: ModelContract | null
   loadMs?: number | null
+  /** SHA-256 of the promoted file (§1). Empty when the import failed. */
+  sha256?: string
+  /** Epoch millis the file was registered (§1). */
+  importedAt?: number
   errorCode?: InferenceErrorCode | null
   message?: string
+}
+
+// -------------------------------------------------------------------
+// CLAP subsystem (Phase 21)
+// -------------------------------------------------------------------
+
+/** Pre-flight memory admission decision (§4). */
+export interface ClapMemoryGuard {
+  allowed: boolean
+  availableMb: number
+  totalMb: number
+  systemLowMemory: boolean
+  estimatedRequiredMb: number
+  javaHeapLimitMb: number
+  javaHeapUsedMb: number
+  reasonCode:
+    | 'STARTED'
+    | 'MEMORY_UNREADABLE'
+    | 'SYSTEM_LOW_MEMORY'
+    | 'BELOW_ABSOLUTE_FLOOR'
+    | 'INSUFFICIENT_MEMORY'
+  explanation: string
+  headroomMb: number
+  modelResidentFactor: number
+  /** States plainly that the estimate is a heuristic, not a measurement. */
+  caveat: string
+}
+
+export interface ClapModelMetadata {
+  id: string
+  name: string
+  family: string
+  architecture: string
+  format: string
+  sampleRate: number
+  inputType: string
+  /** -1 until a real forward pass proves it. Never assumed. */
+  embeddingDimension: number
+  sizeBytes: number
+  sha256: string
+  /** IMPORTED / VALIDATED / DEVICE_TESTED. Never PRODUCTION (§10). */
+  status: string
+  runtimeId: string
+  supportsText: boolean
+  notes: string
+  inputNames: string[]
+  outputNames: string[]
+}
+
+export interface ClapValidationCheck {
+  name: string
+  passed: boolean
+  detail: string
+}
+
+export interface ClapValidationReport {
+  ok: boolean
+  embeddingDimension: number
+  failureCode: string
+  failureMessage: string
+  checks: ClapValidationCheck[]
+}
+
+export interface ClapStatus {
+  loaded: boolean
+  modelId: string
+  validated: boolean
+  multiTrackUnlocked: boolean
+  lastSingleTrackId: string
+  status: 'IDLE' | 'LOADED' | 'VALIDATED' | 'DEVICE_TESTED'
+  /** Always false. Production selection is a separate human decision. */
+  productionSelected: boolean
+  productionNote: string
+  metadata?: ClapModelMetadata
+}
+
+export interface ClapLoadResult {
+  loadMs: number
+  sizeBytes: number
+  memoryGuard: ClapMemoryGuard
+  metadata: ClapModelMetadata
+  inputNames: string[]
+  outputNames: string[]
+}
+
+/** Result of the ONE-TRACK test (§5). */
+export interface ClapSingleTrackResult {
+  trackId: string
+  dimension: number
+  preNormL2: number
+  l2NormAfterNormalisation: number
+  outputFinite: boolean
+  outputNormalised: boolean
+  outputValid: boolean
+  windowsProcessed: number
+  /** The rate the model actually saw, i.e. what we decoded to. */
+  audioSampleRate: number
+  /** The file's own rate, before the decoder resampled it. */
+  sourceSampleRate: number
+  audioSamples: number
+  audioDurationSec: number
+  decodeMs: number
+  preprocessingMs: number
+  inferenceMs: number
+  totalProcessingMs: number
+  memoryBeforeKb: number
+  memoryPeakKb: number
+  memoryAfterKb: number
+  retainedKb: number
+  nativeBeforeKb: number
+  nativeAfterKb: number
+  sessionReleased: boolean
+  releaseError: string
+  multiTrackUnlocked: boolean
+  retentionCaveat: string
+}
+
+export interface ClapReleaseResult {
+  released: boolean
+  error: string
+  memoryBeforeKb: number
+  memoryAfterKb: number
+  retainedKb: number
+  nativeBeforeKb: number
+  nativeAfterKb: number
+}
+
+export interface ClapMemoryCheck {
+  sample: MemorySampleData
+  guard: ClapMemoryGuard
+  sessionLoaded: boolean
 }
 
 export interface InferenceCapabilities {
@@ -893,6 +1028,31 @@ export interface InferencePlugin {
    * can be imported.
    */
   pickAndImportModel(): Promise<ImportResult>
+
+  // ---- CLAP subsystem (Phase 21) ----
+  //
+  // Every one of these is triggered by an explicit user action. None
+  // is called on startup, on navigation, or after import.
+
+  /** Reads lifecycle state. Never starts anything. */
+  getClapStatus(): Promise<ClapStatus>
+  /** Pre-flight memory check (§4). Safe before any model is loaded. */
+  clapMemoryCheck(options: { modelId?: string }): Promise<ClapMemoryCheck>
+  /** Creates the single session, after the memory guard permits it. */
+  clapLoadModel(options: { modelId: string, runtimeId?: RuntimeId }): Promise<ClapLoadResult>
+  /** Dry validation on a synthetic probe, before any real audio (§2). */
+  clapValidateModel(): Promise<ClapValidationReport>
+  /**
+   * The FIRST SAFE TEST: exactly ONE manually chosen track (§5).
+   * Takes a single trackId/uri, so it cannot be handed a list.
+   */
+  clapTestOneTrack(options: {
+    trackId: string
+    uri: string
+    releaseAfter?: boolean
+  }): Promise<ClapSingleTrackResult>
+  /** Releases the session and reports retained memory. */
+  clapRelease(): Promise<ClapReleaseResult>
   /** Records what an imported model consumes. Stamped as declared. */
   declareModelContract(options: {
     modelId: string

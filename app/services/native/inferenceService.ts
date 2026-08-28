@@ -15,6 +15,12 @@
 import {
   InferenceNative,
   isInferenceAvailable,
+  type ClapLoadResult,
+  type ClapMemoryCheck,
+  type ClapReleaseResult,
+  type ClapSingleTrackResult,
+  type ClapStatus,
+  type ClapValidationReport,
   type InferenceCapabilities,
   type InferenceEnvironment,
   type InferenceErrorCode,
@@ -632,4 +638,107 @@ export function describeNeighbours(evaluation: TrackEvaluation): string {
   const far = evaluation.farthestScore?.toFixed(4) ?? '?'
   return `closest ${evaluation.nearestTrackId} (${near}) \u00b7 ` +
     `farthest ${evaluation.farthestTrackId} (${far})`
+}
+
+// -------------------------------------------------------------------
+// CLAP subsystem (Phase 21)
+//
+// Thin, explicit wrappers. Each corresponds to one user action in the
+// benchmark UI. There is deliberately no convenience function that
+// chains load -> validate -> test: the lifecycle is stepped through
+// deliberately so a human sees each result before the next stage, and
+// so nothing can cascade into inference by accident (§4).
+// -------------------------------------------------------------------
+
+/** Reads CLAP lifecycle state. Pure read; starts nothing. */
+export async function getClapStatus(): Promise<ClapStatus> {
+  requirePlugin()
+  try {
+    return await InferenceNative.getClapStatus()
+  } catch (e) {
+    throw toServiceError(e)
+  }
+}
+
+/**
+ * Pre-flight memory check (§4).
+ *
+ * Safe to call before anything is loaded, so the UI can show whether
+ * starting would be permitted rather than discovering it by freezing
+ * the device.
+ */
+export async function clapMemoryCheck(modelId?: string): Promise<ClapMemoryCheck> {
+  requirePlugin()
+  try {
+    return await InferenceNative.clapMemoryCheck({ modelId })
+  } catch (e) {
+    throw toServiceError(e)
+  }
+}
+
+/** Creates the single CLAP session. Refused if the guard says no. */
+export async function clapLoadModel(options: {
+  modelId: string
+  runtimeId?: RuntimeId
+}): Promise<ClapLoadResult> {
+  requirePlugin()
+  if (!options.modelId) {
+    throw new InferenceServiceError(
+      'MODEL_NOT_FOUND',
+      'A modelId is required. SYSTEMA never picks a model for you.',
+    )
+  }
+  try {
+    return await InferenceNative.clapLoadModel(options)
+  } catch (e) {
+    throw toServiceError(e)
+  }
+}
+
+/** Dry validation on a synthetic probe, before any real audio (§2). */
+export async function clapValidateModel(): Promise<ClapValidationReport> {
+  requirePlugin()
+  try {
+    return await InferenceNative.clapValidateModel()
+  } catch (e) {
+    throw toServiceError(e)
+  }
+}
+
+/**
+ * THE FIRST SAFE TEST (§5): exactly ONE manually chosen track.
+ *
+ * Takes a single trackId and uri. There is no array overload, so this
+ * cannot be handed a library, a playlist or a 20-track selection.
+ */
+export async function clapTestOneTrack(options: {
+  trackId: string
+  uri: string
+  releaseAfter?: boolean
+}): Promise<ClapSingleTrackResult> {
+  requirePlugin()
+  if (!options.trackId || !options.uri) {
+    throw new InferenceServiceError(
+      'INPUT_SHAPE_MISMATCH',
+      'Both trackId and uri are required. The track is never auto-selected.',
+    )
+  }
+  try {
+    return await InferenceNative.clapTestOneTrack({
+      releaseAfter: options.releaseAfter ?? true,
+      ...options,
+    })
+  } catch (e) {
+    throw toServiceError(e)
+  }
+}
+
+/** Releases the session and reports retained memory. */
+export async function clapRelease(): Promise<ClapReleaseResult> {
+  requirePlugin()
+  try {
+    return await InferenceNative.clapRelease()
+  } catch (e) {
+    throw toServiceError(e)
+  }
 }

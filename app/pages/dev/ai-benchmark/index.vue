@@ -223,6 +223,31 @@ const sustainedIterations = ref(20)
         </div>
       </section>
 
+      <!-- ---- CLAP lab (Phase 21) ------------------------ -->
+      <section class="border border-line bg-surface">
+        <div class="border-b border-line px-5 py-3">
+          <p class="label text-fg-muted">
+            CLAP EXTERNAL MODEL
+          </p>
+        </div>
+        <div class="px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+          <p class="text-small text-fg-muted max-w-[64ch] leading-relaxed">
+            Import a CLAP model you supply yourself, validate it against the
+            actual graph, load it, and test it on exactly ONE track with memory
+            sampled either side. Every stage is a separate button. No weights
+            ship with the app, nothing is downloaded, and this cannot mark a
+            model production.
+          </p>
+          <button
+            type="button"
+            class="sys-btn-outline shrink-0"
+            @click="router.push('/dev/ai-benchmark/clap')"
+          >
+            CLAP LAB →
+          </button>
+        </div>
+      </section>
+
       <!-- ---- Candidate evaluation (Phase 16) ------------ -->
       <section class="border border-line bg-surface">
         <div class="border-b border-line px-5 py-3">

@@ -12,6 +12,7 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
+import com.systema.music.inference.clap.ClapSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -72,6 +73,12 @@ class InferencePlugin : Plugin() {
     private val labeledLab: LabeledQualityLab by lazy {
         LabeledQualityLab(context, registry) { benchmark.runtime(it) }
     }
+    /**
+     * Phase 21 CLAP lifecycle owner. Lazy: constructing it must not
+     * touch a model, and nothing is loaded until asked.
+     */
+    private val clap: ClapSession by lazy { ClapSession(context, registry) }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun handleOnDestroy() {
@@ -346,6 +353,121 @@ class InferencePlugin : Plugin() {
                 call.reject(
                     e.message ?: "The memory test failed.",
                     InferenceErrorCode.MODEL_INFERENCE_FAILED.name,
+                )
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // CLAP subsystem (Phase 21)
+    //
+    // Deliberately isolated. Every method below is reachable ONLY from
+    // an explicit user action in the benchmark UI. Nothing here runs at
+    // startup, on import, on navigation, or in the background, and
+    // nothing here is reachable from PlayerEngine (§8).
+    // ---------------------------------------------------------------
+
+    /** Current lifecycle state. Pure read; never starts anything. */
+    @PluginMethod
+    fun getClapStatus(call: PluginCall) {
+        call.resolve(clap.status())
+    }
+
+    /**
+     * Memory check (§4). Callable at any point, including before load,
+     * so the UI can show whether starting would even be permitted.
+     */
+    @PluginMethod
+    fun clapMemoryCheck(call: PluginCall) {
+        call.resolve(clap.memoryCheck(call.getString("modelId")))
+    }
+
+    /** LOAD. Runs the memory guard first and refuses if there is no room. */
+    @PluginMethod
+    fun clapLoadModel(call: PluginCall) {
+        val runtimeId = call.getString("runtimeId") ?: RuntimeIds.ONNX
+        val modelId = call.getString("modelId")
+        if (modelId.isNullOrBlank()) {
+            call.reject(
+                "A modelId is required. No model is ever chosen for you.",
+                InferenceErrorCode.MODEL_NOT_FOUND.name,
+            )
+            return
+        }
+        scope.launch {
+            try {
+                call.resolve(clap.load(modelId, benchmark.runtime(runtimeId)))
+            } catch (e: InferenceException) {
+                call.reject(e.message ?: "CLAP load failed.", e.code.name)
+            } catch (e: Throwable) {
+                call.reject(
+                    e.message ?: "CLAP load failed.",
+                    InferenceErrorCode.MODEL_LOAD_FAILED.name,
+                )
+            }
+        }
+    }
+
+    /** VALIDATE (§2). Dry run on a synthetic probe, before any track. */
+    @PluginMethod
+    fun clapValidateModel(call: PluginCall) {
+        scope.launch {
+            try {
+                call.resolve(clap.validate())
+            } catch (e: InferenceException) {
+                call.reject(e.message ?: "CLAP validation failed.", e.code.name)
+            } catch (e: Throwable) {
+                call.reject(
+                    e.message ?: "CLAP validation failed.",
+                    InferenceErrorCode.MODEL_INVALID.name,
+                )
+            }
+        }
+    }
+
+    /**
+     * SINGLE TEST (§5): exactly ONE manually chosen track.
+     *
+     * Takes one trackId and one uri. There is no array parameter, so
+     * this method cannot be handed twenty tracks even by mistake.
+     */
+    @PluginMethod
+    fun clapTestOneTrack(call: PluginCall) {
+        val trackId = call.getString("trackId")
+        val uri = call.getString("uri")
+        if (trackId.isNullOrBlank() || uri.isNullOrBlank()) {
+            call.reject(
+                "Both trackId and uri are required. The track is never auto-selected.",
+                InferenceErrorCode.INPUT_SHAPE_MISMATCH.name,
+            )
+            return
+        }
+        val releaseAfter = call.getBoolean("releaseAfter") ?: true
+
+        scope.launch {
+            try {
+                call.resolve(clap.testOneTrack(trackId, uri, releaseAfter))
+            } catch (e: InferenceException) {
+                call.reject(e.message ?: "The single-track test failed.", e.code.name)
+            } catch (e: Throwable) {
+                call.reject(
+                    e.message ?: "The single-track test failed.",
+                    InferenceErrorCode.MODEL_INFERENCE_FAILED.name,
+                )
+            }
+        }
+    }
+
+    /** RELEASE + MEMORY CHECK. Safe when nothing is loaded. */
+    @PluginMethod
+    fun clapRelease(call: PluginCall) {
+        scope.launch {
+            try {
+                call.resolve(clap.release())
+            } catch (e: Throwable) {
+                call.reject(
+                    e.message ?: "CLAP release failed.",
+                    InferenceErrorCode.MODEL_LOAD_FAILED.name,
                 )
             }
         }

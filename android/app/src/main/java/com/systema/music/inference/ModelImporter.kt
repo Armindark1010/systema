@@ -206,6 +206,13 @@ class ModelImporter(
 
             val modelId = finalName.removeSuffix(ModelStorage.EXTENSION)
 
+            // ---- IDENTITY (§1) ----
+            // SHA-256 of the promoted file, streamed in chunks. This is
+            // what lets a device result be tied to an exact file later:
+            // "CLAP" is not an identity, a digest is.
+            val sha256 = storage.checksum(finalName)
+            val importedAt = System.currentTimeMillis()
+
             // ---- RECORD WHAT THE GRAPH ACTUALLY SAYS ----
             // Note what is NOT recorded: sample rate and preprocessing.
             // Those are not in the graph, so they stay unknown until a
@@ -242,6 +249,8 @@ class ModelImporter(
                 outputs = info.outputs,
                 contract = contract,
                 loadMs = info.loadMs,
+                sha256 = sha256,
+                importedAt = importedAt,
                 errorCode = null,
                 message = "Loaded successfully by ${runtime.label}. Preprocessing is " +
                     "still UNKNOWN: an ONNX graph does not record sample rate or " +
@@ -447,6 +456,10 @@ data class ImportReport(
     val outputs: List<TensorSignature>,
     val contract: ModelContract?,
     val loadMs: Double?,
+    /** SHA-256 of the promoted file (§1). Null when import failed. */
+    val sha256: String? = null,
+    /** Epoch millis the file was registered (§1). */
+    val importedAt: Long? = null,
     val errorCode: InferenceErrorCode?,
     val message: String,
 ) {
@@ -485,6 +498,8 @@ data class ImportReport(
         put("inputs", signaturesToJs(inputs))
         put("outputs", signaturesToJs(outputs))
         put("contract", contract?.toJs())
+        put("sha256", sha256 ?: "")
+        put("importedAt", importedAt ?: 0L)
     }
 }
 
