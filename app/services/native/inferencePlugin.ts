@@ -316,6 +316,18 @@ export interface ClapSingleTrackResult {
   outputNormalised: boolean
   outputValid: boolean
   windowsProcessed: number
+  /** Seconds of audio actually EMBEDDED (windows overlap 50%). */
+  processedDurationSec: number
+  /** The file's full duration, or -1 when the container omits it. */
+  sourceDurationSec: number
+  /** True when the whole track was streamed. */
+  fullTrack: boolean
+  /** What the caller asked for; -1 for full track. */
+  requestedDurationSec: number
+  windowLengthSec: number
+  windowStrideSec: number
+  /** Explains the relationship between window count and coverage. */
+  coverageNote: string
   /** The rate the model actually saw, i.e. what we decoded to. */
   audioSampleRate: number
   /** The file's own rate, before the decoder resampled it. */
@@ -1076,6 +1088,8 @@ export interface InferencePlugin {
     trackId: string
     uri: string
     releaseAfter?: boolean
+    /** Seconds to embed. 0 = the whole track, streamed. */
+    durationSec?: number
   }): Promise<ClapSingleTrackResult>
   /** Releases the session and reports retained memory. */
   clapRelease(): Promise<ClapReleaseResult>

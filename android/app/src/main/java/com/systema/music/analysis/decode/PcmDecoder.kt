@@ -76,6 +76,35 @@ class PcmDecoder(
      * @param shouldCancel polled between buffers so a cancelled Worker
      *   stops promptly instead of decoding a whole track first.
      */
+    /**
+     * Reads the container's format WITHOUT decoding any audio.
+     *
+     * Needed because a cancelled decode never returns its SourceInfo,
+     * and a bounded benchmark cancels on purpose the moment it has
+     * enough audio. Opening the extractor, reading the track format
+     * and closing it again is cheap — no codec is ever started.
+     */
+    fun probe(uri: Uri): SourceInfo {
+        val extractor = MediaExtractor()
+        try {
+            openSource(extractor, uri)
+            val trackIndex = selectAudioTrack(extractor)
+            val format = extractor.getTrackFormat(trackIndex)
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+            val sourceRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            val channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            val durationUs =
+                if (format.containsKey(MediaFormat.KEY_DURATION)) {
+                    format.getLong(MediaFormat.KEY_DURATION)
+                } else {
+                    0L
+                }
+            return SourceInfo(sourceRate, channels, durationUs, mime)
+        } finally {
+            runCatching { extractor.release() }
+        }
+    }
+
     fun decode(uri: Uri, sink: PcmSink, shouldCancel: () -> Boolean = { false }): SourceInfo {
         val extractor = MediaExtractor()
 

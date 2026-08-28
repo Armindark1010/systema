@@ -35,6 +35,7 @@ import {
   clapRelease,
   clapTestOneTrack,
   clapValidateModel,
+  CLAP_DEFAULT_DURATION_SEC,
   getCapabilities,
   getClapStatus,
   pickAndImportModel,
@@ -194,6 +195,15 @@ const selectedTrack = computed(
   () => tracks.value.find(t => t.id === selectedTrackId.value) ?? null,
 )
 
+// Duration selection (§5). 0 means the whole track.
+const durationSec = ref<number>(CLAP_DEFAULT_DURATION_SEC)
+const DURATION_OPTIONS = [
+  { value: 10, label: '10 s' },
+  { value: 30, label: '30 s' },
+  { value: 60, label: '60 s' },
+  { value: 0, label: 'FULL TRACK' },
+]
+
 const testing = ref(false)
 const testResult = ref<ClapSingleTrackResult | null>(null)
 const testError = ref<Err>(null)
@@ -213,6 +223,7 @@ async function onTestOneTrack() {
       trackId: track.id,
       uri: track.uri,
       releaseAfter: true,
+      durationSec: durationSec.value,
     })
   } catch (e) {
     testError.value = asErr(e)
@@ -775,13 +786,43 @@ function sizeMb(bytes: number | null | undefined): string {
                 </ul>
               </div>
 
+              <div>
+                <p class="label text-fg-muted mb-2">
+                  AUDIO DURATION
+                </p>
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    v-for="d in DURATION_OPTIONS"
+                    :key="d.value"
+                    type="button"
+                    class="px-3 py-2 border text-small t-all"
+                    :class="durationSec === d.value
+                      ? 'border-fg bg-fg text-bg font-semibold'
+                      : 'border-line text-fg hover:border-fg'"
+                    @click="durationSec = d.value"
+                  >
+                    {{ d.label }}
+                  </button>
+                </div>
+                <p class="mt-2 text-micro text-fg-faint max-w-[76ch] leading-relaxed">
+                  Windows are 10 s and overlap by 50%, so a 60 s test runs 11
+                  windows, not 6. FULL TRACK streams the whole file one window
+                  at a time — the track is never held in memory in full — but it
+                  takes proportionally longer.
+                </p>
+              </div>
+
               <button
                 type="button"
                 class="px-4 py-2.5 border border-fg text-small text-fg hover:bg-fg hover:text-bg t-all disabled:opacity-40"
                 :disabled="!canTest"
                 @click="onTestOneTrack"
               >
-                {{ testing ? 'TESTING…' : 'TEST ONE TRACK' }}
+                {{ testing
+                  ? 'TESTING…'
+                  : durationSec === 0
+                    ? 'TEST ONE TRACK — FULL'
+                    : `TEST ONE TRACK — ${durationSec} s` }}
               </button>
             </template>
 
@@ -819,19 +860,31 @@ function sizeMb(bytes: number | null | undefined): string {
                     WINDOWS
                   </dt>
                   <dd class="mt-1 text-small text-fg">
-                    {{ testResult.windowsProcessed }}
-                  </dd>
-                </div>
-                <div>
-                  <dt class="label text-fg-muted">
-                    AUDIO
-                  </dt>
-                  <dd class="mt-1 text-small text-fg">
-                    {{ num(testResult.audioDurationSec, 1) }} s @
-                    {{ testResult.audioSampleRate }} Hz
+                    {{ testResult.windowsProcessed }} ×
+                    {{ num(testResult.windowLengthSec, 0) }} s
                   </dd>
                   <dd class="text-micro text-fg-faint">
-                    source {{ testResult.sourceSampleRate }} Hz
+                    stride {{ num(testResult.windowStrideSec, 0) }} s
+                  </dd>
+                </div>
+                <div class="col-span-2">
+                  <dt class="label text-fg-muted">
+                    AUDIO PROCESSED
+                  </dt>
+                  <dd class="mt-1 text-small text-fg">
+                    <template v-if="testResult.fullTrack">
+                      FULL TRACK ({{ num(testResult.processedDurationSec, 1) }} s)
+                    </template>
+                    <template v-else>
+                      {{ num(testResult.processedDurationSec, 1) }} s /
+                      {{ testResult.sourceDurationSec > 0
+                        ? `${num(testResult.sourceDurationSec, 1)} s`
+                        : 'unknown' }}
+                    </template>
+                  </dd>
+                  <dd class="text-micro text-fg-faint">
+                    {{ testResult.audioSampleRate }} Hz
+                    (source {{ testResult.sourceSampleRate }} Hz)
                   </dd>
                 </div>
                 <div>
@@ -949,6 +1002,9 @@ function sizeMb(bytes: number | null | undefined): string {
                 </p>
                 <p class="mt-3 text-micro text-fg-faint max-w-[76ch]">
                   {{ testResult.retentionCaveat }}
+                </p>
+                <p class="mt-2 text-micro text-fg-faint max-w-[76ch]">
+                  {{ testResult.coverageNote }}
                 </p>
               </div>
             </div>

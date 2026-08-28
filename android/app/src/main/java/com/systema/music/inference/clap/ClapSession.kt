@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
+import com.systema.music.analysis.AudioAnalysisException
 import com.systema.music.analysis.decode.PcmDecoder
 import com.systema.music.analysis.dsp.AudioAnalysisConfig
 import com.systema.music.inference.EmbeddingResult
@@ -13,9 +14,14 @@ import com.systema.music.inference.InferenceRuntime
 import com.systema.music.inference.InputFormat
 import com.systema.music.inference.MemoryGuard
 import com.systema.music.inference.MemorySample
-import com.systema.music.inference.ModelDescriptor
 import com.systema.music.inference.ModelRegistry
 import com.systema.music.inference.TensorSignature
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ClosedSendChannelException
+import kotlinx.coroutines.channels.trySendBlocking
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -50,13 +56,17 @@ class ClapSession(
 
     private val mutex = Mutex()
 
-    private companion object {
+    companion object {
         /**
-         * Cap on how much audio the single-track test will decode.
-         * 60 s is well past the six 10 s windows the adapter will
-         * actually consume, so the bound is the window cap, not this.
+         * Default seconds of audio for a single-track test.
+         *
+         * Kept at 60 s so a mis-tap cannot start a huge run. Full-track
+         * mode must be chosen deliberately.
          */
-        const val MAX_TEST_AUDIO_MS = 60_000L
+        const val DEFAULT_DURATION_SEC = 60
+
+        /** Offered in the UI. 0 means the whole track. */
+        val DURATION_CHOICES = listOf(10, 30, 60, 0)
     }
 
     /** The rate CLAP expects, and therefore the rate we decode to. */
@@ -278,6 +288,8 @@ class ClapSession(
         trackId: String,
         uri: String,
         releaseAfter: Boolean = true,
+        /** Seconds of audio to embed, or null / <= 0 for the whole track. */
+        durationSec: Int? = DEFAULT_DURATION_SEC,
     ): JSObject = mutex.withLock {
         val model = active ?: throw InferenceException(
             InferenceErrorCode.MODEL_LOAD_FAILED,
@@ -305,32 +317,132 @@ class ClapSession(
         // everything above 11 kHz and then fabricate it again. The
         // model's mel filter bank runs to 14 kHz, so that band is
         // real content, not headroom.
+        val fullTrack = durationSec == null || durationSec <= 0
+
+        // WINDOW BUDGET
+        // -------------
+        // Windows are `clip` long and advance by `clip/2` (50% overlap),
+        // so N windows cover clip + (N-1)*stride seconds, NOT N*clip.
+        // Deriving the count from the requested duration is what makes
+        // "60 seconds" mean sixty seconds of audio.
+        val contract = model.contract() ?: throw InferenceException(
+            InferenceErrorCode.MODEL_INVALID,
+            "The graph contract has not been derived. Load and validate first.",
+        )
+        val clipSamples = model.windowLengthFor(contract)
+        val strideSamples = clipSamples / ClapAudioEmbeddingModel.WINDOW_STRIDE_DIVISOR
+        val clipSec = clipSamples.toDouble() / frontEndSampleRate
+
+        val windowBudget: Int? = if (fullTrack) {
+            null
+        } else {
+            val requested = durationSec!!.toLong() * frontEndSampleRate
+            if (requested <= clipSamples) {
+                1
+            } else {
+                (((requested - clipSamples) / strideSamples) + 1).toInt()
+            }
+        }
+
+        // Decoding is capped to the audio the windows can actually
+        // consume. Previously the cap was 6 windows' worth of SAMPLES
+        // (60 s) while 6 overlapping windows only reach 35 s, so 25 s
+        // was decoded, held in memory and thrown away.
+        val decodeCapMs: Long = if (fullTrack) {
+            0L // 0 disables the decoder's own limit: stream everything.
+        } else {
+            val covered = clipSamples.toLong() +
+                (windowBudget!! - 1).toLong() * strideSamples
+            // A small tail margin so the last window is never starved
+            // by rounding.
+            (covered * 1000L / frontEndSampleRate) + 1000L
+        }
+
         val config = AudioAnalysisConfig(
             targetSampleRate = frontEndSampleRate,
-            maxAnalysisDurationMs = MAX_TEST_AUDIO_MS,
+            maxAnalysisDurationMs = decodeCapMs,
         )
         val decoder = PcmDecoder(context, config)
 
-        // ---- DECODE, bounded ----
+        // Captured from the producer coroutine; the decoder reports
+        // the source's true rate and duration only when it returns.
+        var sourceInfo: PcmDecoder.SourceInfo? = null
+
+        // ---- DECODE AND EMBED, STREAMED ----
+        // The whole track is never resident. The decoder hands over
+        // small chunks, the embedder keeps exactly ONE window buffer,
+        // and each window is inferred and discarded as soon as it
+        // fills. Peak memory is a function of the window size, not the
+        // track length (§4).
+        val stream = model.openStream(windowBudget)
         val decodeStart = System.nanoTime()
-        val chunks = ArrayList<FloatArray>()
-        var totalSamples = 0
-        // Only as much audio as the windows can consume, so a long
-        // track cannot balloon the decode buffer (§4).
-        val maxSamples = ClapMelFrontEnd.DEFAULT_CLIP_SAMPLES *
-            ClapAudioEmbeddingModel.DEFAULT_MAX_WINDOWS
+        var decodeMs: Double
 
         val info = try {
-            decoder.decode(Uri.parse(uri), { samples, count ->
-                // The decoder reuses its buffer; copy before retaining.
-                if (totalSamples < maxSamples) {
-                    val take = minOf(count, maxSamples - totalSamples)
-                    if (take > 0) {
-                        chunks.add(samples.copyOf(take))
-                        totalSamples += take
+            // BRIDGING A BLOCKING DECODER TO A SUSPENDING MODEL
+            // -------------------------------------------------
+            // PcmDecoder.decode() is synchronous and pushes chunks
+            // through a callback; runtime.infer() is a suspend
+            // function. Calling runBlocking from inside the callback
+            // would block a dispatcher thread that the inference call
+            // itself needs, which risks deadlock under load.
+            //
+            // Instead the decode runs on an IO thread and hands chunks
+            // to this coroutine through a RENDEZVOUS channel. Capacity
+            // zero matters: the decoder cannot run ahead and queue
+            // audio, so back-pressure keeps exactly one chunk in
+            // flight and memory stays bounded no matter how long the
+            // track is.
+            withContext(Dispatchers.IO) {
+                val channel = Channel<FloatArray>(Channel.RENDEZVOUS)
+
+                val producer = launch {
+                    try {
+                        val result = decoder.decode(
+                            Uri.parse(uri),
+                            { samples, count ->
+                                // The decoder REUSES its buffer, so the
+                                // chunk is copied before it crosses the
+                                // channel. This copy is one chunk (a few
+                                // KB), never the track.
+                                val copy = samples.copyOf(count)
+                                // trySendBlocking applies back-pressure
+                                // without needing a coroutine here.
+                                channel.trySendBlocking(copy).getOrThrow()
+                            },
+                            shouldCancel = { stream.isSaturated() },
+                        )
+                        sourceInfo = result
+                    } catch (e: AudioAnalysisException) {
+                        // STOPPING EARLY IS SUCCESS, NOT FAILURE.
+                        // PcmDecoder signals cancellation by THROWING
+                        // CANCELLED, and a capped run cancels on
+                        // purpose the moment its window budget is
+                        // filled. Treating that as an error would make
+                        // every 10/30/60 s test fail.
+                        if (e.code != AudioAnalysisException.Code.CANCELLED) throw e
+                    } catch (e: ClosedSendChannelException) {
+                        // The consumer stopped first; also expected.
+                    } finally {
+                        channel.close()
                     }
                 }
-            })
+
+                for (chunk in channel) {
+                    stream.accept(chunk, chunk.size)
+                    if (stream.isSaturated()) break
+                }
+                // Drain rather than cancel: the producer may be parked
+                // on a rendezvous send, and cancelling it there would
+                // race with reading sourceInfo.
+                channel.cancel()
+                producer.join()
+
+                // A cancelled decode never returns SourceInfo, so the
+                // metadata is read separately. This is cheap: it opens
+                // the container, reads the format, and closes it.
+                sourceInfo ?: PcmDecoder(context, config).probe(Uri.parse(uri))
+            }
         } catch (t: Throwable) {
             val after = MemorySample.capture(context)
             ClapLog.failure(
@@ -338,49 +450,52 @@ class ClapSession(
                 throwable = t,
                 modelId = activeModelId,
                 modelSizeBytes = model.getMetadata().sizeBytes,
-                inputShape = null,
-                inputType = "log_mel_spectrogram",
+                inputShape = contract.concreteInputShape(),
+                inputType = contract.inputKind.name,
                 sampleRate = frontEndSampleRate,
                 audioDurationSec = null,
                 memoryBeforeKb = before.totalPssKb,
                 memoryAfterKb = after.totalPssKb,
             )
+            runCatching { stream.finish() }
             throw InferenceException(
                 InferenceErrorCode.INPUT_SHAPE_MISMATCH,
                 "Could not decode the selected track: ${t.message}",
             )
         }
 
-        val pcm = FloatArray(totalSamples)
-        var off = 0
-        for (c in chunks) {
-            System.arraycopy(c, 0, pcm, off, c.size)
-            off += c.size
-        }
-        chunks.clear() // release the per-chunk copies immediately
-        val decodeMs = (System.nanoTime() - decodeStart) / 1_000_000.0
+        val sum = stream.finish()
+        decodeMs = (System.nanoTime() - decodeStart) / 1_000_000.0
 
-        if (totalSamples == 0) {
+        if (sum == null || stream.windowsProcessed == 0) {
             throw InferenceException(
                 InferenceErrorCode.INPUT_SHAPE_MISMATCH,
-                "The selected track decoded to zero samples.",
+                "The selected track produced no embeddable audio.",
             )
         }
 
-        // ---- EMBED ----
-        // NOTE: the PCM handed back by the sink is at
-        // config.targetSampleRate, NOT info.sourceSampleRate — the
-        // decoder has already resampled. Passing the source rate here
-        // would silently mis-scale every window.
-        val embedding: EmbeddingResult = model.embedAudio(pcm, frontEndSampleRate)
+        val (vector, preNormL2) = model.poolAndNormalise(sum, stream.windowsProcessed)
 
-        val finite = embedding.embedding.all { it.isFinite() }
-        var norm = 0.0
-        for (v in embedding.embedding) norm += v.toDouble() * v.toDouble()
-        norm = Math.sqrt(norm)
-        // A correctly L2-normalised vector has norm 1.
-        val normalised = kotlin.math.abs(norm - 1.0) < 1e-3
-        val outputValid = finite && normalised && embedding.dimension > 0
+        // Audio actually EMBEDDED, which is what the windows covered —
+        // not what happened to be decoded.
+        val processedSamples = minOf(
+            stream.samplesSeen,
+            clipSamples.toLong() +
+                (stream.windowsProcessed - 1).toLong() * strideSamples,
+        )
+        val processedSec = processedSamples.toDouble() / frontEndSampleRate
+        val sourceSec = if (info.durationUs > 0) info.durationUs / 1_000_000.0 else null
+
+        val embedding = EmbeddingResult(
+            embedding = vector,
+            dimension = vector.size,
+            preNormL2 = preNormL2,
+            windowsProcessed = stream.windowsProcessed,
+            decodeMs = decodeMs,
+            preprocessingMs = stream.preprocessingMs,
+            inferenceMs = stream.inferenceMs,
+            totalMs = decodeMs,
+        )
 
         val peak = MemorySample.capture(context)
 
@@ -428,12 +543,39 @@ class ClapSession(
             put("windowsProcessed", embedding.windowsProcessed)
             put("audioSampleRate", frontEndSampleRate)
             put("sourceSampleRate", info.sourceSampleRate)
-            put("audioSamples", totalSamples)
-            put("audioDurationSec", totalSamples.toDouble() / frontEndSampleRate)
+            put("audioSamples", processedSamples)
+            // AUDIO ACTUALLY EMBEDDED, not audio decoded. The previous
+            // build reported decoded samples, which overstated coverage
+            // by the difference between N*clip and the overlapped span.
+            put("audioDurationSec", processedSec)
+            put("processedDurationSec", processedSec)
+            put("sourceDurationSec", sourceSec ?: -1.0)
+            put("fullTrack", fullTrack)
+            put("requestedDurationSec", if (fullTrack) -1 else (durationSec ?: -1))
+            put("windowLengthSec", clipSec)
+            put("windowStrideSec", strideSamples.toDouble() / frontEndSampleRate)
+            put(
+                "coverageNote",
+                if (fullTrack) {
+                    "FULL TRACK: every window was streamed; the track was never " +
+                        "held in memory in full."
+                } else {
+                    "Windows overlap 50%%, so %d windows cover %.1f s, not %d x %.1f s."
+                        .format(
+                            stream.windowsProcessed,
+                            processedSec,
+                            stream.windowsProcessed,
+                            clipSec,
+                        )
+                },
+            )
             put("decodeMs", decodeMs)
             put("preprocessingMs", embedding.preprocessingMs)
             put("inferenceMs", embedding.inferenceMs)
-            put("totalProcessingMs", decodeMs + embedding.totalMs)
+            // Decode and inference are interleaved in the streamed
+            // pipeline, so decodeMs already spans the whole run;
+            // adding them would double-count.
+            put("totalProcessingMs", decodeMs)
             put("memoryBeforeKb", before.totalPssKb)
             put("memoryPeakKb", peak.totalPssKb)
             put("memoryAfterKb", after.totalPssKb)

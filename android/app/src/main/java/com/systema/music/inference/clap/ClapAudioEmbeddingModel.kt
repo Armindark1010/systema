@@ -398,6 +398,204 @@ class ClapAudioEmbeddingModel(
         }
 
     /**
+     * A streaming embedder for FULL-TRACK mode (§4).
+     *
+     * WHY THIS EXISTS SEPARATELY
+     * --------------------------
+     * embedAudio() takes the whole decoded track as one FloatArray.
+     * At 48 kHz that is 11.5 MB per minute, so a 10-minute track
+     * would be 115 MB of PCM before a single window is embedded —
+     * exactly the unbounded growth this phase exists to prevent.
+     *
+     * This class instead accepts audio incrementally. It keeps ONE
+     * window buffer, emits an inference the moment that buffer fills,
+     * slides it by the stride, and accumulates into a single running
+     * sum. Peak memory is therefore a function of the WINDOW size, not
+     * the track length: one 10-second window is 1.9 MB regardless of
+     * whether the track is 30 seconds or an hour.
+     *
+     * The per-window maths — preprocessing branch, inference, running
+     * sum, mean-pool, L2 — is deliberately identical to the array
+     * path. This changes WHEN windows are formed, never HOW they are
+     * embedded.
+     *
+     * Not thread-safe by itself; the caller holds the model's mutex.
+     */
+    inner class StreamingEmbedder internal constructor(
+        private val contract: ClapGraphContract,
+        private val clip: Int,
+        private val stride: Int,
+        /** Null means unbounded — full-track mode. */
+        private val maxWindows: Int?,
+    ) {
+        /** One window's worth of samples. The only large buffer held. */
+        private val window = FloatArray(clip)
+
+        /** How much of [window] is currently filled. */
+        private var filled = 0
+
+        private var sum: DoubleArray? = null
+        var windowsProcessed = 0
+            private set
+        var preprocessingMs = 0.0
+            private set
+        var inferenceMs = 0.0
+            private set
+
+        /** Total samples accepted, including any dropped after the cap. */
+        var samplesSeen = 0L
+            private set
+
+        /** True once the window cap has been reached. */
+        fun isSaturated(): Boolean = maxWindows != null && windowsProcessed >= maxWindows
+
+        /**
+         * Feeds [count] samples from [samples].
+         *
+         * The caller's array is read immediately and never retained,
+         * so the decoder is free to reuse its buffer.
+         */
+        suspend fun accept(samples: FloatArray, count: Int) {
+            if (isSaturated()) return
+            var offset = 0
+            while (offset < count) {
+                if (isSaturated()) return
+                val take = minOf(count - offset, clip - filled)
+                System.arraycopy(samples, offset, window, filled, take)
+                filled += take
+                offset += take
+                samplesSeen += take
+
+                if (filled == clip) {
+                    embedWindow(window, clip)
+                    slide()
+                }
+            }
+        }
+
+        /**
+         * Embeds whatever remains once decoding ends.
+         *
+         * A trailing partial window is padded with the reference's
+         * repeatpad rule, exactly as a short track would be. It is
+         * skipped when it holds nothing new, so silence is never
+         * embedded as if it were content.
+         */
+        suspend fun finish(): DoubleArray? {
+            // `filled` here is the overlap carried by slide() plus any
+            // genuinely new tail. With no new audio, filled == overlap
+            // and every sample was already embedded by the last window.
+            val overlap = clip - stride
+            val hasNewAudio = if (windowsProcessed == 0) filled > 0 else filled > overlap
+            if (hasNewAudio && !isSaturated()) {
+                embedWindow(frontEnd.fitToClip(window.copyOf(filled), clip), clip)
+            }
+            filled = 0
+            return sum
+        }
+
+        /**
+         * Slides the window forward by the stride, preserving the
+         * overlap. This is the only copy per window and it is bounded
+         * by the window size.
+         */
+        private fun slide() {
+            val overlap = clip - stride
+            if (overlap > 0) {
+                System.arraycopy(window, stride, window, 0, overlap)
+                filled = overlap
+            } else {
+                filled = 0
+            }
+        }
+
+        private suspend fun embedWindow(pcm: FloatArray, length: Int) {
+            val p0 = System.nanoTime()
+            val tensor = when (contract.inputKind) {
+                ClapGraphContract.InputKind.WAVEFORM ->
+                    if (pcm.size == length) pcm else pcm.copyOf(length)
+                else -> frontEnd.toNchwTimeMajor(frontEnd.logMel(pcm))
+            }
+            preprocessingMs += (System.nanoTime() - p0) / 1_000_000.0
+
+            val out = runtime.infer(tensor)
+            inferenceMs += out.inferenceMs
+
+            val vec = out.output
+            val acc = sum ?: DoubleArray(vec.size).also { sum = it }
+            if (vec.size != acc.size) {
+                throw InferenceException(
+                    InferenceErrorCode.MODEL_INVALID,
+                    "Window $windowsProcessed produced ${vec.size} values but the " +
+                        "previous window produced ${acc.size}. A model whose output " +
+                        "dimension varies per window cannot be mean-pooled.",
+                )
+            }
+            for (i in vec.indices) acc[i] += vec[i].toDouble()
+            windowsProcessed++
+            // `tensor` and `out` fall out of scope here. Nothing
+            // frame-level is retained (§4).
+        }
+    }
+
+    /**
+     * Opens a streaming embedder for the loaded graph.
+     *
+     * Throws rather than guessing when no contract has been derived,
+     * for the same reason embedAudio() does: an undetermined input
+     * format produces a meaningless vector, not an error.
+     */
+    fun openStream(maxWindows: Int?): StreamingEmbedder {
+        if (!loaded) {
+            throw InferenceException(
+                InferenceErrorCode.MODEL_LOAD_FAILED,
+                "openStream() called with no session loaded.",
+            )
+        }
+        val contract = graphContract ?: throw InferenceException(
+            InferenceErrorCode.MODEL_INVALID,
+            "The graph contract has not been derived. load() must run first.",
+        )
+        if (contract.inputKind == ClapGraphContract.InputKind.UNKNOWN) {
+            throw InferenceException(
+                InferenceErrorCode.MODEL_INVALID,
+                "Refusing to run inference: the model's input format could not " +
+                    "be determined. ${contract.rationale}",
+            )
+        }
+        val clip = windowLengthFor(contract)
+        return StreamingEmbedder(contract, clip, clip / WINDOW_STRIDE_DIVISOR, maxWindows)
+    }
+
+    /**
+     * Finalises a streamed run: mean-pool then L2, identical to the
+     * array path so the two cannot diverge.
+     */
+    fun poolAndNormalise(sum: DoubleArray, windows: Int): Pair<FloatArray, Double> {
+        val pooled = FloatArray(sum.size) { (sum[it] / windows).toFloat() }
+        var sq = 0.0
+        for (v in pooled) sq += v.toDouble() * v.toDouble()
+        val preNormL2 = sqrt(sq)
+        val normalised = if (preNormL2 > 1e-12) {
+            FloatArray(pooled.size) { (pooled[it] / preNormL2).toFloat() }
+        } else {
+            // Do not fabricate a unit vector from nothing.
+            pooled
+        }
+        return normalised to preNormL2
+    }
+
+    /** Window length in samples for the given contract. */
+    internal fun windowLengthFor(contract: ClapGraphContract): Int = when (contract.inputKind) {
+        ClapGraphContract.InputKind.WAVEFORM ->
+            contract.waveformSamples ?: ClapMelFrontEnd.DEFAULT_CLIP_SAMPLES
+        ClapGraphContract.InputKind.LOG_MEL ->
+            contract.melFrames?.let { (it - 1) * frontEnd.hopSize }
+                ?: ClapMelFrontEnd.DEFAULT_CLIP_SAMPLES
+        ClapGraphContract.InputKind.UNKNOWN -> ClapMelFrontEnd.DEFAULT_CLIP_SAMPLES
+    }
+
+    /**
      * The bounded-window embedding loop (§4).
      *
      * Holds exactly one window's tensors at a time and accumulates
@@ -450,16 +648,9 @@ class ClapAudioEmbeddingModel(
             )
         }
 
-        val clip = when (contract.inputKind) {
-            ClapGraphContract.InputKind.WAVEFORM ->
-                contract.waveformSamples ?: ClapMelFrontEnd.DEFAULT_CLIP_SAMPLES
-            // A log-mel graph fixes the FRAME count, so the clip is the
-            // audio length that yields it: frames = samples/hop + 1.
-            ClapGraphContract.InputKind.LOG_MEL ->
-                contract.melFrames?.let { (it - 1) * frontEnd.hopSize }
-                    ?: ClapMelFrontEnd.DEFAULT_CLIP_SAMPLES
-            ClapGraphContract.InputKind.UNKNOWN -> ClapMelFrontEnd.DEFAULT_CLIP_SAMPLES
-        }
+        // Shared with the streaming path so the window length can
+        // never differ between the two.
+        val clip = windowLengthFor(contract)
         val stride = clip / WINDOW_STRIDE_DIVISOR
         val cap = maxWindowsOverride ?: maxWindows
 

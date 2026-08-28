@@ -33,6 +33,7 @@ import { resolve } from 'node:path'
 
 import { CLAP_HTSAT_TINY, hzToMel, logMel, melToHz } from './clap-melref/melPort'
 import { derive } from './clap-melref/graphContractPort'
+import { coverageSec, runStream, windowBudget } from './clap-melref/streamingPort'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const read = (p: string) => readFileSync(resolve(ROOT, p), 'utf8')
@@ -195,10 +196,13 @@ section('4. Bounded windows and incremental aggregation (§4)')
     /var sum: DoubleArray\?/.test(adapterSrc))
   ok('per-window buffers are not retained',
     !/frameEmbeddings|allWindows|windowTensors/.test(adapterSrc))
-  ok('the session decodes a bounded amount of audio',
-    sessionSrc.includes('MAX_TEST_AUDIO_MS'))
-  ok('decoded chunks are released after concatenation',
-    sessionSrc.includes('chunks.clear()'))
+  // Superseded by streaming: the decode is now bounded by the window
+  // budget and the rendezvous channel, not by a byte cap on a buffer
+  // that was accumulated in full.
+  ok('the session bounds decoding by the window budget',
+    /decodeCapMs/.test(sessionSrc))
+  ok('a capped run stops the decoder instead of over-decoding',
+    /shouldCancel = \{ stream\.isSaturated\(\) \}/.test(sessionSrc))
 
   // Mean-pool then L2, with no fabricated unit vector.
   ok('mean-pools across windows', /acc\[it\]\s*\/\s*windowsProcessed/.test(adapterSrc))
@@ -423,8 +427,9 @@ section('15. The tensor shape is declared, not left to a default')
   // The decoder must be asked for 48 kHz, not the DSP default 22050.
   ok('the session decodes at the model rate',
     sessionSrc.includes('targetSampleRate = frontEndSampleRate'))
-  ok('the source rate is not mistaken for the decoded rate',
-    sessionSrc.includes('NOT info.sourceSampleRate'))
+  ok('the source rate is reported separately from the decoded rate',
+    sessionSrc.includes('put("sourceSampleRate", info.sourceSampleRate)') &&
+    sessionSrc.includes('put("audioSampleRate", frontEndSampleRate)'))
 }
 
 // =====================================================================
@@ -575,6 +580,209 @@ section('19. Validation reports the real graph contract (§2)')
   ok('the UI shows NORMALIZED', page.includes('NORMALIZED'))
   ok('the UI explains an internal-mel graph',
     page.includes('computes its own mel spectrogram'))
+}
+
+// =====================================================================
+section('20. Window budget arithmetic (the 60 s -> 35 s bug)')
+{
+  const R = 48000
+  const CLIP = 10 * R
+  const STRIDE = 5 * R
+
+  // THE SHIPPED BUG
+  // ---------------
+  // The previous build ran a fixed 6 windows and reported "60.0 s".
+  // Six windows at a 5 s stride start at 0/5/10/15/20/25 and the last
+  // ends at 35 s. It embedded 35 s and decoded 60 s, discarding 25 s.
+  ok('6 windows cover 35 s, not 60 s', coverageSec(6, CLIP, STRIDE, R) === 35)
+
+  // The budget must be derived from the requested duration.
+  ok('10 s needs 1 window', windowBudget(10, CLIP, STRIDE, R) === 1)
+  ok('30 s needs 5 windows', windowBudget(30, CLIP, STRIDE, R) === 5)
+  ok('60 s needs 11 windows', windowBudget(60, CLIP, STRIDE, R) === 11)
+  ok('full track has no budget', windowBudget(0, CLIP, STRIDE, R) === null)
+
+  // And each budget must cover exactly what was asked for.
+  for (const d of [10, 30, 60]) {
+    const b = windowBudget(d, CLIP, STRIDE, R)!
+    ok(`${d} s budget covers exactly ${d} s`,
+      coverageSec(b, CLIP, STRIDE, R) === d,
+      `got ${coverageSec(b, CLIP, STRIDE, R)}`)
+  }
+
+  // Sub-window requests must not produce zero or negative windows.
+  ok('a 5 s request still runs 1 window', windowBudget(5, CLIP, STRIDE, R) === 1)
+  ok('a 1 s request still runs 1 window', windowBudget(1, CLIP, STRIDE, R) === 1)
+}
+
+// =====================================================================
+section('21. Streaming covers the track without gaps or duplication')
+{
+  const R = 48000
+  const CLIP = 10 * R
+  const STRIDE = 5 * R
+
+  // A 290 s track (the user's 4:50) in full-track mode.
+  const full = runStream(290 * R, CLIP, STRIDE, null)
+  ok('a 290 s track yields 57 windows', full.windows === 57, `got ${full.windows}`)
+  ok('the last window ends at the end of the track',
+    full.starts.at(-1)! + CLIP === 290 * R)
+  ok('the first window starts at 0', full.starts[0] === 0)
+
+  // No gaps: consecutive starts differ by exactly one stride.
+  let gapFree = true
+  for (let i = 1; i < full.starts.length; i++) {
+    if (full.starts[i]! - full.starts[i - 1]! !== STRIDE) gapFree = false
+  }
+  ok('windows advance by exactly one stride, leaving no gap', gapFree)
+
+  // No duplication: every start is distinct.
+  ok('no window is embedded twice',
+    new Set(full.starts).size === full.starts.length)
+
+  // A capped run must stop early rather than decode-and-discard.
+  const capped = runStream(290 * R, CLIP, STRIDE, 11)
+  ok('a capped run stops at its budget', capped.windows === 11)
+  ok('a capped run only consumes what it covers',
+    capped.seen === 60 * R, `saw ${capped.seen / R} s`)
+
+  // Short audio: one padded window, not zero.
+  const short = runStream(7 * R, CLIP, STRIDE, null)
+  ok('a 7 s track still produces one window', short.windows === 1)
+  ok('a 7 s track consumes only 7 s', short.seen === 7 * R)
+
+  // A track shorter than the stride must not loop forever or re-embed.
+  const tiny = runStream(1 * R, CLIP, STRIDE, null)
+  ok('a 1 s track produces exactly one window', tiny.windows === 1)
+
+  // Exactly one window long: no spurious trailing partial.
+  const exact = runStream(10 * R, CLIP, STRIDE, null)
+  ok('a track of exactly one window produces one window',
+    exact.windows === 1, `got ${exact.windows}`)
+
+  // Chunk size must not change the result.
+  for (const chunk of [512, 4096, 8192, 65536]) {
+    const r = runStream(60 * R, CLIP, STRIDE, null, chunk)
+    ok(`chunk size ${chunk} yields the same window count`, r.windows === 11,
+      `got ${r.windows}`)
+  }
+
+  // PEAK MEMORY IS INDEPENDENT OF TRACK LENGTH — the whole point.
+  const short2 = runStream(30 * R, CLIP, STRIDE, null)
+  const long2 = runStream(3600 * R, CLIP, STRIDE, null)
+  ok('peak buffer is one window regardless of track length',
+    short2.peakBufferSamples === long2.peakBufferSamples &&
+    long2.peakBufferSamples === CLIP)
+  ok('a one-hour track needs only a 1.9 MB window buffer',
+    (long2.peakBufferSamples * 4) / 1e6 < 2)
+}
+
+// =====================================================================
+section('22. Full-track mode is bounded-memory by construction')
+{
+  // The old path accumulated every decoded chunk into an ArrayList and
+  // then concatenated it — 56 MB of PCM for a 4:50 track, ~112 MB at
+  // peak during the copy. That must be gone.
+  ok('the session no longer accumulates decoded chunks',
+    !/val chunks = ArrayList<FloatArray>/.test(sessionSrc))
+  ok('the session no longer concatenates the whole track',
+    !/System\.arraycopy\(c, 0, pcm, off, c\.size\)/.test(sessionSrc))
+  ok('the session no longer allocates a full-track PCM array',
+    !/val pcm = FloatArray\(totalSamples\)/.test(sessionSrc))
+
+  // It must stream instead.
+  ok('the session opens a streaming embedder', /\bmodel\.openStream\(/.test(sessionSrc))
+  ok('chunks cross a RENDEZVOUS channel',
+    /Channel<FloatArray>\(Channel\.RENDEZVOUS\)/.test(sessionSrc))
+  ok('back-pressure is explained', /back-pressure/.test(sessionSrc))
+  ok('the decoder runs as a separate producer', /val producer = launch/.test(sessionSrc))
+  // The channel is cancelled rather than the producer coroutine: the
+  // producer may be parked on a rendezvous send, and cancelling it
+  // there would race with reading its SourceInfo.
+  ok('the stream is torn down once saturated',
+    /channel\.cancel\(\)/.test(sessionSrc))
+  ok('the producer is always joined', /producer\.join\(\)/.test(sessionSrc))
+  ok('the race is documented',
+    /parked\s+on\s+a\s+rendezvous\s+send/.test(sessionSrc.replace(/\/\/\s*/g, ' ')))
+
+  // A capped run CANCELS the decoder on purpose. PcmDecoder signals
+  // cancellation by throwing CANCELLED, so treating that as an error
+  // would make every 10/30/60 s test fail.
+  ok('cancellation is treated as success, not failure',
+    /if \(e\.code != AudioAnalysisException\.Code\.CANCELLED\) throw e/.test(sessionSrc))
+  ok('the reason is documented', /STOPPING EARLY IS SUCCESS/.test(sessionSrc))
+  ok('a closed channel is also expected',
+    /ClosedSendChannelException/.test(sessionSrc))
+  // A cancelled decode never returns SourceInfo, so duration comes
+  // from a header-only probe rather than being reported as unknown.
+  ok('source metadata survives cancellation',
+    /\.probe\(Uri\.parse\(uri\)\)/.test(sessionSrc))
+  ok('the decoder exposes a header-only probe',
+    /fun probe\(uri: Uri\): SourceInfo/.test(
+      read('android/app/src/main/java/com/systema/music/analysis/decode/PcmDecoder.kt')))
+  ok('probe starts no codec',
+    !/MediaCodec/.test(
+      read('android/app/src/main/java/com/systema/music/analysis/decode/PcmDecoder.kt')
+        .split('fun probe(uri: Uri): SourceInfo')[1]!.split('fun decode(')[0]!))
+
+  // No runBlocking inside a suspend function: that risks deadlocking
+  // the very dispatcher inference needs.
+  // Careful: the word appears in the comment explaining why it is
+  // avoided, so match a CALL (runBlocking {) rather than the word.
+  ok('no runBlocking call in the session', !/runBlocking\s*\{/.test(sessionSrc))
+  ok('the deadlock risk is documented', /runBlocking from inside the callback/.test(sessionSrc))
+
+  // The streaming embedder itself must hold one window and one sum.
+  ok('the embedder holds exactly one window buffer',
+    /private val window = FloatArray\(clip\)/.test(adapterSrc))
+  ok('the embedder accumulates into a single running sum',
+    /private var sum: DoubleArray\? = null/.test(adapterSrc))
+  ok('the embedder retains no per-window embeddings',
+    !/embeddings\.add|windowVectors|allEmbeddings/.test(adapterSrc))
+  ok('the embedder slides rather than reallocating',
+    /System\.arraycopy\(window, stride, window, 0, overlap\)/.test(adapterSrc))
+  ok('full-track mode is an unbounded budget, not a huge buffer',
+    /maxWindows: Int\?/.test(adapterSrc))
+
+  // Pooling must be shared so streamed and array paths cannot diverge.
+  ok('pooling is shared between both paths',
+    /fun poolAndNormalise/.test(adapterSrc))
+  ok('window length is shared between both paths',
+    /fun windowLengthFor/.test(adapterSrc) &&
+    /val clip = windowLengthFor\(contract\)/.test(adapterSrc))
+}
+
+// =====================================================================
+section('23. Duration is selectable and reported honestly')
+{
+  ok('the session takes a duration', /durationSec: Int\?/.test(sessionSrc))
+  ok('the default is 60 s', /DEFAULT_DURATION_SEC = 60/.test(sessionSrc))
+  ok('0 means full track', /durationSec == null \|\| durationSec <= 0/.test(sessionSrc))
+  ok('the choices are 10/30/60/full',
+    /DURATION_CHOICES = listOf\(10, 30, 60, 0\)/.test(sessionSrc))
+  ok('the plugin accepts durationSec', /call\.getInt\("durationSec"\)/.test(pluginSrc))
+  ok('an absent duration falls back to the safe default',
+    /\?: ClapSession\.DEFAULT_DURATION_SEC/.test(pluginSrc))
+
+  // The reported duration must be what was EMBEDDED, not decoded.
+  ok('processed duration is reported', /put\("processedDurationSec"/.test(sessionSrc))
+  ok('source duration is reported', /put\("sourceDurationSec"/.test(sessionSrc))
+  ok('full-track mode is flagged', /put\("fullTrack"/.test(sessionSrc))
+  ok('audioDurationSec now reports embedded audio, not decoded',
+    /put\("audioDurationSec", processedSec\)/.test(sessionSrc))
+  ok('the overlap relationship is explained to the user',
+    sessionSrc.includes('"coverageNote"'))
+
+  const page = read('app/pages/dev/ai-benchmark/clap.vue')
+  ok('the UI offers a duration selector', page.includes('AUDIO DURATION'))
+  ok('the UI offers FULL TRACK', page.includes('FULL TRACK'))
+  ok('the UI shows processed vs source', page.includes('AUDIO PROCESSED'))
+  ok('the UI states windows overlap 50%', /overlap by 50%/.test(page))
+  ok('the UI shows the window stride', page.includes('windowStrideSec'))
+  ok('the button names the chosen duration',
+    /TEST ONE TRACK — /.test(page))
+  ok('full track is not the default',
+    page.includes('CLAP_DEFAULT_DURATION_SEC'))
 }
 
 console.log(`\n${'='.repeat(60)}`)

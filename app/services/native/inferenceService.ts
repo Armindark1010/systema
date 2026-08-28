@@ -711,10 +711,19 @@ export async function clapValidateModel(): Promise<ClapValidationReport> {
  * Takes a single trackId and uri. There is no array overload, so this
  * cannot be handed a library, a playlist or a 20-track selection.
  */
+export const CLAP_DURATION_CHOICES = [10, 30, 60, 0] as const
+export const CLAP_DEFAULT_DURATION_SEC = 60
+
 export async function clapTestOneTrack(options: {
   trackId: string
   uri: string
   releaseAfter?: boolean
+  /**
+   * Seconds of audio to embed. 0 means the WHOLE track, streamed one
+   * window at a time. Omitted means the conservative 60 s default, so
+   * a caller cannot start a full-track run by forgetting a field.
+   */
+  durationSec?: number
 }): Promise<ClapSingleTrackResult> {
   requirePlugin()
   if (!options.trackId || !options.uri) {
@@ -725,8 +734,9 @@ export async function clapTestOneTrack(options: {
   }
   try {
     return await InferenceNative.clapTestOneTrack({
-      releaseAfter: options.releaseAfter ?? true,
       ...options,
+      releaseAfter: options.releaseAfter ?? true,
+      durationSec: options.durationSec ?? CLAP_DEFAULT_DURATION_SEC,
     })
   } catch (e) {
     throw toServiceError(e)

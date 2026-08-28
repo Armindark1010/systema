@@ -443,10 +443,15 @@ class InferencePlugin : Plugin() {
             return
         }
         val releaseAfter = call.getBoolean("releaseAfter") ?: true
+        // Seconds of audio to embed. 0 (or a negative value) means the
+        // WHOLE track, streamed one window at a time. Absent means the
+        // conservative default, so an old caller cannot accidentally
+        // start a full-track run.
+        val durationSec = call.getInt("durationSec") ?: ClapSession.DEFAULT_DURATION_SEC
 
         scope.launch {
             try {
-                call.resolve(clap.testOneTrack(trackId, uri, releaseAfter))
+                call.resolve(clap.testOneTrack(trackId, uri, releaseAfter, durationSec))
             } catch (e: InferenceException) {
                 call.reject(e.message ?: "The single-track test failed.", e.code.name)
             } catch (e: Throwable) {
