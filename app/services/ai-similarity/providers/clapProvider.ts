@@ -371,6 +371,12 @@ export class ClapProvider implements AudioEmbeddingProvider {
           audioSampleRate: result.audioSampleRate,
           preNormL2: result.preNormL2,
           decodeMs: result.decodeMs,
+          // Phase 24: measured audio facts for the single-track
+          // analysis record. All reported by the device; none derived
+          // or guessed here.
+          sourceDurationSec: result.sourceDurationSec,
+          sourceSampleRate: result.sourceSampleRate,
+          totalProcessingMs: result.totalProcessingMs,
         },
       },
     }

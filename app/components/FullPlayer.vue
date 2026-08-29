@@ -194,6 +194,8 @@ const audioAnalysisFailure = computed(() => audioAnalysis.failureFor(currentTrac
 const aiState = computed(() => aiAnalysis.stateFor(currentTrack.value?.id))
 const aiResult = computed(() => aiAnalysis.resultFor(currentTrack.value?.id))
 const aiFailure = computed(() => aiAnalysis.failureFor(currentTrack.value?.id))
+const aiSaveWarning = computed(() => aiAnalysis.saveWarningFor(currentTrack.value?.id))
+const aiFromCache = computed(() => aiAnalysis.wasFromCache(currentTrack.value?.id))
 
 /**
  * Runs the experimental model for the track on screen.
@@ -203,15 +205,25 @@ const aiFailure = computed(() => aiAnalysis.failureFor(currentTrack.value?.id))
  * provider with an explained failure rather than silently doing
  * nothing.
  */
-function onAiAnalyze() {
+function onAiAnalyze(force = false) {
   const track = currentTrack.value
   if (!track) return
   void aiAnalysis.analyze({
     trackId: track.id,
     uri: track.uri,
     title: track.title,
-  })
+  }, force)
 }
+
+// Show a previously saved analysis immediately, so a track analysed
+// earlier does not look unanalysed after a reload.
+watch(() => currentTrack.value?.id, (id) => {
+  if (id) aiAnalysis.hydrate(id)
+}, { immediate: true })
+
+watch(showAnalysisSheet, (open) => {
+  if (open && currentTrack.value?.id) aiAnalysis.hydrate(currentTrack.value.id)
+})
 
 // Read any stored analysis for the current track, so the sheet can
 // open straight into a previous result instead of offering to redo
@@ -658,6 +670,8 @@ if (import.meta.client) {
             :state="aiState"
             :result="aiResult"
             :failure="aiFailure"
+            :save-warning="aiSaveWarning"
+            :from-cache="aiFromCache"
             @analyze="onAiAnalyze"
           />
         </PlayerAnalysis>
