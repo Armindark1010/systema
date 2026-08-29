@@ -41,6 +41,7 @@ import {
   pickAndImportModel,
   InferenceServiceError,
 } from '~/services/native/inferenceService'
+import { rememberClapModel } from '~/services/ai-similarity/providers/clapModelPreference'
 import {
   isInferenceAvailable,
   type ClapLoadResult,
@@ -159,6 +160,11 @@ async function onLoad() {
   loadResult.value = null
   try {
     loadResult.value = await clapLoadModel({ modelId: modelId.value })
+    // Remember WHICH model the human loaded. The single-track test
+    // below releases the session on purpose, so a later analysis has
+    // to reload it — and it must reload this exact model rather than
+    // choosing one.
+    rememberClapModel(modelId.value)
   } catch (e) {
     loadError.value = asErr(e)
   } finally {

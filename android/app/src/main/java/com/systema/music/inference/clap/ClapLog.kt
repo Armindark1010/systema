@@ -35,6 +35,12 @@ object ClapLog {
     const val GUARD_REFUSED = "GUARD_REFUSED"
     const val FAILURE = "FAILURE"
 
+    // Phase 23.1 lifecycle tracing. These answer "is the session the
+    // one the lab loaded, or a different/absent one?" using object
+    // identity only — never audio, never embeddings.
+    const val SESSION_IDENTITY = "SESSION_IDENTITY"
+    const val SESSION_STATE = "SESSION_STATE"
+
     /** One structured line. Fields are `key=value`, space separated. */
     fun event(event: String, vararg fields: Pair<String, Any?>) {
         Log.i(TAG, render(event, fields))
