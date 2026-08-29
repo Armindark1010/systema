@@ -1,66 +1,100 @@
 <script setup lang="ts">
 /**
- * Experimental AI analysis panel for the Full Player (Phase 22.1).
+ * Single-track AI analysis panel for the Full Player (Phase 24).
  *
- * Renders whatever the generic analysis service produced. It knows
- * nothing about CLAP, ONNX or any model: every value on screen comes
- * from the runtime result, and there is no fallback constant to show
- * when a value is missing — a missing value renders as a dash.
+ * Renders what the analysis actually produced. Every value comes from
+ * the runtime record; there is no fallback constant, and a missing
+ * measurement renders as a dash.
  *
- * THE HONEST BIT
- * --------------
- * Similarity is a relationship between two tracks. The Full Player has
- * one. So when no reference was supplied, this panel says the score is
- * unavailable and why, instead of showing a number that would look like
- * a measurement of "how similar this song is" to nothing in particular.
+ * WHAT IS DELIBERATELY NOT HERE
+ * -----------------------------
+ * No Mood, Language, Danceability, Acoustic, Vocal or "good for
+ * Driving/Workout". No classifier for any of those exists in this
+ * repo, and printing a plausible-looking value would be inventing
+ * data. They are listed under "Not yet available" with the reason, so
+ * the gap is visible instead of disguised.
  */
 import { computed } from 'vue'
 
 import type { AiAnalysisState } from '~/composables/useTrackAiAnalysis'
 import type {
-  TrackAnalysisFailure,
-  TrackAnalysisResult,
-} from '~/services/ai-similarity/analysis'
+  TrackAnalysisFailureRecord,
+  TrackAnalysisRecord,
+} from '~/services/ai-similarity/trackAnalysis'
 
 const props = defineProps<{
   state: AiAnalysisState
-  result: TrackAnalysisResult | null
-  failure: TrackAnalysisFailure | null
+  result: TrackAnalysisRecord | null
+  failure: TrackAnalysisFailureRecord | null
+  saveWarning?: string | null
+  fromCache?: boolean
 }>()
 
-const emit = defineEmits<{ analyze: [] }>()
+const emit = defineEmits<{ analyze: [force: boolean] }>()
 
 const isAnalyzing = computed(() => props.state === 'analyzing')
 const hasResult = computed(() => props.state === 'done' && props.result !== null)
 
-/** A dash rather than a plausible-looking placeholder. */
+/** A dash, never a plausible-looking placeholder. */
 const DASH = '—'
 
-const rows = computed(() => {
+function fmt(v: number | null | undefined, digits = 0, suffix = ''): string {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return DASH
+  return `${v.toFixed(digits)}${suffix}`
+}
+
+/** Measured DSP features, shown only when the DSP analyser has run. */
+const dspRows = computed(() => {
+  const d = props.result?.dsp
+  if (!d) return []
+  const rows: { label: string, value: string }[] = []
+  // BPM is null when confidence was too low to state a number honestly.
+  rows.push({ label: 'Tempo', value: d.bpm === null ? DASH : `${Math.round(d.bpm)} BPM` })
+  if (d.bpm !== null && d.bpmConfidence !== null) {
+    rows.push({ label: 'Tempo conf.', value: fmt(d.bpmConfidence * 100, 0, '%') })
+  }
+  rows.push({ label: 'Loudness', value: fmt(d.loudnessDbfs, 1, ' dBFS') })
+  rows.push({ label: 'Dynamics', value: fmt(d.dynamicRangeDb, 1, ' dB') })
+  return rows
+})
+
+const audioRows = computed(() => {
+  const a = props.result?.audio
+  if (!a) return []
+  return [
+    { label: 'Duration', value: fmt(a.durationSec, 0, ' s') },
+    { label: 'Analysed', value: fmt(a.processedDurationSec, 0, ' s') },
+    { label: 'Source rate', value: a.sourceSampleRate ? `${a.sourceSampleRate} Hz` : DASH },
+    { label: 'Windows', value: a.windowsProcessed === null ? DASH : String(a.windowsProcessed) },
+  ]
+})
+
+const modelRows = computed(() => {
   const r = props.result
   if (!r) return []
   return [
-    {
-      label: 'Similarity',
-      // Null means "no reference", never 0.
-      value: r.cosine === null ? DASH : r.cosine.toFixed(4),
-    },
-    { label: 'Model', value: r.model || DASH },
-    { label: 'Version', value: r.modelVersion || DASH },
-    {
-      label: 'Embedding',
-      value: r.dimension > 0 ? `${r.dimension}-d` : DASH,
-    },
-    { label: 'Normalised', value: r.normalised ? 'Yes' : 'No' },
-    { label: 'Experimental', value: r.experimental ? 'Yes' : 'No' },
+    { label: 'Model', value: r.model.id || DASH },
+    { label: 'Version', value: r.model.version || DASH },
+    { label: 'Embedding', value: r.embedding.dimension > 0 ? `${r.embedding.dimension}-d` : DASH },
+    { label: 'Normalised', value: r.embedding.normalised ? 'Yes' : 'No' },
+    { label: 'Experimental', value: r.model.experimental ? 'Yes' : 'No' },
   ]
 })
 
 const timing = computed(() => {
-  const ms = props.result?.inferenceMs
-  return typeof ms === 'number' && Number.isFinite(ms) && ms > 0
-    ? `${Math.round(ms)} ms inference`
-    : null
+  const t = props.result?.timings
+  if (!t) return null
+  const parts: string[] = []
+  if (t.inferenceMs !== null) parts.push(`${Math.round(t.inferenceMs)} ms inference`)
+  if (t.decodeMs !== null) parts.push(`${Math.round(t.decodeMs)} ms decode`)
+  return parts.length ? parts.join(' · ') : null
+})
+
+const analysedAt = computed(() => {
+  const iso = props.result?.analyzedAt
+  if (!iso) return null
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleString()
 })
 </script>
 
@@ -85,21 +119,51 @@ const timing = computed(() => {
 
     <!-- RESULT ----------------------------------------------------- -->
     <template v-else-if="hasResult">
+      <dl v-if="dspRows.length" class="analysis-grid">
+        <div v-for="row in dspRows" :key="row.label" class="analysis-field">
+          <dt class="analysis-field-label">{{ row.label }}</dt>
+          <dd class="analysis-field-value tnum">{{ row.value }}</dd>
+        </div>
+      </dl>
+      <p v-else class="analysis-note">
+        No measured tempo or loudness yet — run the on-device audio
+        analysis for this track to add them.
+      </p>
+
       <dl class="analysis-grid">
-        <div v-for="row in rows" :key="row.label" class="analysis-field">
+        <div v-for="row in audioRows" :key="row.label" class="analysis-field">
           <dt class="analysis-field-label">{{ row.label }}</dt>
           <dd class="analysis-field-value tnum">{{ row.value }}</dd>
         </div>
       </dl>
 
-      <p v-if="result?.cosineUnavailableReason" class="analysis-note">
-        {{ result.cosineUnavailableReason }}
-      </p>
+      <dl class="analysis-grid">
+        <div v-for="row in modelRows" :key="row.label" class="analysis-field">
+          <dt class="analysis-field-label">{{ row.label }}</dt>
+          <dd class="analysis-field-value tnum">{{ row.value }}</dd>
+        </div>
+      </dl>
 
-      <div v-if="timing" class="analysis-provenance">
-        <span>{{ timing }}</span>
-        <span v-if="result?.referenceTrackId">vs {{ result.referenceTrackId }}</span>
+      <!-- The honest gap. Not decoration: this is why the panel has no
+           Mood or Language row. -->
+      <details v-if="result?.unsupported?.length" class="ai-unsupported">
+        <summary class="ai-unsupported-summary">
+          Not yet available ({{ result.unsupported.length }})
+        </summary>
+        <ul class="ai-unsupported-list">
+          <li v-for="u in result.unsupported" :key="u.feature">
+            <strong>{{ u.feature }}</strong> — {{ u.reason }}
+          </li>
+        </ul>
+      </details>
+
+      <div v-if="timing || analysedAt" class="analysis-provenance">
+        <span v-if="timing">{{ timing }}</span>
+        <span v-if="analysedAt">{{ analysedAt }}</span>
+        <span v-if="fromCache">saved result</span>
       </div>
+
+      <p v-if="saveWarning" class="analysis-note">{{ saveWarning }}</p>
 
       <p class="analysis-note">
         Experimental. This model is under evaluation and has not been selected
@@ -107,7 +171,7 @@ const timing = computed(() => {
       </p>
 
       <div class="analysis-btns">
-        <button class="player-sheet-btn player-sheet-btn--primary" @click="emit('analyze')">
+        <button class="player-sheet-btn player-sheet-btn--primary" @click="emit('analyze', true)">
           RE-RUN
         </button>
       </div>
@@ -123,7 +187,7 @@ const timing = computed(() => {
         Playback is unaffected.
       </p>
       <div class="analysis-btns">
-        <button class="player-sheet-btn player-sheet-btn--primary" @click="emit('analyze')">
+        <button class="player-sheet-btn player-sheet-btn--primary" @click="emit('analyze', true)">
           TRY AGAIN
         </button>
       </div>
@@ -136,7 +200,7 @@ const timing = computed(() => {
         on this device; nothing is uploaded.
       </p>
       <div class="analysis-btns">
-        <button class="player-sheet-btn player-sheet-btn--primary" @click="emit('analyze')">
+        <button class="player-sheet-btn player-sheet-btn--primary" @click="emit('analyze', false)">
           RUN AI ANALYSIS
         </button>
       </div>
@@ -174,5 +238,23 @@ const timing = computed(() => {
   border-radius: 0.25rem;
   border: 1px solid var(--line, rgba(255, 255, 255, 0.14));
   color: var(--fg-faint, rgba(255, 255, 255, 0.5));
+}
+
+.ai-unsupported {
+  font-size: 0.75rem;
+  color: var(--fg-faint, rgba(255, 255, 255, 0.5));
+}
+
+.ai-unsupported-summary {
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+
+.ai-unsupported-list {
+  margin: 0.25rem 0 0;
+  padding-left: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 </style>

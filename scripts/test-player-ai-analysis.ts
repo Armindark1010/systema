@@ -320,11 +320,12 @@ section('6. Track A result can never appear under track B')
 
   // State is keyed by trackId, so a lookup for B cannot return A's row.
   ok('state is keyed by track id', /Map<string, AiAnalysisState>/.test(composable))
-  ok('results are keyed by track id', /Map<string, TrackAnalysisResult>/.test(composable))
-  ok('failures are keyed by track id', /Map<string, TrackAnalysisFailure>/.test(composable))
+  ok('results are keyed by track id', /Map<string, TrackAnalysisRecord>/.test(composable))
+  ok('failures are keyed by track id',
+    /Map<string, TrackAnalysisFailureRecord>/.test(composable))
   ok('the result is stored under the analysed id, captured up front',
     /const id = track\.trackId/.test(composable)
-    && /results\.set\(id, outcome\)/.test(composable))
+    && /results\.set\(id, outcome\.record\)/.test(composable))
 
   // The player reads by the CURRENT track id every time.
   ok('the player reads state by the current track id',
@@ -353,7 +354,7 @@ section('7. Concurrency: one request per track')
   ok('a duplicate request is refused',
     /if \(inFlight\.has\(id\)\) return/.test(composable))
   ok('the guard is set before awaiting',
-    composable.indexOf('inFlight.add(id)') < composable.indexOf('await analyseTrack'))
+    composable.indexOf('inFlight.add(id)') < composable.indexOf('await analyseSingleTrack'))
   ok('the guard is always released',
     /finally \{[\s\S]{0,80}inFlight\.delete\(id\)/.test(composable))
   ok('the guard is per track, not global',
@@ -366,7 +367,10 @@ section('8. UI renders runtime values and stays in the player')
 {
   const panel = read('app/components/player/PlayerAiAnalysis.vue')
 
-  ok('the panel shows a similarity row', /Similarity/.test(panel))
+  // Phase 24: this panel analyses ONE track, so there is deliberately
+  // no Similarity row. A cosine needs a reference track, and inventing
+  // one to fill the UI is exactly what must not happen.
+  ok('the panel shows no similarity row', !/Similarity/.test(panel))
   ok('the panel shows the model', /'Model'/.test(panel))
   ok('the panel shows the version', /'Version'/.test(panel))
   ok('the panel shows the embedding dimension', /Embedding/.test(panel))
@@ -374,16 +378,21 @@ section('8. UI renders runtime values and stays in the player')
   ok('the panel shows the experimental flag', /Experimental/.test(panel))
 
   // Values come from the result object, not from literals.
-  ok('similarity is read from the result', /r\.cosine/.test(panel))
-  ok('the model is read from the result', /r\.model\b/.test(panel))
-  ok('the version is read from the result', /r\.modelVersion/.test(panel))
-  ok('the dimension is read from the result', /r\.dimension/.test(panel))
+  ok('the model is read from the result', /r\.model\.id/.test(panel))
+  ok('the version is read from the result', /r\.model\.version/.test(panel))
+  ok('the dimension is read from the result',
+    /r\.embedding\.dimension/.test(panel))
 
-  // A null cosine must render as a dash, never as 0.
-  ok('a null cosine renders as a dash',
-    /r\.cosine === null \? DASH/.test(panel))
-  ok('the unavailable reason is displayed',
-    /cosineUnavailableReason/.test(panel))
+  // A missing measurement renders as a dash, never as a plausible 0.
+  ok('a missing value renders as a dash',
+    /return DASH/.test(panel) && /const DASH = '—'/.test(panel))
+  ok('an unmeasurable BPM renders as a dash',
+    /d\.bpm === null \? DASH/.test(panel))
+
+  // The features this repo cannot produce are named, with reasons,
+  // instead of being filled in with invented values.
+  ok('unsupported features are surfaced', /result\.unsupported/.test(panel))
+  ok('each unsupported feature shows its reason', /u\.reason/.test(panel))
 
   ok('a loading state is rendered', /isAnalyzing/.test(panel))
   ok('an error state is rendered', /state === 'failed'/.test(panel))
