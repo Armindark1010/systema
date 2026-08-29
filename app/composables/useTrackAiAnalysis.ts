@@ -21,6 +21,7 @@ import type {
   TrackAnalysisRecord,
 } from '~/services/ai-similarity/trackAnalysis'
 import { analyseSingleTrack } from '~/services/ai-similarity/trackAnalysisService'
+import { ANALYZER_VERSION, persistAnalysisToDataset } from '~/services/ai-dataset/datasetBridge'
 import { loadAnalysis } from '~/services/ai-similarity/trackAnalysisStore'
 import type { AudioInput } from '~/services/ai-similarity/types'
 import { getAnalysis } from '~/services/native/audioAnalysisService'
@@ -170,9 +171,15 @@ export function useTrackAiAnalysis() {
     saveWarnings.delete(id)
 
     try {
+      // Read the DSP result once and reuse it, so the dataset row and
+      // the sheet cannot disagree about what was measured.
+      let dspFeatures: Awaited<ReturnType<typeof readStoredDsp>> = null
       const outcome = await analyseSingleTrack(provider, track, {
         force,
-        dsp: readStoredDsp,
+        dsp: async (trackId: string) => {
+          dspFeatures = await readStoredDsp(trackId)
+          return dspFeatures
+        },
       })
 
       // Stored under the analysed track's own id. Even if the user has
@@ -184,6 +191,14 @@ export function useTrackAiAnalysis() {
         if (outcome.fromCache) cacheHits.add(id)
         else cacheHits.delete(id)
         if (outcome.saveError) saveWarnings.set(id, outcome.saveError)
+
+        // Collect into the persistent dataset. Only for a fresh run:
+        // a cache hit already has its row, and rewriting it would
+        // churn updatedAt for no new data.
+        if (!outcome.fromCache) {
+          const stored = await persistAnalysisToDataset(outcome.record, track, dspFeatures)
+          if (!stored.ok && stored.error) saveWarnings.set(id, stored.error)
+        }
       } else {
         failures.set(id, outcome.failure)
         states.set(id, 'failed')
