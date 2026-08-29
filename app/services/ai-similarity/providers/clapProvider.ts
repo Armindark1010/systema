@@ -33,7 +33,10 @@ import {
   CLAP_DEFAULT_DURATION_SEC,
   getClapStatus,
   clapTestOneTrack,
+  clapLoadModel,
+  clapValidateModel,
 } from '../../native/inferenceService'
+import { recallClapModel } from './clapModelPreference'
 import {
   type AudioEmbeddingProvider,
   type AudioInput,
@@ -73,6 +76,14 @@ export interface ClapProviderOptions {
 /** Dependencies, injectable so the provider is testable without a device. */
 export interface ClapProviderDeps {
   status: () => Promise<ClapStatus>
+  /**
+   * Session-recovery dependencies. Optional: a caller that injects
+   * only `status`/`embedTrack` (as several existing tests do) gets the
+   * original behaviour, where a missing session is simply reported.
+   */
+  loadModel?: (options: { modelId: string }) => Promise<unknown>
+  validateModel?: () => Promise<{ ok: boolean }>
+  recallModel?: () => string | null
   embedTrack: (options: {
     trackId: string
     uri: string
@@ -84,6 +95,9 @@ export interface ClapProviderDeps {
 
 const defaultDeps: ClapProviderDeps = {
   status: getClapStatus,
+  loadModel: clapLoadModel,
+  validateModel: clapValidateModel,
+  recallModel: recallClapModel,
   embedTrack: clapTestOneTrack,
 }
 
@@ -158,6 +172,57 @@ export class ClapProvider implements AudioEmbeddingProvider {
   }
 
   /**
+   * Reloads the model the human last chose, then validates it.
+   *
+   * Only ever loads an id the human explicitly loaded before. Returns
+   * the refreshed status; on any failure it returns a status carrying
+   * the real reason, so the caller still reports an honest error
+   * rather than proceeding with no session.
+   */
+  private async reestablish(current: ProviderStatus): Promise<ProviderStatus> {
+    // Recovery needs all three collaborators. When any is absent the
+    // provider cannot reload anything, so it reports the original
+    // reason rather than pretending to recover.
+    const { recallModel, loadModel, validateModel } = this.deps
+    if (!recallModel || !loadModel || !validateModel) return current
+
+    const modelId = recallModel()
+    if (!modelId) {
+      // Nothing to reload. Keep the original reason: the human has
+      // genuinely never loaded a model on this device.
+      return current
+    }
+
+    try {
+      // `loaded` false means the session is gone and must be recreated.
+      // `loaded` true with `validated` false means it exists but has
+      // not passed the dry run, so only validation is missing.
+      const status = await this.deps.status()
+      if (!status.loaded) {
+        await loadModel({ modelId })
+      }
+
+      const report = await validateModel()
+      if (!report?.ok) {
+        return {
+          ...current,
+          ready: false,
+          reason: 'The model was reloaded but failed validation, so it has '
+            + 'not been given any audio.',
+        }
+      }
+      return await this.status()
+    } catch (e) {
+      return {
+        ...current,
+        ready: false,
+        reason: `Could not reload the CLAP model "${modelId}": `
+          + `${(e as Error)?.message ?? 'unknown error'}`,
+      }
+    }
+  }
+
+  /**
    * Embeds one track.
    *
    * Never throws and never fabricates. Every failure path returns an
@@ -188,7 +253,26 @@ export class ClapProvider implements AudioEmbeddingProvider {
 
     // Refuse early with a readable reason rather than letting the
     // bridge fail with a lower-level one.
-    const st = await this.status()
+    let st = await this.status()
+
+    // RE-ESTABLISH THE SESSION IF IT IS GONE
+    // --------------------------------------
+    // The native session does not survive a lab test: the lab passes
+    // `releaseAfter: true`, which unloads the graph on purpose so the
+    // test can prove memory is returned. That leaves the model
+    // imported and chosen, but nothing loaded — which is why an
+    // analysis run later reported PROVIDER_NOT_READY even though the
+    // human really had loaded the model.
+    //
+    // Loading it again is the correct recovery, NOT relaxing the
+    // readiness check. The model id is the one the human explicitly
+    // loaded in the lab; if they never loaded one, nothing is
+    // reloaded and the original honest error stands. SYSTEMA still
+    // never chooses a model.
+    if (st.available && !st.ready) {
+      st = await this.reestablish(st)
+    }
+
     if (!st.available || !st.ready) {
       return {
         ok: false,

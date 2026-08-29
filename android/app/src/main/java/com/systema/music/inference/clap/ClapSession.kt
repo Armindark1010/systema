@@ -83,6 +83,18 @@ class ClapSession(
 
     fun status(): JSObject = JSObject().apply {
         val model = active
+        // Lifecycle tracing (Phase 23.1). `sessionId` is this object's
+        // identity hash: if the lab and a later analysis print the same
+        // value, they are talking to the SAME ClapSession, which
+        // distinguishes a lost-plugin problem from a released-session
+        // one. No audio or embedding data is ever logged.
+        ClapLog.event(
+            ClapLog.SESSION_STATE,
+            "sessionId" to Integer.toHexString(System.identityHashCode(this@ClapSession)),
+            "loaded" to (model != null),
+            "validated" to validated,
+            "modelId" to (activeModelId ?: ""),
+        )
         put("loaded", model != null)
         put("modelId", activeModelId ?: "")
         put("validated", validated)
@@ -112,6 +124,12 @@ class ClapSession(
      * room (§4).
      */
     suspend fun load(modelId: String, runtime: InferenceRuntime): JSObject = mutex.withLock {
+        ClapLog.event(
+            ClapLog.SESSION_IDENTITY,
+            "stage" to "loadRequested",
+            "sessionId" to Integer.toHexString(System.identityHashCode(this@ClapSession)),
+            "modelId" to modelId,
+        )
         if (active != null) {
             throw InferenceException(
                 InferenceErrorCode.MODEL_LOAD_FAILED,

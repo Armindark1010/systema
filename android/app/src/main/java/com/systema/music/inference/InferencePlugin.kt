@@ -12,6 +12,7 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
+import com.systema.music.inference.clap.ClapLog
 import com.systema.music.inference.clap.ClapSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -81,7 +82,29 @@ class InferencePlugin : Plugin() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * Phase 23.1 lifecycle tracing.
+     *
+     * If the plugin were recreated on navigation, the CLAP session
+     * (a field of this plugin) would go with it. Logging creation and
+     * destruction with the instance identity makes that visible
+     * instead of inferred.
+     */
+    override fun load() {
+        super.load()
+        ClapLog.event(
+            ClapLog.SESSION_IDENTITY,
+            "stage" to "pluginCreated",
+            "pluginId" to Integer.toHexString(System.identityHashCode(this)),
+        )
+    }
+
     override fun handleOnDestroy() {
+        ClapLog.event(
+            ClapLog.SESSION_IDENTITY,
+            "stage" to "pluginDestroyed",
+            "pluginId" to Integer.toHexString(System.identityHashCode(this)),
+        )
         scope.cancel()
         super.handleOnDestroy()
     }
