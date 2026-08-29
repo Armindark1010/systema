@@ -55,6 +55,7 @@ import {
   setQueueNative,
   setRepeatNative,
   setShuffleNative,
+  setFavoritesNative,
   setVolumeNative,
   fromNativeRepeat,
   type PlayerSnapshot,
@@ -511,6 +512,11 @@ export function useNativePlayer() {
             void setRepeatNative(player.repeatMode)
             break
 
+          case 'toggleFavorite':
+          case 'toggleFavoriteId':
+            void setFavoritesNative(Array.from(player.favorites))
+            break
+
           case 'setVolume':
           case 'toggleMute':
             void setVolumeNative(player.muted ? 0 : player.volume)
@@ -529,6 +535,9 @@ export function useNativePlayer() {
     installed = true
     player.isNativePlayback = true
 
+    // Push initial favorites to native
+    void setFavoritesNative(Array.from(player.favorites))
+
     disposeListeners = addPlayerListeners({
       onSnapshot: applySnapshot,
       onTrackChanged: event => applyTrackChange(event.trackId),
@@ -537,6 +546,12 @@ export function useNativePlayer() {
         if (event.durationMs > 0) {
           applyNative(() => { player.duration = event.durationMs / 1000 })
         }
+      },
+      onFavoriteToggled: (event) => {
+        if (!event.trackId) return
+        applyNative(() => {
+          player.toggleFavoriteId(event.trackId)
+        })
       },
       onNotificationPermission: (event) => {
         // The native layer resolved POST_NOTIFICATIONS (MainActivity

@@ -127,12 +127,13 @@ class PlayerEngine private constructor(context: Context) {
 
     // ---- Listener plumbing -------------------------------------
 
-    /** Consumers (the Capacitor plugin) observe through these. */
+    /** Consumers (the Capacitor plugin and notification service) observe through these. */
     interface Listener {
         fun onSnapshot(snapshot: PlayerSnapshot)
         fun onTrackChanged(trackId: String?, index: Int)
         fun onError(error: PlayerException, trackId: String?)
         fun onQueueChanged(trackIds: List<String>, currentIndex: Int)
+        fun onFavoriteToggled(trackId: String, isFavorite: Boolean) {}
     }
 
     private val listeners = mutableListOf<Listener>()
@@ -578,6 +579,10 @@ class PlayerEngine private constructor(context: Context) {
         trackIdAt(player?.currentMediaItemIndex ?: -1)?.let { trackById[it] }
     }
 
+    fun currentTrackId(): String? = onMainSync(null) {
+        trackIdAt(player?.currentMediaItemIndex ?: -1)
+    }
+
     // ---- Media item construction -------------------------------
 
     /**
@@ -893,14 +898,43 @@ class PlayerEngine private constructor(context: Context) {
         emitSnapshot()
     }
 
-    // ---- Modes -------------------------------------------------
+    // ---- Favorites & Modes ------------------------------------
 
-    /**
-     * Real shuffle: Media3 keeps the playlist order intact and applies
-     * a stable internal shuffle order on top. The current track keeps
-     * playing, previous/next stay coherent, and the order survives for
-     * the session — unlike picking a random track on every Next.
-     */
+    private val favoriteTrackIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    fun setFavorites(ids: Collection<String>) {
+        favoriteTrackIds.clear()
+        favoriteTrackIds.addAll(ids)
+    }
+
+    fun isFavorite(trackId: String?): Boolean =
+        trackId != null && favoriteTrackIds.contains(trackId)
+
+    fun toggleFavorite(trackId: String): Boolean {
+        val nowFavorite = if (favoriteTrackIds.contains(trackId)) {
+            favoriteTrackIds.remove(trackId)
+            false
+        } else {
+            favoriteTrackIds.add(trackId)
+            true
+        }
+        forEachListener { it.onFavoriteToggled(trackId, nowFavorite) }
+        return nowFavorite
+    }
+
+    fun toggleFavoriteCurrent(): Boolean? {
+        val current = currentTrackId() ?: return null
+        return toggleFavorite(current)
+    }
+
+    fun isShuffle(): Boolean = player?.shuffleModeEnabled == true
+
+    fun toggleShuffle(): Boolean {
+        val next = !isShuffle()
+        setShuffle(next)
+        return next
+    }
+
     fun setShuffle(enabled: Boolean) = onMain {
         player?.shuffleModeEnabled = enabled
         emitSnapshot()

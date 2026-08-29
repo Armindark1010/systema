@@ -61,6 +61,7 @@ class PlayerPlugin : Plugin() {
         private const val EVENT_NOTIFICATION_PERMISSION = "notificationPermissionChanged"
         private const val EVENT_SLEEP_TIMER = "sleepTimerChanged"
         private const val EVENT_SLEEP_EXPIRED = "sleepTimerExpired"
+        private const val EVENT_FAVORITE_TOGGLED = "favoriteToggled"
     }
 
     private val engine: PlayerEngine by lazy { PlayerEngine.get(context) }
@@ -113,6 +114,13 @@ class PlayerPlugin : Plugin() {
                 JSObject()
                     .put("trackIds", JSArray(trackIds))
                     .put("currentIndex", currentIndex),
+            )
+        }
+
+        override fun onFavoriteToggled(trackId: String, isFavorite: Boolean) {
+            notifyListeners(
+                EVENT_FAVORITE_TOGGLED,
+                JSObject().put("trackId", trackId).put("isFavorite", isFavorite),
             )
         }
     }
@@ -495,6 +503,20 @@ class PlayerPlugin : Plugin() {
     // ---------------------------------------------------------------
     // Modes
     // ---------------------------------------------------------------
+
+    @PluginMethod
+    fun setFavorites(call: PluginCall) {
+        val array = call.getArray("trackIds")
+        val ids = mutableListOf<String>()
+        if (array != null) {
+            for (i in 0 until array.length()) {
+                val item = array.optString(i)
+                if (!item.isNullOrBlank()) ids.add(item)
+            }
+        }
+        engine.setFavorites(ids)
+        call.resolve()
+    }
 
     @PluginMethod
     fun setShuffle(call: PluginCall) {

@@ -26,6 +26,12 @@ const isFavorites = computed(() => props.playlist.id === 'favorites' || props.pl
 const isRecents = computed(() => props.playlist.id === 'recents' || props.playlist.id === 'recent' || props.playlist.id === 'sys-recent')
 const isSystem = computed(() => props.playlist.kind === 'system' || isSystemPlaylistId(props.playlist.id) || isFavorites.value || isRecents.value)
 
+onMounted(() => {
+  if (libraryStore.isNativeLibrary && !libraryStore.allTracksLoaded) {
+    void libraryStore.loadAllTracks()
+  }
+})
+
 const playlistTracks = computed(() => {
   const libraryMap = new Map(tracks.value.map((t) => [t.id, t]))
   return props.playlist.trackIds
@@ -62,19 +68,19 @@ function onRemove(trackId: string) {
     <header class="grid md:grid-cols-[280px_1fr] gap-6 md:gap-10 hairline-b pb-6">
       <div class="max-w-[280px]">
         <!-- Custom system artwork for Favorites -->
-        <div v-if="!playlist.cover && isFavorites" class="relative overflow-hidden bg-surface border border-red-500/40 aspect-square flex flex-col items-center justify-center gap-3">
-          <div class="w-16 h-16 rounded-sm bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-500">
-            <UIcon name="lucide:heart" class="w-8 h-8 fill-current" />
+        <div v-if="!playlist.cover && isFavorites" class="relative overflow-hidden bg-surface/60 border border-red-500/30 aspect-square flex flex-col items-center justify-center gap-3">
+          <div class="w-14 h-14 rounded-sm bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400">
+            <UIcon name="lucide:heart" class="w-7 h-7 fill-current" />
           </div>
-          <span class="label text-red-400 font-bold tracking-wider">FAVORITES</span>
+          <span class="label text-red-400/90 font-semibold tracking-widest text-[11px]">FAVORITES</span>
         </div>
 
         <!-- Custom system artwork for Recents -->
-        <div v-else-if="!playlist.cover && isRecents" class="relative overflow-hidden bg-surface border border-line aspect-square flex flex-col items-center justify-center gap-3">
-          <div class="w-16 h-16 rounded-sm bg-primary/10 border border-primary/25 flex items-center justify-center text-primary">
-            <UIcon name="lucide:clock-3" class="w-8 h-8" />
+        <div v-else-if="!playlist.cover && isRecents" class="relative overflow-hidden bg-surface/60 border border-line aspect-square flex flex-col items-center justify-center gap-3">
+          <div class="w-14 h-14 rounded-sm bg-white/5 border border-white/10 flex items-center justify-center text-fg-muted">
+            <UIcon name="lucide:history" class="w-7 h-7" />
           </div>
-          <span class="label text-primary font-bold tracking-wider">RECENTLY PLAYED</span>
+          <span class="label text-fg-muted font-semibold tracking-widest text-[11px]">RECENTLY PLAYED</span>
         </div>
 
         <Artwork v-else :src="playlist.cover" :alt="playlist.title" :seed="playlist.id" />

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // ============================================================
-// PLAYLISTS — archive + create / import / export
+// PLAYLISTS INDEX — archive + create / import / export
 // ============================================================
 
 useHead({ title: 'Playlists' })
@@ -53,63 +53,63 @@ function onCreate() {
       </div>
     </header>
 
-    <!-- Primary System Playlists (Favorites & Recents) -->
-    <div class="sys-container mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-      <!-- FAVORITES (Red Border, Small Rectangular Card) -->
+    <!-- Primary System Playlists (Favorites & Recents) — Minimal & Side-by-Side -->
+    <div class="sys-container mt-5 grid grid-cols-2 gap-3">
+      <!-- FAVORITES (Subtle Red Accent, Minimal Rectangular Card) -->
       <NuxtLink
         to="/playlists/favorites"
-        class="group relative flex items-center justify-between p-3.5 sm:p-4 bg-surface/80 hover:bg-surface border border-red-500/50 hover:border-red-500 rounded-sm transition-all duration-200 focus-ring pressable shadow-sm"
+        class="group relative flex items-center justify-between p-3 bg-surface/50 hover:bg-surface border border-red-500/30 hover:border-red-500/60 rounded-sm transition-all duration-150 focus-ring pressable"
       >
-        <div class="flex items-center gap-3.5 min-w-0">
-          <div class="w-10 h-10 rounded-sm bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-500 group-hover:scale-105 group-hover:bg-red-500/15 transition-all flex-shrink-0">
-            <UIcon name="lucide:heart" class="w-5 h-5 fill-current" />
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="w-8 h-8 rounded-sm bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400 group-hover:scale-105 transition-transform shrink-0">
+            <UIcon name="lucide:heart" class="w-4 h-4 fill-current" />
           </div>
           <div class="min-w-0">
-            <h2 class="text-sm font-bold tracking-wider text-fg group-hover:text-red-400 transition-colors uppercase truncate">
+            <h2 class="text-xs font-semibold tracking-wider text-fg group-hover:text-red-400 transition-colors uppercase truncate">
               FAVORITES
             </h2>
-            <p class="text-[11px] text-fg-muted font-mono tracking-wider uppercase mt-0.5">
+            <p class="text-[10px] text-fg-faint font-mono tracking-wider uppercase mt-0.5">
               {{ favoriteCount }} TRACKS
             </p>
           </div>
         </div>
-        <div class="flex items-center text-fg-faint group-hover:text-red-400 group-hover:translate-x-0.5 transition-all">
-          <UIcon name="lucide:chevron-right" class="w-4 h-4" />
+        <div class="hidden sm:flex items-center text-fg-faint group-hover:text-red-400 transition-colors">
+          <UIcon name="lucide:chevron-right" class="w-3.5 h-3.5" />
         </div>
       </NuxtLink>
 
-      <!-- RECENTS (Small Rectangular Card) -->
+      <!-- RECENTS (Minimal Rectangular Card) -->
       <NuxtLink
         to="/playlists/recents"
-        class="group relative flex items-center justify-between p-3.5 sm:p-4 bg-surface/80 hover:bg-surface border border-line hover:border-line-strong rounded-sm transition-all duration-200 focus-ring pressable shadow-sm"
+        class="group relative flex items-center justify-between p-3 bg-surface/50 hover:bg-surface border border-line hover:border-line-strong rounded-sm transition-all duration-150 focus-ring pressable"
       >
-        <div class="flex items-center gap-3.5 min-w-0">
-          <div class="w-10 h-10 rounded-sm bg-primary/10 border border-primary/25 flex items-center justify-center text-primary group-hover:scale-105 group-hover:bg-primary/15 transition-all flex-shrink-0">
-            <UIcon name="lucide:clock-3" class="w-5 h-5" />
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="w-8 h-8 rounded-sm bg-white/5 border border-white/10 flex items-center justify-center text-fg-muted group-hover:text-fg group-hover:scale-105 transition-all shrink-0">
+            <UIcon name="lucide:history" class="w-4 h-4" />
           </div>
           <div class="min-w-0">
-            <h2 class="text-sm font-bold tracking-wider text-fg group-hover:text-primary transition-colors uppercase truncate">
+            <h2 class="text-xs font-semibold tracking-wider text-fg group-hover:text-fg transition-colors uppercase truncate">
               RECENTS
             </h2>
-            <p class="text-[11px] text-fg-muted font-mono tracking-wider uppercase mt-0.5">
+            <p class="text-[10px] text-fg-faint font-mono tracking-wider uppercase mt-0.5">
               {{ recentsCount }} TRACKS
             </p>
           </div>
         </div>
-        <div class="flex items-center text-fg-faint group-hover:text-primary group-hover:translate-x-0.5 transition-all">
-          <UIcon name="lucide:chevron-right" class="w-4 h-4" />
+        <div class="hidden sm:flex items-center text-fg-faint group-hover:text-fg transition-colors">
+          <UIcon name="lucide:chevron-right" class="w-3.5 h-3.5" />
         </div>
       </NuxtLink>
     </div>
 
-    <div class="sys-container mt-8">
+    <div class="sys-container mt-7">
       <PlaylistList :playlists="playlists" @create="createOpen = true" />
     </div>
 
     <!-- create modal -->
     <UModal
       v-model:open="createOpen"
-      :ui="{ width: 'max-w-[480px]', content: 'bg-surface text-fg' }"
+      :ui="{ width: 'max-w-120', content: 'bg-surface text-fg' }"
       title="CREATE PLAYLIST"
       description="A NEW SET IN THE ARCHIVE"
     >
