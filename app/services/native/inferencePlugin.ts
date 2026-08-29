@@ -309,6 +309,13 @@ export interface ClapLoadResult {
 /** Result of the ONE-TRACK test (§5). */
 export interface ClapSingleTrackResult {
   trackId: string
+  /**
+   * The embedding itself, present only when the caller passed
+   * `includeVector` AND the output passed its validity checks
+   * (Phase 22). Absent means "not requested or not valid" — never
+   * treat a missing vector as a zero vector.
+   */
+  vector?: number[]
   dimension: number
   preNormL2: number
   l2NormAfterNormalisation: number
@@ -1090,6 +1097,11 @@ export interface InferencePlugin {
     releaseAfter?: boolean
     /** Seconds to embed. 0 = the whole track, streamed. */
     durationSec?: number
+    /**
+     * Return the embedding itself (Phase 22). Defaults to false, so the
+     * lab's existing payload is unchanged.
+     */
+    includeVector?: boolean
   }): Promise<ClapSingleTrackResult>
   /** Releases the session and reports retained memory. */
   clapRelease(): Promise<ClapReleaseResult>

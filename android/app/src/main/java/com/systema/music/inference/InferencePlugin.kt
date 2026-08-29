@@ -448,10 +448,15 @@ class InferencePlugin : Plugin() {
         // conservative default, so an old caller cannot accidentally
         // start a full-track run.
         val durationSec = call.getInt("durationSec") ?: ClapSession.DEFAULT_DURATION_SEC
+        // Phase 22: the similarity pipeline needs the vector itself.
+        // Defaults to false so the existing lab payload is unchanged.
+        val includeVector = call.getBoolean("includeVector") ?: false
 
         scope.launch {
             try {
-                call.resolve(clap.testOneTrack(trackId, uri, releaseAfter, durationSec))
+                call.resolve(
+                    clap.testOneTrack(trackId, uri, releaseAfter, durationSec, includeVector),
+                )
             } catch (e: InferenceException) {
                 call.reject(e.message ?: "The single-track test failed.", e.code.name)
             } catch (e: Throwable) {

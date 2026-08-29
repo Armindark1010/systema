@@ -290,6 +290,15 @@ class ClapSession(
         releaseAfter: Boolean = true,
         /** Seconds of audio to embed, or null / <= 0 for the whole track. */
         durationSec: Int? = DEFAULT_DURATION_SEC,
+        /**
+         * Include the embedding itself in the payload (Phase 22).
+         *
+         * Off by default so the existing single-track test payload is
+         * unchanged. The vector is only needed by the similarity
+         * pipeline, which compares two tracks; sending 512 floats to a
+         * UI that just wants timings would be waste.
+         */
+        includeVector: Boolean = false,
     ): JSObject = mutex.withLock {
         val model = active ?: throw InferenceException(
             InferenceErrorCode.MODEL_LOAD_FAILED,
@@ -534,6 +543,13 @@ class ClapSession(
 
         JSObject().apply {
             put("trackId", trackId)
+            // Phase 22: the raw embedding, for the similarity pipeline.
+            // Only when explicitly requested, and only when the output
+            // passed its validity checks — an invalid vector must not
+            // leave this class and become a silent 0.0 cosine.
+            if (includeVector && outputValid) {
+                put("vector", JSArray().apply { embedding.embedding.forEach { put(it.toDouble()) } })
+            }
             put("dimension", embedding.dimension)
             put("preNormL2", embedding.preNormL2)
             put("l2NormAfterNormalisation", norm)
