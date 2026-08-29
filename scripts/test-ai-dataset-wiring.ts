@@ -361,7 +361,10 @@ section('11. Room accepted the entity (exported schema, compiler output)')
   // real annotation processor rather than from reading source: if the
   // entity, DAO and migration disagreed, the build would have failed
   // and this file would not exist at version 3.
-  const path = 'android/app/schemas/com.systema.music.library.db.MusicLibraryDatabase/3.json'
+  // The CURRENT compiled schema. Bumped with the database version:
+  // validating an older export would let a new column silently miss
+  // the compiled schema, which is precisely this check's job.
+  const path = 'android/app/schemas/com.systema.music.library.db.MusicLibraryDatabase/4.json'
   const schema = JSON.parse(read(path)) as {
     database: {
       version: number
@@ -375,13 +378,20 @@ section('11. Room accepted the entity (exported schema, compiler output)')
     }
   }
 
-  ok('the exported schema is version 3', schema.database.version === 3)
+  ok('the exported schema is version 4', schema.database.version === 4)
 
   const table = schema.database.entities.find(e => e.tableName === 'track_ai_analysis')
   ok('Room compiled the track_ai_analysis table', table !== undefined)
   if (!table) throw new Error('track_ai_analysis missing from the exported schema')
 
-  ok('all 49 columns are present', table.fields.length === 49)
+  // 49 in Phase 28 + semanticJson.
+  ok('all 50 columns are present', table.fields.length === 50,
+    `found ${table.fields.length}`)
+  ok('the semantic column is compiled in',
+    table.fields.some((f: { columnName: string }) => f.columnName === 'semanticJson'))
+  ok('the semantic column is nullable — old rows have no prediction',
+    table.fields.find((f: { columnName: string }) => f.columnName === 'semanticJson')
+      ?.notNull === false)
   ok('the primary key is the composite identity id',
     table.primaryKey.columnNames.length === 1 && table.primaryKey.columnNames[0] === 'id')
 

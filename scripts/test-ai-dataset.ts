@@ -542,8 +542,17 @@ section('11. Export and import')
   const parsed = JSON.parse(json)
   ok('the export is self-identifying', parsed.format === 'systema-ai-dataset')
   ok('the export is versioned', typeof parsed.version === 'number')
-  ok('the export states label provenance', /human-assigned/.test(parsed.notice))
-  ok('the export warns it holds no predictions', /No model predictions/.test(parsed.notice))
+  ok('the export states label provenance', /HUMAN-assigned/i.test(parsed.notice))
+  // Phase 29: the export now DOES carry model predictions, so the old
+  // "holds no predictions" assertion would be a lie. The invariant that
+  // actually matters is unchanged and is what is asserted instead: the
+  // notice must tell a reader the two kinds of value are not the same.
+  ok('the export distinguishes model output from labels',
+    /RAW MODEL OUTPUT/.test(parsed.notice))
+  ok('the export states predictions are never ground truth',
+    /never ground truth/i.test(parsed.notice))
+  ok('the export states the two stay separate',
+    /separate/i.test(parsed.notice))
   ok('the record count is right', parsed.recordCount === 1)
 
   const rec = parsed.records[0]

@@ -29,7 +29,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         AudioAnalysisEntity::class,
         TrackAiAnalysisEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class MusicLibraryDatabase : RoomDatabase() {
@@ -207,7 +207,27 @@ abstract class MusicLibraryDatabase : RoomDatabase() {
          * Explicit migrations. Every schema change appends one here
          * rather than dropping user data.
          */
-        private val MIGRATIONS = arrayOf<Migration>(MIGRATION_1_2, MIGRATION_2_3)
+        /**
+         * Phase 29: adds the semantic prediction column.
+         *
+         * ADDITIVE AND NULLABLE. One ALTER TABLE, no table rebuild, no
+         * data copy, so it cannot lose collected analyses or labels.
+         * Existing rows get NULL, which is the truthful value — they
+         * were analysed before any semantic model existed.
+         */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `track_ai_analysis` ADD COLUMN `semanticJson` TEXT"
+                )
+            }
+        }
+
+        private val MIGRATIONS = arrayOf<Migration>(
+            MIGRATION_1_2,
+            MIGRATION_2_3,
+            MIGRATION_3_4,
+        )
 
         @Volatile
         private var instance: MusicLibraryDatabase? = null

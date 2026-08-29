@@ -22,9 +22,17 @@
 
 import type { GroundTruthLabels } from './labels'
 import { emptyLabels, sanitiseLabels } from './labels'
+import { coerceSemanticAnalysis, type SemanticAnalysis } from './semanticRecord'
 
 /** Bumped when the RECORD shape changes. Distinct from analyzerVersion. */
-export const DATASET_SCHEMA_VERSION = 1
+/**
+ * Bumped to 2 in Phase 29, which added the optional `semantic` region.
+ *
+ * The change is ADDITIVE: a v1 row has no `semantic` key and reads back
+ * as `semantic: null`, which is a true statement about it. Nothing is
+ * migrated and nothing is invented.
+ */
+export const DATASET_SCHEMA_VERSION = 2
 
 export type DatasetStatus = 'COMPLETED' | 'FAILED'
 
@@ -144,6 +152,17 @@ export interface DatasetRecord {
   embedding: DatasetEmbedding | null
   processing: DatasetProcessing
 
+  /**
+   * MODEL predictions. Human edits never touch this.
+   *
+   * Null when no semantic analysis has run — including every row
+   * written before Phase 29. Deliberately a sibling of `groundTruth`
+   * rather than merged into it: once the two are in one field, nothing
+   * can tell what the model said from what the human said, and the
+   * dataset loses the only property that makes it worth collecting.
+   */
+  semantic: SemanticAnalysis | null
+
   /** HUMAN labels. Analysis writes never touch this. */
   groundTruth: GroundTruthLabels
 
@@ -213,6 +232,13 @@ export function isDatasetRecord(value: unknown): value is DatasetRecord {
   // A predicted label must never masquerade as ground truth.
   if (g.source !== 'human') return false
 
+  // ...nor the reverse. A semantic region that claims a human source
+  // would let a model output be counted as its own evaluation target.
+  if (r.semantic != null) {
+    const sem = r.semantic as Record<string, unknown>
+    if (sem.source !== 'model') return false
+  }
+
   return true
 }
 
@@ -223,6 +249,9 @@ export function coerceDatasetRecord(value: unknown): DatasetRecord | null {
   const withLabels = {
     ...r,
     groundTruth: sanitiseLabels(r.groundTruth ?? emptyLabels()),
+    // A corrupt prediction set degrades the row to "not analysed"
+    // rather than carrying scores that cannot be trusted.
+    semantic: coerceSemanticAnalysis(r.semantic),
   }
   return isDatasetRecord(withLabels) ? (withLabels as DatasetRecord) : null
 }

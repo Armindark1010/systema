@@ -267,6 +267,11 @@ class AiDatasetPlugin : Plugin() {
         TrackAiAnalysisEntity(
             id = id,
             schemaVersion = getInt("schemaVersion") ?: 1,
+            // Phase 29 predictions, stored verbatim as the web layer
+            // serialised them. The plugin does not parse or reshape the
+            // document: re-encoding it here would be a second place for
+            // the format to drift.
+            semanticJson = getString("semanticJson"),
             trackId = trackId,
             title = getString("title"),
             artist = getString("artist"),
@@ -343,6 +348,7 @@ class AiDatasetPlugin : Plugin() {
         put("artist", artist)
         put("album", album)
         put("sourceUri", sourceUri)
+        put("semanticJson", semanticJson)
         put("bpm", bpm)
         put("bpmConfidence", bpmConfidence)
         put("loudnessDbfs", loudnessDbfs)

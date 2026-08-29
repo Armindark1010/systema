@@ -49,7 +49,7 @@ interface TrackAiAnalysisDao {
             labelLanguage, labelGenres, labelMoods, labelVocal,
             labelEnergy, labelContexts, labelNotes, labelledAt,
             labelRevision, status, errorCode, errorMessage,
-            createdAt, updatedAt, supersededAt
+            createdAt, updatedAt, supersededAt, semanticJson
         ) VALUES (
             :id, :schemaVersion, :trackId, :title, :artist, :album, :sourceUri,
             :bpm, :bpmConfidence, :loudnessDbfs, :dynamicRangeDb, :peak, :rms,
@@ -62,7 +62,7 @@ interface TrackAiAnalysisDao {
             :decodeDurationMs, :inferenceDurationMs, :experimental,
             NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
             0, :status, :errorCode, :errorMessage,
-            :now, :now, NULL
+            :now, :now, NULL, :semanticJson
         )
         ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
@@ -98,13 +98,18 @@ interface TrackAiAnalysisDao {
             errorCode = excluded.errorCode,
             errorMessage = excluded.errorMessage,
             updatedAt = excluded.updatedAt,
-            supersededAt = NULL
+            supersededAt = NULL,
+            -- Model predictions are analysis data, so a re-analysis
+            -- replaces them. The label columns are deliberately absent
+            -- from this entire SET clause and stay untouched.
+            semanticJson = excluded.semanticJson
         """,
     )
     @Suppress("LongParameterList")
     suspend fun upsertAnalysis(
         id: String,
         schemaVersion: Int,
+        semanticJson: String?,
         trackId: String,
         title: String?,
         artist: String?,
@@ -208,6 +213,7 @@ interface TrackAiAnalysisDao {
         upsertAnalysis(
             id = entity.id,
             schemaVersion = entity.schemaVersion,
+            semanticJson = entity.semanticJson,
             trackId = entity.trackId,
             title = entity.title,
             artist = entity.artist,
