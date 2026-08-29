@@ -36,10 +36,37 @@ interface AiDatasetPlugin {
   }): Promise<{ path: string, bytes: number }>
 }
 
-export const AiDatasetNative = registerPlugin<AiDatasetPlugin>('AiDataset')
+/**
+ * Must match `@CapacitorPlugin(name = "AiDataset")` on
+ * AiDatasetPlugin.kt exactly. Capacitor matches by this string; a
+ * mismatch produces a plugin that is silently never found.
+ */
+export const AI_DATASET_PLUGIN_NAME = 'AiDataset'
 
+export const AiDatasetNative = registerPlugin<AiDatasetPlugin>(AI_DATASET_PLUGIN_NAME)
+
+/**
+ * True on a real device build.
+ *
+ * Separate from the plugin check on purpose: "we are on a device" and
+ * "the dataset plugin is present" are different facts, and conflating
+ * them is what allowed a device with a missing plugin to be treated
+ * like a browser.
+ */
+export function isNativePlatform(): boolean {
+  return Capacitor.isNativePlatform()
+}
+
+/**
+ * True when the AiDataset bridge is actually exported to the WebView.
+ *
+ * `isPluginAvailable` reads window.Capacitor.PluginHeaders, which is
+ * populated from the plugins registered in MainActivity before
+ * super.onCreate(). If registerPlugin(AiDatasetPlugin.class) is
+ * missing or threw, this returns false.
+ */
 export function isNativeDatasetAvailable(): boolean {
-  return Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('AiDataset')
+  return Capacitor.isNativePlatform() && Capacitor.isPluginAvailable(AI_DATASET_PLUGIN_NAME)
 }
 
 // ---------------------------------------------------------------------

@@ -182,7 +182,22 @@ function distRows(d: { counts: Record<string, number>, unlabelled: number }) {
       <!-- Durability warning: the one thing worse than no labeling UI
            is one that silently throws work away. -->
       <div
-        v-if="!dataset.durable.value"
+        v-if="dataset.unavailableReason.value"
+        class="border border-line bg-surface px-5 py-4"
+      >
+        <p class="label text-fg-muted">PERSISTENCE UNAVAILABLE</p>
+        <p class="mt-2 text-small text-fg-muted max-w-[76ch] leading-relaxed">
+          {{ dataset.unavailableReason.value }}
+          This is a device build, so the dataset database was expected and is
+          missing. Saving is disabled rather than accepted and discarded — any
+          labels entered now would be lost. Check that
+          <span class="tnum">registerPlugin(AiDatasetPlugin.class)</span> runs
+          in MainActivity, then reinstall.
+        </p>
+      </div>
+
+      <div
+        v-else-if="!dataset.durable.value"
         class="border border-line bg-surface px-5 py-4"
       >
         <p class="label text-fg-muted">NOT PERSISTED</p>
@@ -675,7 +690,7 @@ function distRows(d: { counts: Record<string, number>, unlabelled: number }) {
             </div>
             <button
               class="sys-btn-outline"
-              :disabled="!draft.dirty.value || draft.saving.value"
+              :disabled="!draft.dirty.value || draft.saving.value || !!dataset.unavailableReason.value"
               @click="onSaveLabels"
             >
               SAVE LABELS

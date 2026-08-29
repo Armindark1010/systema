@@ -203,8 +203,14 @@ section('6. The composable caches, it does not store')
   ok('a filter change resets pagination', /filters\.offset = 0/.test(compSrc))
   ok('durability is exposed to the UI', /isDatasetDurable/.test(compSrc))
   ok('the page warns when not durable', /NOT PERSISTED/.test(pageSrc))
+  // Rendered whenever the backend is not durable, whether that is the
+  // ordinary web case or a device whose plugin is missing. The two
+  // notices are mutually exclusive branches of one conditional.
   ok('the warning is bound to the durability flag',
-    /v-if="!dataset\.durable/.test(pageSrc))
+    /v-(?:else-)?if="!dataset\.durable/.test(pageSrc))
+  ok('a broken device backend gets its own, louder notice',
+    /v-if="dataset\.unavailableReason\.value"/.test(pageSrc)
+    && /PERSISTENCE UNAVAILABLE/.test(pageSrc))
   ok('the warning says labels are not saved',
     /not saved|lost when this page is reloaded/i.test(pageSrc))
 }

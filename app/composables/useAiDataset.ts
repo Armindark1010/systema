@@ -11,7 +11,7 @@
 
 import { computed, reactive, ref } from 'vue'
 
-import { initDataset, isDatasetDurable } from '~/services/ai-dataset'
+import { datasetUnavailableReason, initDataset, isDatasetDurable } from '~/services/ai-dataset'
 import type { DatasetQuery } from '~/services/ai-dataset/datasetGateway'
 import type { DatasetRecord } from '~/services/ai-dataset/datasetRecord'
 import { assessRecord } from '~/services/ai-dataset/datasetRecord'
@@ -122,6 +122,12 @@ export function useAiDataset() {
     distributions,
     /** False when writes are not being persisted. The UI must warn. */
     durable: computed(() => isDatasetDurable()),
+    /**
+     * Set when persistence was EXPECTED and is broken, i.e. a device
+     * build with no plugin. Distinct from simply running in a browser,
+     * where non-durability is normal.
+     */
+    unavailableReason: computed(() => datasetUnavailableReason()),
     init,
     refresh,
     setFilter,
