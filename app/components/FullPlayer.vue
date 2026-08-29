@@ -258,49 +258,29 @@ const playlistOptions = computed(() => playlists.value.slice(0, 8).map(playlist 
   count: playlist.trackIds.length,
 })))
 
-// Full-player drag-down minimization (top handle only).
+// Full-player drag-down minimization and horizontal navigation.
 const fullDragOffset = ref(0)
 const isFullDragging = ref(false)
-let fullDragStartY = 0
-let fullPointerId: number | null = null
+const sessionDragOffset = ref(0)
+const isSessionDragging = ref(false)
+
+const swipeOffset = ref(0)
+const isSwiping = ref(false)
+
+let dragStartX = 0
+let dragStartY = 0
+let activePointerId: number | null = null
+let dragAxis: 'pending' | 'horizontal' | 'vertical' = 'pending'
+
 const fullSheetStyle = computed(() => {
   if (!isFullDragging.value && fullDragOffset.value === 0) return undefined
-  const scale = Math.max(0.975, 1 - fullDragOffset.value / 2400)
+  const scale = Math.max(0.96, 1 - fullDragOffset.value / 2400)
   return {
     transform: `translate3d(0, ${fullDragOffset.value}px, 0) scale(${scale})`,
     transition: isFullDragging.value ? 'none' : 'transform 280ms var(--player-ease)',
   }
 })
 
-function onFullHandleDown(event: PointerEvent) {
-  if (event.pointerType === 'mouse' && event.button !== 0) return
-  fullDragStartY = event.clientY
-  fullPointerId = event.pointerId
-  fullDragOffset.value = 0
-  isFullDragging.value = true
-  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
-}
-function onFullHandleMove(event: PointerEvent) {
-  if (!isFullDragging.value || event.pointerId !== fullPointerId) return
-  fullDragOffset.value = Math.max(0, event.clientY - fullDragStartY)
-}
-function onFullHandleEnd(event: PointerEvent) {
-  if (!isFullDragging.value || event.pointerId !== fullPointerId) return
-  const target = event.currentTarget as HTMLElement
-  if (target.hasPointerCapture?.(event.pointerId)) target.releasePointerCapture(event.pointerId)
-  const shouldMinimize = fullDragOffset.value > 88
-  fullPointerId = null
-  isFullDragging.value = false
-  if (shouldMinimize) closeFullPlayer()
-  else fullDragOffset.value = 0
-}
-
-// AI and lyrics are sessions inside the player. Their own handle dismisses
-// the session without affecting playback or minimizing the full player.
-const sessionDragOffset = ref(0)
-const isSessionDragging = ref(false)
-let sessionDragStartY = 0
-let sessionPointerId: number | null = null
 const sessionDragStyle = computed(() => {
   if (!isSessionDragging.value && sessionDragOffset.value === 0) return undefined
   return {
@@ -308,38 +288,7 @@ const sessionDragStyle = computed(() => {
     transition: isSessionDragging.value ? 'none' : 'transform 260ms var(--player-ease)',
   }
 })
-function onSessionHandleDown(event: PointerEvent) {
-  if (event.pointerType === 'mouse' && event.button !== 0) return
-  sessionDragStartY = event.clientY
-  sessionPointerId = event.pointerId
-  sessionDragOffset.value = 0
-  isSessionDragging.value = true
-  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
-}
-function onSessionHandleMove(event: PointerEvent) {
-  if (!isSessionDragging.value || event.pointerId !== sessionPointerId) return
-  sessionDragOffset.value = Math.max(0, event.clientY - sessionDragStartY)
-}
-function onSessionHandleEnd(event: PointerEvent) {
-  if (!isSessionDragging.value || event.pointerId !== sessionPointerId) return
-  const target = event.currentTarget as HTMLElement
-  if (target.hasPointerCapture?.(event.pointerId)) target.releasePointerCapture(event.pointerId)
-  const shouldClose = sessionDragOffset.value > 72
-  sessionPointerId = null
-  isSessionDragging.value = false
-  if (shouldClose) closeActiveSession()
-  else sessionDragOffset.value = 0
-}
 
-// Horizontal navigation belongs to the normal player surface, never buttons,
-// the progress scrubber, or text inputs. A small elastic offset previews the
-// direction before the track and artwork update.
-const swipeOffset = ref(0)
-const isSwiping = ref(false)
-let swipeStartX = 0
-let swipeStartY = 0
-let swipePointerId: number | null = null
-let swipeAxis: 'pending' | 'horizontal' | 'vertical' = 'pending'
 const swipeVisualStyle = computed(() => ({
   transform: `translate3d(${swipeOffset.value}px, 0, 0)`,
   transition: isSwiping.value ? 'none' : 'transform 220ms var(--player-ease)',
@@ -348,40 +297,105 @@ const swipeVisualStyle = computed(() => ({
 function isInteractiveTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest('button, input, textarea, select, a, [role="slider"], [data-player-no-swipe]'))
 }
-function onPlayerPointerDown(event: PointerEvent) {
-  if (!useSettingsStore().gestures.swipePlayer) return
-  if (isInteractiveTarget(event.target) || event.pointerType === 'mouse' && event.button !== 0) return
-  swipeStartX = event.clientX
-  swipeStartY = event.clientY
-  swipePointerId = event.pointerId
-  swipeAxis = 'pending'
-  isSwiping.value = false
-  ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
-}
-function onPlayerPointerMove(event: PointerEvent) {
-  if (event.pointerId !== swipePointerId) return
-  const deltaX = event.clientX - swipeStartX
-  const deltaY = event.clientY - swipeStartY
-  if (swipeAxis === 'pending' && Math.max(Math.abs(deltaX), Math.abs(deltaY)) > 10) {
-    swipeAxis = Math.abs(deltaX) > Math.abs(deltaY) * 1.25 ? 'horizontal' : 'vertical'
+
+function onWindowPointerMove(event: PointerEvent) {
+  if (activePointerId === null || event.pointerId !== activePointerId) return
+
+  const deltaX = event.clientX - dragStartX
+  const deltaY = event.clientY - dragStartY
+
+  if (dragAxis === 'pending') {
+    const absX = Math.abs(deltaX)
+    const absY = Math.abs(deltaY)
+    if (Math.max(absX, absY) > 8) {
+      if (useSettingsStore().gestures.swipePlayer && absX > absY * 1.15) {
+        dragAxis = 'horizontal'
+      } else if (deltaY > 4) {
+        dragAxis = 'vertical'
+      }
+    }
   }
-  if (swipeAxis !== 'horizontal') return
-  isSwiping.value = true
-  swipeOffset.value = Math.max(-56, Math.min(56, deltaX * 0.32))
+
+  if (dragAxis === 'horizontal') {
+    isSwiping.value = true
+    swipeOffset.value = Math.max(-56, Math.min(56, deltaX * 0.32))
+  } else if (dragAxis === 'vertical') {
+    if (event.cancelable) {
+      try {
+        event.preventDefault()
+      } catch {
+        /* ignore */
+      }
+    }
+    if (visualMode.value === 'lyrics') {
+      isSessionDragging.value = true
+      sessionDragOffset.value = Math.max(0, deltaY)
+    } else {
+      isFullDragging.value = true
+      fullDragOffset.value = Math.max(0, deltaY)
+    }
+  }
 }
-function onPlayerPointerEnd(event: PointerEvent) {
-  if (event.pointerId !== swipePointerId) return
-  const deltaX = event.clientX - swipeStartX
-  const target = event.currentTarget as HTMLElement
-  if (target.hasPointerCapture?.(event.pointerId)) target.releasePointerCapture(event.pointerId)
-  const shouldNavigate = swipeAxis === 'horizontal' && Math.abs(deltaX) >= 72
-  swipePointerId = null
+
+function onWindowPointerUp(event: PointerEvent) {
+  if (activePointerId === null || event.pointerId !== activePointerId) return
+
+  const deltaX = event.clientX - dragStartX
+  const deltaY = event.clientY - dragStartY
+  removePlayerDragListeners()
+
+  if (dragAxis === 'horizontal') {
+    const shouldNavigate = Math.abs(deltaX) >= 64
+    if (shouldNavigate) {
+      if (deltaX < 0) next()
+      else prev()
+    }
+  } else if (dragAxis === 'vertical') {
+    if (visualMode.value === 'lyrics') {
+      const shouldClose = sessionDragOffset.value > 60
+      if (shouldClose) closeActiveSession()
+      else sessionDragOffset.value = 0
+      isSessionDragging.value = false
+    } else {
+      const shouldMinimize = fullDragOffset.value > 60
+      if (shouldMinimize) closeFullPlayer()
+      else fullDragOffset.value = 0
+      isFullDragging.value = false
+    }
+  }
+
+  activePointerId = null
   isSwiping.value = false
   swipeOffset.value = 0
-  if (shouldNavigate) {
-    if (deltaX < 0) next()
-    else prev()
+  dragAxis = 'pending'
+}
+
+function addPlayerDragListeners() {
+  if (import.meta.client) {
+    window.addEventListener('pointermove', onWindowPointerMove, { passive: false })
+    window.addEventListener('pointerup', onWindowPointerUp, { passive: false })
+    window.addEventListener('pointercancel', onWindowPointerUp, { passive: false })
   }
+}
+
+function removePlayerDragListeners() {
+  if (import.meta.client) {
+    window.removeEventListener('pointermove', onWindowPointerMove)
+    window.removeEventListener('pointerup', onWindowPointerUp)
+    window.removeEventListener('pointercancel', onWindowPointerUp)
+  }
+}
+
+function onPlayerPointerDown(event: PointerEvent) {
+  if (isInteractiveTarget(event.target) || (event.pointerType === 'mouse' && event.button !== 0)) return
+  dragStartX = event.clientX
+  dragStartY = event.clientY
+  activePointerId = event.pointerId
+  dragAxis = 'pending'
+  isSwiping.value = false
+  fullDragOffset.value = 0
+  isFullDragging.value = false
+  addPlayerDragListeners()
 }
 
 function onKeydown(event: KeyboardEvent) {
@@ -436,16 +450,13 @@ if (import.meta.client) {
 
         <section
           class="player-sheet-main"
-          :class="{ 'is-dragging': isFullDragging }"
+          :class="{ 'is-dragging': isFullDragging || isSessionDragging }"
           :style="fullSheetStyle"
+          @pointerdown="onPlayerPointerDown"
         >
           <div
             class="player-mobile-handle"
             aria-label="Swipe down to minimize player"
-            @pointerdown="onFullHandleDown"
-            @pointermove="onFullHandleMove"
-            @pointerup="onFullHandleEnd"
-            @pointercancel="onFullHandleEnd"
           ><span /></div>
 
           <header class="player-topbar">
@@ -465,10 +476,6 @@ if (import.meta.client) {
               <div
                 class="player-session-handle"
                 aria-label="Swipe down to close AI session"
-                @pointerdown="onSessionHandleDown"
-                @pointermove="onSessionHandleMove"
-                @pointerup="onSessionHandleEnd"
-                @pointercancel="onSessionHandleEnd"
               ><span /></div>
               <div class="player-ai-emo-wrap">
                 <EmoCompanion
@@ -500,19 +507,11 @@ if (import.meta.client) {
             <section
               v-else
               class="player-normal-session"
-              @pointerdown="onPlayerPointerDown"
-              @pointermove="onPlayerPointerMove"
-              @pointerup="onPlayerPointerEnd"
-              @pointercancel="onPlayerPointerEnd"
             >
               <div
                 v-if="visualMode === 'lyrics'"
                 class="player-session-handle"
                 aria-label="Swipe down to close lyrics"
-                @pointerdown.stop="onSessionHandleDown"
-                @pointermove.stop="onSessionHandleMove"
-                @pointerup.stop="onSessionHandleEnd"
-                @pointercancel.stop="onSessionHandleEnd"
               ><span /></div>
 
               <div
@@ -664,6 +663,8 @@ if (import.meta.client) {
   overflow: hidden;
   overscroll-behavior: none;
   transform-origin: center top;
+  touch-action: none;
+  user-select: none;
 }
 .player-sheet-main.is-dragging { user-select: none; will-change: transform; }
 
@@ -700,6 +701,7 @@ if (import.meta.client) {
   height: 3rem;
   padding-inline: 0.75rem;
   flex-shrink: 0;
+  touch-action: none;
 }
 .player-topbar-label { font-size: 0.6875rem; font-weight: 800; letter-spacing: 0.22em; color: var(--player-fg-faint); }
 .player-topbar-btn { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border: 1px solid transparent; background: transparent; color: var(--player-fg-muted); border-radius: 999px; cursor: pointer; transition: all 160ms var(--player-ease-smooth); }
@@ -711,6 +713,7 @@ if (import.meta.client) {
   flex: 1;
   overflow: hidden;
   padding: 0.25rem 0 calc(0.7rem + var(--player-safe-bottom));
+  touch-action: none;
 }
 .player-normal-session {
   display: flex;
@@ -720,7 +723,7 @@ if (import.meta.client) {
   flex-direction: column;
   gap: clamp(0.45rem, 1.5dvh, 0.9rem);
   overflow: hidden;
-  touch-action: pan-y;
+  touch-action: none;
 }
 
 .player-visual {
@@ -731,9 +734,10 @@ if (import.meta.client) {
   overflow: hidden;
   justify-content: center;
   will-change: transform;
+  touch-action: none;
 }
 .player-visual.is-lyrics { min-height: 0; }
-.player-visual-pane { width: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.player-visual-pane { width: 100%; min-height: 0; display: flex; align-items: center; justify-content: center; touch-action: none; }
 .player-visual-pane--artwork { padding-inline: var(--player-content-padding); }
 .player-visual-pane--lyrics { align-items: stretch; }
 
@@ -747,8 +751,9 @@ if (import.meta.client) {
   border: 1px solid var(--player-line-strong);
   background: var(--player-bg-soft);
   box-shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 32px -12px rgba(0,0,0,0.6);
+  touch-action: none;
 }
-.player-artwork-img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.player-artwork-img { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; user-select: none; -webkit-user-drag: none; }
 .player-artwork-fallback { display: grid; width: 100%; height: 100%; place-items: center; background: var(--player-bg-soft); color: var(--player-fg-faint); font-size: 2rem; font-weight: 700; letter-spacing: 0.1em; }
 .player-artwork-glow { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(60% 60% at 50% 10%, rgba(237,240,244,0.08), transparent 70%); }
 

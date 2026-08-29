@@ -8,6 +8,7 @@ import com.systema.music.analysis.AudioAnalysisException
 import com.systema.music.analysis.decode.PcmDecoder
 import com.systema.music.analysis.dsp.AudioAnalysisConfig
 import com.systema.music.inference.EmbeddingResult
+import com.systema.music.inference.EmbeddingSimilarity
 import com.systema.music.inference.InferenceErrorCode
 import com.systema.music.inference.InferenceException
 import com.systema.music.inference.InferenceRuntime
@@ -16,6 +17,7 @@ import com.systema.music.inference.MemoryGuard
 import com.systema.music.inference.MemorySample
 import com.systema.music.inference.ModelRegistry
 import com.systema.music.inference.TensorSignature
+import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedSendChannelException
@@ -475,6 +477,10 @@ class ClapSession(
         }
 
         val (vector, preNormL2) = model.poolAndNormalise(sum, stream.windowsProcessed)
+        val norm = EmbeddingSimilarity.l2Norm(vector)
+        val finite = vector.all { it.isFinite() }
+        val normalised = abs(norm - 1.0) <= EmbeddingSimilarity.NORM_TOLERANCE
+        val outputValid = finite && normalised && preNormL2 > 1e-8
 
         // Audio actually EMBEDDED, which is what the windows covered —
         // not what happened to be decoded.
