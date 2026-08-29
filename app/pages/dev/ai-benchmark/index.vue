@@ -24,6 +24,7 @@ import { useLibraryStore } from '~/stores/library'
 import { MAX_DATASET_SAMPLES } from '~/services/ai-lab/dataset'
 import { MAX_SUSTAINED_ITERATIONS } from '~/services/ai-lab/benchmarkRunner'
 import { buildRecommendations } from '~/services/ai-lab/comparison'
+import { navigateTo } from 'nuxt/app'
 
 definePageMeta({ layout: 'dev' })
 useHead({ title: 'AI Benchmark Lab' })
@@ -102,7 +103,7 @@ const sustainedIterations = ref(20)
     <!-- ---- Header ---------------------------------------- -->
     <header class="border-b border-line bg-surface">
       <div class="sys-container py-6">
-        <p class="label text-fg-faint">
+        <p class="label text-fg-faint" @click="navigateTo({name:'index'})">
           SYSTEMA / PHASE 14 / DEVELOPER INSTRUMENT
         </p>
         <h1 class="mt-2 text-[24px] font-bold tracking-tight text-fg">

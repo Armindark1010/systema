@@ -289,6 +289,27 @@ export async function getTracksPage(options: GetTracksOptions = {}): Promise<Lib
   }
 }
 
+/**
+ * Fetches all device tracks across pages.
+ */
+export async function fetchAllDeviceTracks(maxTracks = 50000): Promise<Track[]> {
+  if (!isNativeLibraryAvailable()) return []
+  const all: Track[] = []
+  let offset = 0
+  const limit = 500
+  let hasMore = true
+
+  while (hasMore && all.length < maxTracks) {
+    const page = await getTracksPage({ offset, limit })
+    if (!page.tracks.length) break
+    all.push(...page.tracks)
+    offset += page.tracks.length
+    hasMore = page.hasMore && offset < page.total
+  }
+
+  return all
+}
+
 export async function getTrack(id: string): Promise<Track | null> {
   if (!isNativeLibraryAvailable()) return null
   try {

@@ -21,7 +21,9 @@ import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedSendChannelException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.trySendBlocking
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
@@ -85,6 +87,18 @@ class ClapSession(
 
     fun status(): JSObject = JSObject().apply {
         val model = active
+        // Lifecycle tracing (Phase 23.1). `sessionId` is this object's
+        // identity hash: if the lab and a later analysis print the same
+        // value, they are talking to the SAME ClapSession, which
+        // distinguishes a lost-plugin problem from a released-session
+        // one. No audio or embedding data is ever logged.
+        ClapLog.event(
+            ClapLog.SESSION_STATE,
+            "sessionId" to Integer.toHexString(System.identityHashCode(this@ClapSession)),
+            "loaded" to (model != null),
+            "validated" to validated,
+            "modelId" to (activeModelId ?: ""),
+        )
         put("loaded", model != null)
         put("modelId", activeModelId ?: "")
         put("validated", validated)
@@ -114,6 +128,12 @@ class ClapSession(
      * room (§4).
      */
     suspend fun load(modelId: String, runtime: InferenceRuntime): JSObject = mutex.withLock {
+        ClapLog.event(
+            ClapLog.SESSION_IDENTITY,
+            "stage" to "loadRequested",
+            "sessionId" to Integer.toHexString(System.identityHashCode(this@ClapSession)),
+            "modelId" to modelId,
+        )
         if (active != null) {
             throw InferenceException(
                 InferenceErrorCode.MODEL_LOAD_FAILED,
@@ -292,6 +312,15 @@ class ClapSession(
         releaseAfter: Boolean = true,
         /** Seconds of audio to embed, or null / <= 0 for the whole track. */
         durationSec: Int? = DEFAULT_DURATION_SEC,
+        /**
+         * Include the embedding itself in the payload (Phase 22).
+         *
+         * Off by default so the existing single-track test payload is
+         * unchanged. The vector is only needed by the similarity
+         * pipeline, which compares two tracks; sending 512 floats to a
+         * UI that just wants timings would be waste.
+         */
+        includeVector: Boolean = false,
     ): JSObject = mutex.withLock {
         val model = active ?: throw InferenceException(
             InferenceErrorCode.MODEL_LOAD_FAILED,
@@ -376,6 +405,18 @@ class ClapSession(
         // and each window is inferred and discarded as soon as it
         // fills. Peak memory is a function of the window size, not the
         // track length (§4).
+        // One id per analyse request, so the whole chain can be read as
+        // a sequence in logcat. Derived from the clock and this
+        // session's identity: no track data, no URI.
+        val requestId = java.lang.Long.toHexString(System.nanoTime())
+        ClapLog.event(
+            ClapLog.ANALYZE_START,
+            "requestId" to requestId,
+            "sessionId" to Integer.toHexString(System.identityHashCode(this@ClapSession)),
+            "modelId" to (activeModelId ?: ""),
+            "windowBudget" to (windowBudget?.toString() ?: "unbounded"),
+        )
+
         val stream = model.openStream(windowBudget)
         val decodeStart = System.nanoTime()
         var decodeMs: Double
@@ -425,6 +466,29 @@ class ClapSession(
                         if (e.code != AudioAnalysisException.Code.CANCELLED) throw e
                     } catch (e: ClosedSendChannelException) {
                         // The consumer stopped first; also expected.
+                    } catch (e: CancellationException) {
+                        // THE CONSUMER FINISHED FIRST — THIS IS SUCCESS.
+                        //
+                        // When the window budget fills, the consumer
+                        // breaks and calls channel.cancel(). If the
+                        // producer is parked on the rendezvous send at
+                        // that moment, its trySendBlocking().getOrThrow()
+                        // throws CancellationException. That is the
+                        // normal end of a capped run, not a failure.
+                        //
+                        // Only swallowed when THIS coroutine was not
+                        // itself cancelled: if the caller cancelled the
+                        // whole request, the exception must propagate so
+                        // structured concurrency stays correct.
+                        if (isActive) {
+                            ClapLog.event(
+                                ClapLog.DECODE_STOPPED,
+                                "requestId" to requestId,
+                                "reason" to "consumerSaturated",
+                            )
+                        } else {
+                            throw e
+                        }
                     } finally {
                         channel.close()
                     }
@@ -434,9 +498,23 @@ class ClapSession(
                     stream.accept(chunk, chunk.size)
                     if (stream.isSaturated()) break
                 }
-                // Drain rather than cancel: the producer may be parked
-                // on a rendezvous send, and cancelling it there would
-                // race with reading sourceInfo.
+                // The consumer has everything it needs. The producer
+                // may still be parked on a rendezvous send, so the
+                // channel is cancelled to release it; that surfaces in
+                // the producer as a CancellationException, which it
+                // recognises as this expected stop.
+                //
+                // shouldCancel = { stream.isSaturated() } is only polled
+                // at the top of the decode loop, so it cannot release a
+                // producer that is ALREADY parked mid-callback. The
+                // channel cancel is what actually unblocks it.
+                ClapLog.event(
+                    ClapLog.DECODE_STOPPED,
+                    "requestId" to requestId,
+                    "stage" to "consumerDone",
+                    "saturated" to stream.isSaturated(),
+                    "windows" to stream.windowsProcessed,
+                )
                 channel.cancel()
                 producer.join()
 
@@ -460,14 +538,33 @@ class ClapSession(
                 memoryAfterKb = after.totalPssKb,
             )
             runCatching { stream.finish() }
+            // Include the underlying cause. The wrapper's own message
+            // ("The decoder failed while reading this file") cannot
+            // distinguish a permission problem from an unexpected PCM
+            // encoding, which is exactly the ambiguity that made this
+            // failure undiagnosable from the device report.
+            val cause = generateSequence(t) { it.cause }
+                .drop(1)
+                .firstOrNull()
+            val detail = if (cause != null) {
+                "${t.message} (cause: ${cause.javaClass.simpleName}: ${cause.message})"
+            } else {
+                t.message
+            }
             throw InferenceException(
                 InferenceErrorCode.INPUT_SHAPE_MISMATCH,
-                "Could not decode the selected track: ${t.message}",
+                "Could not decode the selected track: $detail",
             )
         }
 
         val sum = stream.finish()
         decodeMs = (System.nanoTime() - decodeStart) / 1_000_000.0
+        ClapLog.event(
+            ClapLog.ANALYZE_SUCCESS,
+            "requestId" to requestId,
+            "windows" to stream.windowsProcessed,
+            "decodeMs" to decodeMs.toLong(),
+        )
 
         if (sum == null || stream.windowsProcessed == 0) {
             throw InferenceException(
@@ -502,6 +599,14 @@ class ClapSession(
             inferenceMs = stream.inferenceMs,
             totalMs = decodeMs,
         )
+
+        val finite = embedding.embedding.all { it.isFinite() }
+        var norm = 0.0
+        for (v in embedding.embedding) norm += v.toDouble() * v.toDouble()
+        norm = kotlin.math.sqrt(norm)
+        // A correctly L2-normalised vector has norm 1.
+        val normalised = kotlin.math.abs(norm - 1.0) < 1e-3
+        val outputValid = finite && normalised && embedding.dimension > 0
 
         val peak = MemorySample.capture(context)
 
@@ -540,6 +645,13 @@ class ClapSession(
 
         JSObject().apply {
             put("trackId", trackId)
+            // Phase 22: the raw embedding, for the similarity pipeline.
+            // Only when explicitly requested, and only when the output
+            // passed its validity checks — an invalid vector must not
+            // leave this class and become a silent 0.0 cosine.
+            if (includeVector && outputValid) {
+                put("vector", JSArray().apply { embedding.embedding.forEach { put(it.toDouble()) } })
+            }
             put("dimension", embedding.dimension)
             put("preNormL2", embedding.preNormL2)
             put("l2NormAfterNormalisation", norm)

@@ -7,13 +7,21 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Bundle
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.MediaStyleNotificationHelper
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import com.systema.music.R
+import com.systema.music.player.model.PlayerException
+import com.systema.music.player.model.PlayerSnapshot
 
 /**
  * SYSTEMA — the foreground playback service.
@@ -22,26 +30,6 @@ import com.systema.music.R
  * session here, in a service the system keeps alive while audio is
  * playing, so locking the phone or pressing Home no longer takes the
  * player down with the UI.
- *
- * Architecture
- * ------------
- * The service does *not* own a player. It publishes the process-wide
- * [PlayerEngine] singleton:
- *
- *     PlayerEngine (one ExoPlayer)
- *         -> MediaSession (this service)
- *             -> notification / lock screen / Bluetooth
- *
- * There is exactly one ExoPlayer, one queue and one MediaSession in the
- * process. Everything the user can press — the in-app transport, the
- * notification, the lock screen, a headset button — ends up calling the
- * same [Player] instance.
- *
- * Lifecycle
- * ---------
- * Uses Media3's [DefaultMediaNotificationProvider] with [MediaStyleNotificationHelper]
- * so Android renders the full System Media Player card (title, artist, album art,
- * seekbar, and playback action controls).
  */
 class PlaybackService : MediaSessionService() {
 
@@ -49,9 +37,32 @@ class PlaybackService : MediaSessionService() {
         const val TAG = "SystemaPlaybackSvc"
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "systema_playback_channel"
+
+        const val ACTION_FAVORITE = "com.systema.music.ACTION_FAVORITE"
+        const val ACTION_SHUFFLE = "com.systema.music.ACTION_SHUFFLE"
     }
 
     private var mediaSession: MediaSession? = null
+
+    private val engineListener = object : PlayerEngine.Listener {
+        override fun onSnapshot(snapshot: PlayerSnapshot) {
+            updateCustomLayout()
+        }
+
+        override fun onTrackChanged(trackId: String?, index: Int) {
+            updateCustomLayout()
+        }
+
+        override fun onError(error: PlayerException, trackId: String?) {}
+
+        override fun onQueueChanged(trackIds: List<String>, currentIndex: Int) {
+            updateCustomLayout()
+        }
+
+        override fun onFavoriteToggled(trackId: String, isFavorite: Boolean) {
+            updateCustomLayout()
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -68,6 +79,9 @@ class PlaybackService : MediaSessionService() {
             return
         }
 
+        val engine = PlayerEngine.get(applicationContext)
+        engine.addListener(engineListener)
+
         // 3. Configure PendingIntent for tapping notification to reopen SYSTEMA
         val sessionActivity = packageManager
             .getLaunchIntentForPackage(packageName)
@@ -80,9 +94,10 @@ class PlaybackService : MediaSessionService() {
                 )
             }
 
-        // 4. Build MediaSession attached to the shared ExoPlayer
+        // 4. Build MediaSession attached to the shared ExoPlayer with custom action callback
         mediaSession = try {
             MediaSession.Builder(this, player)
+                .setCallback(SessionCallback())
                 .apply { sessionActivity?.let(::setSessionActivity) }
                 .build()
         } catch (t: Throwable) {
@@ -106,6 +121,77 @@ class PlaybackService : MediaSessionService() {
         startInitialForeground(sessionActivity)
 
         Log.i(TAG, "Playback service created (session=${mediaSession != null})")
+    }
+
+    private fun buildCustomLayout(): List<CommandButton> {
+        val engine = try {
+            PlayerEngine.get(applicationContext)
+        } catch (_: Throwable) {
+            return emptyList()
+        }
+
+        val currentTrackId = engine.currentTrackId()
+        val isFav = engine.isFavorite(currentTrackId)
+        val isShuffle = engine.isShuffle()
+
+        val favoriteButton = CommandButton.Builder()
+            .setDisplayName(if (isFav) "Unlike" else "Like")
+            .setIconResId(if (isFav) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline)
+            .setSessionCommand(SessionCommand(ACTION_FAVORITE, Bundle.EMPTY))
+            .build()
+
+        val shuffleButton = CommandButton.Builder()
+            .setDisplayName(if (isShuffle) "Shuffle On" else "Shuffle Off")
+            .setIconResId(if (isShuffle) R.drawable.ic_shuffle_on else R.drawable.ic_shuffle)
+            .setSessionCommand(SessionCommand(ACTION_SHUFFLE, Bundle.EMPTY))
+            .build()
+
+        return listOf(favoriteButton, shuffleButton)
+    }
+
+    private fun updateCustomLayout() {
+        val session = mediaSession ?: return
+        try {
+            session.setCustomLayout(buildCustomLayout())
+        } catch (t: Throwable) {
+            Log.w(TAG, "Could not update custom layout", t)
+        }
+    }
+
+    private inner class SessionCallback : MediaSession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo
+        ): MediaSession.ConnectionResult {
+            val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                .add(SessionCommand(ACTION_FAVORITE, Bundle.EMPTY))
+                .add(SessionCommand(ACTION_SHUFFLE, Bundle.EMPTY))
+                .build()
+
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(sessionCommands)
+                .setCustomLayout(buildCustomLayout())
+                .build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle
+        ): ListenableFuture<SessionResult> {
+            val engine = PlayerEngine.get(applicationContext)
+            when (customCommand.customAction) {
+                ACTION_FAVORITE -> {
+                    engine.toggleFavoriteCurrent()
+                }
+                ACTION_SHUFFLE -> {
+                    engine.toggleShuffle()
+                }
+            }
+            updateCustomLayout()
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
     }
 
     private fun createNotificationChannel() {
@@ -198,6 +284,10 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         Log.i(TAG, "Playback service destroyed")
+
+        try {
+            PlayerEngine.get(applicationContext).removeListener(engineListener)
+        } catch (_: Throwable) {}
 
         mediaSession?.run {
             release()

@@ -175,6 +175,7 @@ export interface PlayerPlugin {
   skipToIndex(options: { index: number }): Promise<void>
   getQueue(): Promise<QueueChangedEvent>
 
+  setFavorites(options: { trackIds: string[] }): Promise<void>
   setShuffle(options: { enabled: boolean }): Promise<void>
   setRepeatMode(options: { mode: NativeRepeatMode }): Promise<void>
   setVolume(options: { volume: number }): Promise<void>
@@ -199,6 +200,7 @@ export interface PlayerPlugin {
   addListener(eventName: 'bufferingChanged', handler: (event: BufferingEvent) => void): Promise<PluginListenerHandle>
   addListener(eventName: 'queueChanged', handler: (event: QueueChangedEvent) => void): Promise<PluginListenerHandle>
   addListener(eventName: 'playerError', handler: (event: PlayerErrorEvent) => void): Promise<PluginListenerHandle>
+  addListener(eventName: 'favoriteToggled', handler: (event: { trackId: string; isFavorite: boolean }) => void): Promise<PluginListenerHandle>
   addListener(eventName: 'notificationPermissionChanged', handler: (event: NotificationPermissionEvent) => void): Promise<PluginListenerHandle>
   addListener(eventName: 'sleepTimerChanged', handler: (event: SleepTimerState) => void): Promise<PluginListenerHandle>
   addListener(eventName: 'sleepTimerExpired', handler: () => void): Promise<PluginListenerHandle>

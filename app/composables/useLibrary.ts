@@ -76,9 +76,14 @@ export function useLibrary() {
    * Shuffle the library: play the whole list as the context with
    * shuffle enabled, so Next/Previous follow one deterministic
    * shuffled order rather than re-randomising per press.
+   * On native, ensures all device tracks are loaded before shuffling.
    */
-  function shuffleLibrary() {
-    const list = sortedTracks.value
+  async function shuffleLibrary() {
+    let list = sortedTracks.value
+    if (isNativeLibrary.value && !allTracksLoaded.value) {
+      await libraryStore.loadAllTracks()
+      list = sortedTracks.value
+    }
     if (!list.length) return
     const start = Math.floor(Math.random() * list.length)
     playerStore.playQueue(list, start)
@@ -139,6 +144,8 @@ export function useLibrary() {
     shuffleLibrary,
     addTrackToQueue,
     setSection,
+    setSortBy: libraryStore.setSortBy,
+    resetPresentation: libraryStore.resetPresentation,
 
     // native library actions — no-ops in the browser
     initNativeLibrary: libraryStore.initNativeLibrary,

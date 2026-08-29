@@ -55,6 +55,7 @@ import {
   setQueueNative,
   setRepeatNative,
   setShuffleNative,
+  setFavoritesNative,
   setVolumeNative,
   fromNativeRepeat,
   type PlayerSnapshot,
@@ -389,6 +390,14 @@ export function useNativePlayer() {
     return player.$onAction(({ name, args, after }) => {
       if (applyingNativeState) return
 
+      let preAddToQueueIndex = -1
+      if (name === 'addToQueue') {
+        const track = args[0] as Track | undefined
+        if (track) {
+          preAddToQueueIndex = player.playbackOrder.findIndex(t => t.id === track.id)
+        }
+      }
+
       after(() => {
         switch (name) {
           case 'playTrack': {
@@ -455,13 +464,15 @@ export function useNativePlayer() {
           }
 
           case 'addToQueue': {
-            const track = args[0] as { id: string } | undefined
-            const added = player.playbackOrder.find(t => t.id === track?.id)
-            if (!added || !isPlayableNatively(added)) return
-            // The store already inserted it; mirror the same absolute
-            // position so both lists stay identical.
-            const at = player.playbackOrder.findIndex(t => t.id === added.id)
-            void addToQueueNative(added, at >= 0 ? at : undefined)
+            const track = args[0] as Track | undefined
+            if (!track || !isPlayableNatively(track)) return
+            const newIndex = player.playbackOrder.findIndex(t => t.id === track.id)
+            if (newIndex < 0) return
+            if (preAddToQueueIndex >= 0 && preAddToQueueIndex !== newIndex) {
+              void moveInQueueNative(preAddToQueueIndex, newIndex)
+            } else if (preAddToQueueIndex < 0) {
+              void addToQueueNative(track, newIndex)
+            }
             break
           }
 
@@ -501,6 +512,11 @@ export function useNativePlayer() {
             void setRepeatNative(player.repeatMode)
             break
 
+          case 'toggleFavorite':
+          case 'toggleFavoriteId':
+            void setFavoritesNative(Array.from(player.favorites))
+            break
+
           case 'setVolume':
           case 'toggleMute':
             void setVolumeNative(player.muted ? 0 : player.volume)
@@ -519,6 +535,9 @@ export function useNativePlayer() {
     installed = true
     player.isNativePlayback = true
 
+    // Push initial favorites to native
+    void setFavoritesNative(Array.from(player.favorites))
+
     disposeListeners = addPlayerListeners({
       onSnapshot: applySnapshot,
       onTrackChanged: event => applyTrackChange(event.trackId),
@@ -527,6 +546,12 @@ export function useNativePlayer() {
         if (event.durationMs > 0) {
           applyNative(() => { player.duration = event.durationMs / 1000 })
         }
+      },
+      onFavoriteToggled: (event) => {
+        if (!event.trackId) return
+        applyNative(() => {
+          player.toggleFavoriteId(event.trackId)
+        })
       },
       onNotificationPermission: (event) => {
         // The native layer resolved POST_NOTIFICATIONS (MainActivity

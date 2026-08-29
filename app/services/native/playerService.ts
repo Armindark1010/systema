@@ -188,6 +188,9 @@ export const clearQueueNative = () => guarded(() => NativePlayer.clearQueue(), '
 export const skipToIndexNative = (index: number) =>
   guarded(() => NativePlayer.skipToIndex({ index }), 'skipToIndex')
 
+export const setFavoritesNative = (trackIds: string[]) =>
+  guarded(() => NativePlayer.setFavorites({ trackIds }), 'setFavorites')
+
 export const setShuffleNative = (enabled: boolean) =>
   guarded(() => NativePlayer.setShuffle({ enabled }), 'setShuffle')
 
@@ -231,6 +234,7 @@ export interface NativePlayerHandlers {
   onDuration?: (event: DurationEvent) => void
   onQueueChanged?: (event: QueueChangedEvent) => void
   onError?: (error: PlayerError) => void
+  onFavoriteToggled?: (event: { trackId: string; isFavorite: boolean }) => void
   onNotificationPermission?: (event: NotificationPermissionEvent) => void
   onSleepTimerChanged?: (event: SleepTimerState) => void
   onSleepTimerExpired?: () => void
@@ -259,6 +263,9 @@ export function addPlayerListeners(handlers: NativePlayerHandlers): () => void {
   }
   if (handlers.onQueueChanged) {
     pending.push(NativePlayer.addListener('queueChanged', handlers.onQueueChanged))
+  }
+  if (handlers.onFavoriteToggled) {
+    pending.push(NativePlayer.addListener('favoriteToggled', handlers.onFavoriteToggled))
   }
   if (handlers.onNotificationPermission) {
     pending.push(

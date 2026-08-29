@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.WebViewListener;
 import com.systema.music.analysis.AudioAnalysisPlugin;
+import com.systema.music.dataset.AiDatasetPlugin;
 import com.systema.music.inference.InferencePlugin;
 import com.systema.music.library.MusicLibraryPlugin;
 import com.systema.music.player.PlayerPlugin;
@@ -76,6 +77,19 @@ public class MainActivity extends BridgeActivity {
             Log.e(TAG, "Failed to register InferencePlugin", t);
         }
 
+        // Phase 28 dataset collection. Unlike the plugins above, a
+        // failure here is NOT harmless-and-quiet: the web layer would
+        // fall back to a volatile store, and someone could label an
+        // entire library into a map that dies with the tab. The
+        // frontend detects the missing plugin and refuses to report a
+        // successful save, but that only works if this line is here.
+        Log.i(TAG, "Registering AiDatasetPlugin");
+        try {
+            registerPlugin(AiDatasetPlugin.class);
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to register AiDatasetPlugin", t);
+        }
+
         super.onCreate(savedInstanceState);
 
         // Ask for POST_NOTIFICATIONS natively, right at startup.
@@ -107,6 +121,16 @@ public class MainActivity extends BridgeActivity {
                 + (getBridge().getPlugin("AudioAnalysis") != null));
             Log.i(TAG, "Inference plugin registered with bridge: "
                 + (getBridge().getPlugin("Inference") != null));
+
+            boolean datasetPresent = getBridge().getPlugin("AiDataset") != null;
+            Log.i(TAG, "AiDataset plugin registered with bridge: " + datasetPresent);
+            if (!datasetPresent) {
+                Log.e(
+                    TAG,
+                    "AiDataset is NOT registered. The dataset page will report NOT PERSISTED "
+                        + "and refuse to save labels. Look for an earlier PluginLoadException."
+                );
+            }
             if (!present) {
                 Log.e(
                     TAG,

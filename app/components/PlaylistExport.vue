@@ -1,24 +1,87 @@
 <script setup lang="ts">
 // ============================================================
-// PlaylistExport — export state machine (UI only)
-// Future: SYSTEMA JSON · M3U · JSON — native export later.
+// PlaylistExport — real M3U and JSON playlist exporter
+// Generates standard Extended M3U (#EXTM3U) and triggers download
 // ============================================================
 
-const props = defineProps<{ open: boolean; playlistTitle?: string }>()
+import type { Playlist } from '~/types'
+import { useLibraryStore } from '~/stores/library'
+
+const props = defineProps<{
+  open: boolean
+  playlistTitle?: string
+  playlistId?: string
+}>()
+
 const emit = defineEmits<{ 'update:open': [v: boolean] }>()
 
 const pl = usePlaylists()
-const { exportStep, exportFormat, startExport, resetExport, setExportFormat } = pl
+const { playlists, exportStep, exportFormat, setExportFormat, exportPlaylist, resetExport } = pl
+const libraryStore = useLibraryStore()
+const tracks = computed(() => libraryStore.tracks)
 const toast = useToast()
 
-const formats = ['SYSTEMA JSON', 'JSON', 'M3U']
+const formats = ['M3U', 'SYSTEMA JSON']
+const selectedPlaylistId = ref<string>(props.playlistId || playlists.value[0]?.id || '')
+
+watch(() => props.playlistId, (newId) => {
+  if (newId) selectedPlaylistId.value = newId
+}, { immediate: true })
+
+watch(() => props.open, (isOpen) => {
+  if (isOpen) {
+    if (props.playlistId) {
+      selectedPlaylistId.value = props.playlistId
+    } else if (!selectedPlaylistId.value && playlists.value.length) {
+      selectedPlaylistId.value = playlists.value[0].id
+    }
+  } else {
+    resetExport()
+  }
+})
+
+const activePlaylist = computed<Playlist | undefined>(() => {
+  if (props.playlistId) {
+    return pl.getPlaylist(props.playlistId) || playlists.value.find(p => p.id === props.playlistId)
+  }
+  if (props.playlistTitle) {
+    return playlists.value.find(p => p.title.toLowerCase() === props.playlistTitle?.toLowerCase()) || playlists.value[0]
+  }
+  return playlists.value.find(p => p.id === selectedPlaylistId.value) || playlists.value[0]
+})
+
+const activeTracks = computed(() => {
+  if (!activePlaylist.value) return []
+  return activePlaylist.value.trackIds
+    .map(id => tracks.value.find(t => t.id === id))
+    .filter((t): t is NonNullable<typeof t> => Boolean(t))
+})
+
+const estimatedSize = computed(() => {
+  const count = activePlaylist.value?.trackIds.length || 0
+  const bytes = count * 95 + 60
+  return bytes > 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`
+})
 
 function onExport() {
-  startExport()
+  if (!activePlaylist.value) return
+  exportPlaylist(activePlaylist.value, tracks.value, exportFormat.value === 'M3U' ? 'M3U' : 'JSON')
+  toast.add({
+    title: 'Playlist exported',
+    description: `${activePlaylist.value.title}.${exportFormat.value === 'M3U' ? 'm3u' : 'json'} downloaded`,
+    icon: 'lucide:download',
+  })
 }
 
+const isOpen = computed({
+  get: () => props.open,
+  set: (val: boolean) => {
+    emit('update:open', val)
+    if (!val) resetExport()
+  },
+})
+
 function onDone() {
-  toast.add({ title: 'Playlist exported', description: `${props.playlistTitle ?? 'PLAYLIST'}.${exportFormat.value === 'M3U' ? 'm3u' : 'json'} — ready`, icon: 'lucide:download' })
   emit('update:open', false)
   resetExport()
 }
@@ -26,17 +89,35 @@ function onDone() {
 
 <template>
   <UModal
-    :model-value="open"
+    v-model:open="isOpen"
     :ui="{ width: 'max-w-[520px]', content: 'bg-surface text-fg' }"
     title="EXPORT PLAYLIST"
-    description="PREPARING → READY — NATIVE FILE HANDLING LATER"
-    @update:model-value="(v: boolean) => { emit('update:open', v); if (!v) resetExport() }"
+    description="GENERATE & DOWNLOAD M3U AUDIO PLAYLIST"
   >
     <template #body>
-      <p v-if="playlistTitle" class="text-small font-semibold text-fg mb-5">{{ playlistTitle }}</p>
+      <!-- Playlist selection if not provided by prop -->
+      <div v-if="!playlistTitle && !playlistId && playlists.length > 1" class="mb-5">
+        <label class="label-muted block mb-2">SELECT PLAYLIST</label>
+        <select
+          v-model="selectedPlaylistId"
+          class="sys-input w-full bg-surface text-fg border border-line h-10 px-3 text-small"
+        >
+          <option v-for="p in playlists" :key="p.id" :value="p.id">
+            {{ p.title }} ({{ p.trackIds.length }} tracks)
+          </option>
+        </select>
+      </div>
+
+      <div v-else-if="activePlaylist" class="sys-panel p-3.5 mb-5 flex items-center justify-between">
+        <div>
+          <p class="text-small font-bold text-fg">{{ activePlaylist.title }}</p>
+          <p class="text-[11.5px] text-fg-muted mt-0.5">{{ activePlaylist.trackIds.length }} TRACKS · {{ estimatedSize }}</p>
+        </div>
+        <span class="label text-primary">READY</span>
+      </div>
 
       <p class="label-muted mb-2">FORMAT</p>
-      <div class="grid grid-cols-3 gap-2 mb-6" role="radiogroup" aria-label="Export format">
+      <div class="grid grid-cols-2 gap-2 mb-6" role="radiogroup" aria-label="Export format">
         <button
           v-for="f in formats"
           :key="f"
@@ -50,15 +131,17 @@ function onDone() {
         </button>
       </div>
 
-      <div v-if="exportStep === 'idle'" class="flex justify-end">
-        <button class="sys-btn-primary" @click="onExport()">
+      <div v-if="exportStep === 'idle'" class="flex justify-end gap-2">
+        <button class="sys-btn-ghost" @click="emit('update:open', false)">CANCEL</button>
+        <button class="sys-btn-primary" :disabled="!activePlaylist" @click="onExport">
           <UIcon name="lucide:download" class="w-4 h-4" />
-          EXPORT PLAYLIST
+          DOWNLOAD {{ exportFormat === 'M3U' ? '.M3U' : '.JSON' }}
         </button>
       </div>
 
       <div v-else-if="exportStep === 'preparing'" class="py-6" aria-live="polite">
-        <Meter :value="65" label="PREPARING" color="bg-primary" />
+        <Meter :value="80" label="GENERATING M3U PLAYLIST" color="bg-primary" />
+        <p class="text-center text-micro text-fg-faint mt-3">Writing Extended M3U directives & track entries...</p>
       </div>
 
       <div v-else class="py-4 flex items-center gap-4">
@@ -66,10 +149,10 @@ function onDone() {
           <UIcon name="lucide:file-check" class="w-4.5 h-4.5" />
         </span>
         <div class="flex-1 min-w-0">
-          <p class="text-small font-semibold text-fg">{{ playlistTitle ?? 'PLAYLIST' }}.{{ exportFormat === 'M3U' ? 'm3u' : 'json' }}</p>
-          <p class="text-[11.5px] text-fg-muted tnum">4.2 KB · 18 TRACKS · UTF-8</p>
+          <p class="text-small font-semibold text-fg truncate">{{ activePlaylist?.title ?? 'PLAYLIST' }}.{{ exportFormat === 'M3U' ? 'm3u' : 'json' }}</p>
+          <p class="text-[11.5px] text-fg-muted tnum">{{ estimatedSize }} · {{ activePlaylist?.trackIds.length }} TRACKS · UTF-8</p>
         </div>
-        <button class="sys-btn-primary" @click="onDone()">DONE</button>
+        <button class="sys-btn-primary" @click="onDone">DONE</button>
       </div>
     </template>
   </UModal>

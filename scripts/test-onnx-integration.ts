@@ -499,9 +499,17 @@ ok('the test model uses RAW_TENSOR, so PCM passes through unresampled',
   /inputFormat = InputFormat\.RAW_TENSOR/.test(testDescriptorBlock))
 
 // A single dynamic dimension must resolve to the actual element count.
+//
+// Phase 21.3 tightened this: the division must be EXACT. The old code
+// computed `actualElements / known` unconditionally and floored the
+// result, which silently dropped the remainder (a 13,840,300-sample
+// track became [28, 480000] = 13,440,000 elements). The contract is now
+// "resolve exactly, or refuse", so this asserts both halves.
 ok('a lone dynamic dimension resolves from the real input length',
   /if \(dynamicCount == 0\) return declared\.toLongArray\(\)/.test(onnxRuntime) &&
-  /inferred = if \(known > 0\) actualElements \/ known/.test(onnxRuntime))
+  /val inferred = actualElements \/ known/.test(onnxRuntime))
+ok('an inexact division is refused rather than floored',
+  /actualElements\.toLong\(\) % known != 0L/.test(onnxRuntime))
 
 // Behavioural: replay the element-wise contract at the device's size.
 {

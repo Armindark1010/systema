@@ -724,6 +724,12 @@ export async function clapTestOneTrack(options: {
    * a caller cannot start a full-track run by forgetting a field.
    */
   durationSec?: number
+  /**
+   * Return the embedding itself, for the similarity pipeline
+   * (Phase 22). Defaults to false: the lab only needs timings, and a
+   * 512-float array per call is pure overhead there.
+   */
+  includeVector?: boolean
 }): Promise<ClapSingleTrackResult> {
   requirePlugin()
   if (!options.trackId || !options.uri) {
@@ -737,6 +743,7 @@ export async function clapTestOneTrack(options: {
       ...options,
       releaseAfter: options.releaseAfter ?? true,
       durationSec: options.durationSec ?? CLAP_DEFAULT_DURATION_SEC,
+      includeVector: options.includeVector ?? false,
     })
   } catch (e) {
     throw toServiceError(e)

@@ -27,6 +27,10 @@ const {
   toggleFavorite,
   queue,
   ensureFullPlayerNavigation,
+  isShuffle,
+  repeatMode,
+  toggleShuffle,
+  cycleRepeat,
 } = player
 
 const { playlists, addTracks, createPlaylist } = usePlaylists()
@@ -37,6 +41,10 @@ const analysis = useTrackAnalysis()
 // The REAL on-device DSP. Kept separate from the mock above on
 // purpose: one is invented for the prototype, the other is measured.
 const audioAnalysis = useAudioAnalysis()
+// Phase 22.1: the EXPERIMENTAL embedding model, behind the generic
+// similarity service. This component never imports a provider or any
+// model-specific code; it only ever sees a result object.
+const aiAnalysis = useTrackAiAnalysis()
 const ai = usePlayerAI()
 
 // Canonical projection of the globally current track. These are
@@ -182,6 +190,44 @@ function onAnalyzeConfirm(force: boolean) {
 const audioAnalysisState = computed(() => audioAnalysis.stateFor(currentTrack.value?.id))
 const audioAnalysisResult = computed(() => audioAnalysis.resultFor(currentTrack.value?.id))
 const audioAnalysisFailure = computed(() => audioAnalysis.failureFor(currentTrack.value?.id))
+
+// ---- Experimental AI analysis (Phase 22.1) ----------------------
+// Every read is keyed by the CURRENT track's id. That is what stops a
+// result for track A appearing under track B: when the user skips, the
+// key changes and the new track simply has no entry yet.
+const aiState = computed(() => aiAnalysis.stateFor(currentTrack.value?.id))
+const aiResult = computed(() => aiAnalysis.resultFor(currentTrack.value?.id))
+const aiFailure = computed(() => aiAnalysis.failureFor(currentTrack.value?.id))
+const aiSaveWarning = computed(() => aiAnalysis.saveWarningFor(currentTrack.value?.id))
+const aiFromCache = computed(() => aiAnalysis.wasFromCache(currentTrack.value?.id))
+
+/**
+ * Runs the experimental model for the track on screen.
+ *
+ * Uses the URI the player already has — no second audio-loading path.
+ * A track with no URI (mock catalogue entry) is rejected by the
+ * provider with an explained failure rather than silently doing
+ * nothing.
+ */
+function onAiAnalyze(force = false) {
+  const track = currentTrack.value
+  if (!track) return
+  void aiAnalysis.analyze({
+    trackId: track.id,
+    uri: track.uri,
+    title: track.title,
+  }, force)
+}
+
+// Show a previously saved analysis immediately, so a track analysed
+// earlier does not look unanalysed after a reload.
+watch(() => currentTrack.value?.id, (id) => {
+  if (id) aiAnalysis.hydrate(id)
+}, { immediate: true })
+
+watch(showAnalysisSheet, (open) => {
+  if (open && currentTrack.value?.id) aiAnalysis.hydrate(currentTrack.value.id)
+})
 
 // Read any stored analysis for the current track, so the sheet can
 // open straight into a previous result instead of offering to redo
@@ -578,10 +624,14 @@ if (import.meta.client) {
               <PlayerControls
                 :is-playing="isPlaying"
                 :is-loading="false"
+                :is-shuffle="isShuffle"
+                :repeat-mode="repeatMode"
                 @prev="prev"
                 @next="next"
                 @toggle="togglePlay"
                 @seek-step="onSeekStep"
+                @toggle-shuffle="toggleShuffle"
+                @cycle-repeat="cycleRepeat"
               />
 
               <div v-if="sleepTimer.isActive.value" class="player-sleep-indicator">
@@ -620,7 +670,18 @@ if (import.meta.client) {
           :track-title="currentTrack.title"
           @close="showAnalysisSheet = false"
           @analyze="onAnalyzeConfirm"
-        />
+        >
+          <!-- Experimental AI analysis, inside the existing sheet so
+               the user never leaves the Full Player. -->
+          <PlayerAiAnalysis
+            :state="aiState"
+            :result="aiResult"
+            :failure="aiFailure"
+            :save-warning="aiSaveWarning"
+            :from-cache="aiFromCache"
+            @analyze="onAiAnalyze"
+          />
+        </PlayerAnalysis>
         <PlayerMoreMenu :open="showMoreSheet" :track-title="currentTrack.title" @close="showMoreSheet = false" @action="onMoreAction" />
         <PlayerPlaylistPicker
           :open="showPlaylistPicker"

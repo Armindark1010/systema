@@ -61,9 +61,21 @@ const dbSrc = read('android/app/src/main/java/com/systema/music/library/db/Music
  * Pulls every db.execSQL("""...""") / db.execSQL("..." + "...") body
  * out of MIGRATION_1_2, reassembling Kotlin string concatenation into
  * plain SQL.
+ *
+ * Scoped to the MIGRATION_1_2 block. The file now holds later
+ * migrations too, and scanning the whole source would attribute their
+ * DDL to this one — which is how the index count silently drifted.
  */
-function extractMigrationSql(src: string): string[] {
+function extractMigrationSql(fullSrc: string): string[] {
   const statements: string[] = []
+
+  const marker = 'MIGRATION_1_2 = object : Migration(1, 2)'
+  const start = fullSrc.indexOf(marker)
+  if (start === -1) throw new Error('MIGRATION_1_2 not found in the Kotlin source')
+  // Search for the NEXT migration from past this one's own header,
+  // otherwise the marker matches itself and the slice collapses.
+  const next = fullSrc.indexOf('= object : Migration(', start + marker.length)
+  const src = fullSrc.slice(start, next === -1 ? undefined : next)
 
   // Triple-quoted blocks.
   for (const match of src.matchAll(/execSQL\(\s*"""([\s\S]*?)"""/g)) {
@@ -88,6 +100,9 @@ const migrationSql = extractMigrationSql(dbSrc)
 
 ok('the shipping migration SQL was extracted from the Kotlin source',
   migrationSql.length >= 4, `found ${migrationSql.length} statements`)
+// Canary: prove the slice really is MIGRATION_1_2 and not the whole file.
+ok('the extracted SQL is scoped to migration 1 -> 2',
+  migrationSql.every(s => !/track_ai_analysis/i.test(s)))
 ok('the migration creates the song_analysis table',
   migrationSql.some(s => /CREATE TABLE.*song_analysis/is.test(s)))
 ok('the migration creates three indices',

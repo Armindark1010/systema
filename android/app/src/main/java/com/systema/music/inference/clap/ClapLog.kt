@@ -35,6 +35,29 @@ object ClapLog {
     const val GUARD_REFUSED = "GUARD_REFUSED"
     const val FAILURE = "FAILURE"
 
+    // Phase 23.1 lifecycle tracing. These answer "is the session the
+    // one the lab loaded, or a different/absent one?" using object
+    // identity only — never audio, never embeddings.
+    const val SESSION_IDENTITY = "SESSION_IDENTITY"
+    const val SESSION_STATE = "SESSION_STATE"
+
+    /**
+     * Phase 23.2. Structural facts about the audio handed to CLAP:
+     * scheme and authority only, never the full URI (a content:// path
+     * can carry a filename) and never audio data.
+     */
+    const val AUDIO_INPUT = "AUDIO_INPUT"
+
+    /**
+     * Phase 23.3. The decode ended early because the consumer had all
+     * the windows it needed. This is a normal, successful stop.
+     */
+    const val DECODE_STOPPED = "DECODE_STOPPED"
+
+    /** Phase 23.3 request correlation. Carries no track or audio data. */
+    const val ANALYZE_START = "ANALYZE_START"
+    const val ANALYZE_SUCCESS = "ANALYZE_SUCCESS"
+
     /** One structured line. Fields are `key=value`, space separated. */
     fun event(event: String, vararg fields: Pair<String, Any?>) {
         Log.i(TAG, render(event, fields))

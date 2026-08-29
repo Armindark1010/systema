@@ -12,6 +12,7 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
+import com.systema.music.inference.clap.ClapLog
 import com.systema.music.inference.clap.ClapSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -81,7 +82,29 @@ class InferencePlugin : Plugin() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * Phase 23.1 lifecycle tracing.
+     *
+     * If the plugin were recreated on navigation, the CLAP session
+     * (a field of this plugin) would go with it. Logging creation and
+     * destruction with the instance identity makes that visible
+     * instead of inferred.
+     */
+    override fun load() {
+        super.load()
+        ClapLog.event(
+            ClapLog.SESSION_IDENTITY,
+            "stage" to "pluginCreated",
+            "pluginId" to Integer.toHexString(System.identityHashCode(this)),
+        )
+    }
+
     override fun handleOnDestroy() {
+        ClapLog.event(
+            ClapLog.SESSION_IDENTITY,
+            "stage" to "pluginDestroyed",
+            "pluginId" to Integer.toHexString(System.identityHashCode(this)),
+        )
         scope.cancel()
         super.handleOnDestroy()
     }
@@ -448,10 +471,28 @@ class InferencePlugin : Plugin() {
         // conservative default, so an old caller cannot accidentally
         // start a full-track run.
         val durationSec = call.getInt("durationSec") ?: ClapSession.DEFAULT_DURATION_SEC
+        // Phase 22: the similarity pipeline needs the vector itself.
+        // Defaults to false so the existing lab payload is unchanged.
+        val includeVector = call.getBoolean("includeVector") ?: false
+
+        // Structural facts only (Step 1). The full URI is NOT logged:
+        // a content:// path can carry a filename, and the scheme plus
+        // authority is enough to tell a MediaStore URI from a file
+        // path or a WebView-converted URL.
+        val parsed = runCatching { android.net.Uri.parse(uri) }.getOrNull()
+        ClapLog.event(
+            ClapLog.AUDIO_INPUT,
+            "trackId" to trackId,
+            "uriScheme" to (parsed?.scheme ?: "none"),
+            "uriAuthority" to (parsed?.authority ?: "none"),
+            "durationSec" to durationSec,
+        )
 
         scope.launch {
             try {
-                call.resolve(clap.testOneTrack(trackId, uri, releaseAfter, durationSec))
+                call.resolve(
+                    clap.testOneTrack(trackId, uri, releaseAfter, durationSec, includeVector),
+                )
             } catch (e: InferenceException) {
                 call.reject(e.message ?: "The single-track test failed.", e.code.name)
             } catch (e: Throwable) {

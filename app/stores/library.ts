@@ -5,6 +5,7 @@
 // Completely separated from Player state.
 // ============================================================
 
+import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import type { Album, Artist, Playlist, Track } from '~/types'
 import { tracks as catalogTracks, albums as catalogAlbums, artists as catalogArtists } from '~/data/music'
@@ -14,6 +15,7 @@ import { useSettingsStore } from '~/stores/settings'
 import {
   addScanListeners,
   cancelScan as nativeCancelScan,
+  fetchAllDeviceTracks,
   getLibraryCount as nativeGetLibraryCount,
   getScanStatus as nativeGetScanStatus,
   getTracksPage,
@@ -185,8 +187,8 @@ export const useLibraryStore = defineStore('library', () => {
     librarySortOptions.find(o => o.id === sortBy.value)?.label ?? 'RECENTLY ADDED',
   )
 
-  const recentRank = computed(() =>
-    new Map(history.recentTrackIds.value.map((id, index) => [id, index])),
+  const recentRank = computed<Map<string, number>>(() =>
+    new Map(history.recentTrackIds.value.map((id: string, index: number) => [id, index])),
   )
 
   /** Sorts the native index can serve itself, in global order. */
@@ -203,44 +205,57 @@ export const useLibraryStore = defineStore('library', () => {
 
     const list = [...tracks.value]
     const byText = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' })
-    const missingLast = (value?: string | number) => value === undefined || value === '' ? 1 : 0
+    const missingLast = (value?: string | number) => (value === undefined || value === '' || (typeof value === 'number' && Number.isNaN(value)) ? 1 : 0)
 
-    return list.sort((a, b) => {
-      const artistA = artists.value.find(art => art.id === a.artistId)?.name ?? ''
-      const artistB = artists.value.find(art => art.id === b.artistId)?.name ?? ''
-      const albumA = albums.value.find(alb => alb.id === a.albumId)?.title ?? ''
-      const albumB = albums.value.find(alb => alb.id === b.albumId)?.title ?? ''
+    return list.sort((a: Track, b: Track) => {
+      const artistA = artists.value.find((art: Artist) => art.id === a.artistId)?.name ?? a.artist ?? ''
+      const artistB = artists.value.find((art: Artist) => art.id === b.artistId)?.name ?? b.artist ?? ''
+      const albumA = albums.value.find((alb: Album) => alb.id === a.albumId)?.title ?? a.album ?? ''
+      const albumB = albums.value.find((alb: Album) => alb.id === b.albumId)?.title ?? b.album ?? ''
 
       switch (sortBy.value) {
-        case 'recently-added':
-          return b.addedAt.localeCompare(a.addedAt)
+        case 'recently-added': {
+          const dateA = a.addedAt || ''
+          const dateB = b.addedAt || ''
+          return dateB.localeCompare(dateA) || byText(a.title || '', b.title || '')
+        }
         case 'recently-played': {
-          const rankA = recentRank.value.get(a.id) ?? Number.MAX_SAFE_INTEGER
-          const rankB = recentRank.value.get(b.id) ?? Number.MAX_SAFE_INTEGER
-          return rankA - rankB || b.addedAt.localeCompare(a.addedAt)
+          const rankA: number = recentRank.value.get(a.id) ?? Number.MAX_SAFE_INTEGER
+          const rankB: number = recentRank.value.get(b.id) ?? Number.MAX_SAFE_INTEGER
+          if (rankA !== rankB) return rankA - rankB
+          const dateA = a.addedAt || ''
+          const dateB = b.addedAt || ''
+          return dateB.localeCompare(dateA) || byText(a.title || '', b.title || '')
         }
         case 'title':
-          return byText(a.title, b.title)
+          return byText(a.title || '', b.title || '')
         case 'artist':
-          return byText(artistA, artistB) || byText(a.title, b.title)
+          return byText(artistA, artistB) || byText(a.title || '', b.title || '')
         case 'album':
-          return byText(albumA, albumB) || byText(a.title, b.title)
+          return byText(albumA, albumB) || byText(a.title || '', b.title || '')
         case 'duration':
-          return a.duration - b.duration
+          return (a.duration || 0) - (b.duration || 0) || byText(a.title || '', b.title || '')
         case 'most-played':
-          return b.plays - a.plays
+          return (b.plays || 0) - (a.plays || 0) || byText(a.title || '', b.title || '')
         case 'ai-mood': {
-          const moodA = a.ai?.analyzed ? a.ai.mood[0] : undefined
-          const moodB = b.ai?.analyzed ? b.ai.mood[0] : undefined
-          return missingLast(moodA) - missingLast(moodB) || byText(moodA ?? '', moodB ?? '') || byText(a.title, b.title)
+          const moodA = a.ai?.analyzed && a.ai.mood?.length ? a.ai.mood[0] : (a.mood || undefined)
+          const moodB = b.ai?.analyzed && b.ai.mood?.length ? b.ai.mood[0] : (b.mood || undefined)
+          return missingLast(moodA) - missingLast(moodB) || byText(moodA ?? '', moodB ?? '') || byText(a.title || '', b.title || '')
         }
         case 'ai-energy': {
-          const energyA = a.ai?.analyzed ? a.ai.energy : undefined
-          const energyB = b.ai?.analyzed ? b.ai.energy : undefined
-          return missingLast(energyA) - missingLast(energyB) || (energyB ?? -1) - (energyA ?? -1) || byText(a.title, b.title)
+          const energyA = a.ai?.analyzed && typeof a.ai.energy === 'number' ? a.ai.energy : (a.energy != null ? a.energy / 100 : undefined)
+          const energyB = b.ai?.analyzed && typeof b.ai.energy === 'number' ? b.ai.energy : (b.energy != null ? b.energy / 100 : undefined)
+          return missingLast(energyA) - missingLast(energyB) || (energyB ?? -1) - (energyA ?? -1) || byText(a.title || '', b.title || '')
         }
       }
     })
+  })
+
+  // Keep pagination in sync with sortBy changes on native devices
+  watch(sortBy, () => {
+    if (isNativeLibrary.value) {
+      void resetPagination()
+    }
   })
 
   // ---- Helpers & Actions -------------------------------------
@@ -536,7 +551,7 @@ export const useLibraryStore = defineStore('library', () => {
   function nativeQueryArgs() {
     return {
       sort: nativeSortKey(),
-      order: (sortBy.value === 'title' || sortBy.value === 'artist' || sortBy.value === 'album'
+      order: (sortBy.value === 'title' || sortBy.value === 'artist' || sortBy.value === 'album' || sortBy.value === 'duration'
         ? 'asc'
         : 'desc') as 'asc' | 'desc',
       query: searchQuery.value.trim() || undefined,
@@ -676,6 +691,29 @@ export const useLibraryStore = defineStore('library', () => {
     void resetPagination()
   }
 
+  async function loadAllTracks(): Promise<Track[]> {
+    if (!isNativeLibrary.value) {
+      return tracks.value
+    }
+    if (allTracksLoaded.value || (nativeTotal.value > 0 && tracks.value.length >= nativeTotal.value)) {
+      return tracks.value
+    }
+    try {
+      const all = await fetchAllDeviceTracks()
+      if (all.length > 0) {
+        tracks.value = mergeUnique(tracks.value, all)
+        registerTracksForHistory(all)
+        nativeTotal.value = all.length
+        loadedOffset.value = all.length
+        hasMoreTracks.value = false
+        nativeDataLoaded.value = true
+      }
+    } catch (err) {
+      libWarn('loadAllTracks failed', err)
+    }
+    return tracks.value
+  }
+
   function clearLibraryError(): void {
     libraryError.value = null
   }
@@ -738,6 +776,7 @@ export const useLibraryStore = defineStore('library', () => {
     cancelLibraryScan,
     loadFirstPage,
     loadMoreTracks,
+    loadAllTracks,
     resetPagination,
     setSearchQuery,
     clearLibraryError,
