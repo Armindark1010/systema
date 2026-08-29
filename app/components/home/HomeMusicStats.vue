@@ -1,23 +1,16 @@
 <script setup lang="ts">
-const { stats, genreCatalog } = useMusicLibrary()
+import { useLibraryStore } from '~/stores/library'
 
-const library = computed(() => stats())
+const libraryStore = useLibraryStore()
 
-const mostPlayedGenre = computed(() => {
-  const ranked = genreCatalog.value
-    .map(({ genre, tracks }) => ({
-      name: genre.name,
-      plays: tracks.reduce((total, track) => total + track.plays, 0),
-    }))
-    .sort((a, b) => b.plays - a.plays)
-
-  return ranked[0]?.name ?? '—'
-})
+const totalTracks = computed(() => libraryStore.totalTracks)
+const totalArtists = computed(() => libraryStore.artists.length)
+const totalAlbums = computed(() => libraryStore.albums.length)
 
 const summaries = computed(() => [
-  { label: 'TRACKS', value: library.value.tracks, to: '/library/tracks' },
-  { label: 'ARTISTS', value: library.value.artists, to: '/library/artists' },
-  { label: 'ALBUMS', value: library.value.albums, to: '/library/albums' },
+  { label: 'TRACKS', value: totalTracks.value, to: '/library/tracks' },
+  { label: 'ARTISTS', value: totalArtists.value, to: '/library/artists' },
+  { label: 'ALBUMS', value: totalAlbums.value, to: '/library/albums' },
 ])
 
 function formatCount(value: number) {
@@ -42,18 +35,6 @@ function formatCount(value: number) {
           <strong class="mt-2 block text-title font-semibold text-fg tnum">
             {{ formatCount(summary.value) }}
           </strong>
-        </NuxtLink>
-      </div>
-
-      <div class="hairline-t p-3 md:p-4 flex items-end justify-between gap-4">
-        <div>
-          <p class="label-faint">MOST PLAYED</p>
-          <p class="mt-1 text-small font-semibold text-fg uppercase">
-            {{ mostPlayedGenre }}
-          </p>
-        </div>
-        <NuxtLink to="/library/genres" class="label text-fg-muted hover:text-primary t-col focus-ring py-1">
-          BROWSE →
         </NuxtLink>
       </div>
     </div>

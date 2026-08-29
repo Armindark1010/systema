@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import type { Track, TrackMood } from '~/types'
+import { useLibraryStore } from '~/stores/library'
 
-const { genreCatalog, recentlyPlayed } = useMusicLibrary()
+const libraryStore = useLibraryStore()
+const { recentlyPlayed } = usePlaybackHistory()
 const { playQueue } = usePlayer()
 
-const catalogTracks = computed(() => genreCatalog.value.flatMap(entry => entry.tracks))
+const libraryTracks = computed(() => libraryStore.tracks)
 const recentBehavior = computed(() => recentlyPlayed(12))
 
 const dominantMood = computed<TrackMood>(() => {
@@ -48,19 +50,18 @@ function recommendationScore(track: Track) {
   const moodMatch = track.mood === dominantMood.value ? 100 : 0
   const instrumental = track.lang === 'inst' ? 20 : 0
   const energyDistance = 100 - Math.abs(track.energy - averageEnergy.value)
-  return moodMatch + instrumental + energyDistance + track.plays / 1000
+  return moodMatch + instrumental + energyDistance + (track.plays || 0) / 1000
 }
 
 const recommendationTracks = computed(() =>
-  [...catalogTracks.value]
+  [...libraryTracks.value]
     .sort((a, b) => recommendationScore(b) - recommendationScore(a))
     .slice(0, 18),
 )
 
 function playRecommendation() {
-  playQueue(
-    recommendationTracks.value.map(track => ({ track, context: `AI / ${title.value}` })),
-  )
+  if (!recommendationTracks.value.length) return
+  playQueue(recommendationTracks.value)
 }
 </script>
 
@@ -73,8 +74,14 @@ function playRecommendation() {
         {{ title }}
       </h2>
       <p class="mt-2 text-small text-fg-muted">
-        {{ recommendationTracks.length }} tracks selected<br>
-        for {{ purpose }}.
+        <template v-if="recommendationTracks.length">
+          {{ recommendationTracks.length }} tracks selected<br>
+          for {{ purpose }}.
+        </template>
+        <template v-else>
+          Ready for your device music library.<br>
+          Scan your music to activate recommendations.
+        </template>
       </p>
     </div>
 
@@ -82,6 +89,7 @@ function playRecommendation() {
       <button
         type="button"
         class="sys-btn-primary"
+        :disabled="!recommendationTracks.length"
         :aria-label="`Play AI recommendation ${title}`"
         @click="playRecommendation"
       >

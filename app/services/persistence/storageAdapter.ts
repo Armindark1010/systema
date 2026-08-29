@@ -14,7 +14,7 @@ export interface StorageAdapter {
 
 function safeLocalStorage(): Storage | null {
   try {
-    if (!import.meta.client) return null
+    if (typeof window === 'undefined' || !window.localStorage) return null
     const probe = '__systema:probe'
     window.localStorage.setItem(probe, '1')
     window.localStorage.removeItem(probe)
@@ -75,6 +75,10 @@ export function createMemoryAdapter(): StorageAdapter {
 }
 
 let adapter: StorageAdapter | null = null
+
+export function setStorageAdapter(custom: StorageAdapter | null) {
+  adapter = custom
+}
 
 export function getStorageAdapter(): StorageAdapter {
   if (adapter) return adapter

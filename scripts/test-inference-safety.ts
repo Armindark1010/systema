@@ -66,7 +66,7 @@ function walk(dir: string, out: string[] = []): string[] {
     return out
   }
   for (const e of entries) {
-    if (['node_modules', '.git', '.nuxt', '.output', 'dist'].includes(e)) continue
+    if (['node_modules', '.git', '.nuxt', '.output', 'dist', '.gradle', 'build'].includes(e)) continue
     const p = join(dir, e)
     if (statSync(resolve(ROOT, p)).isDirectory()) walk(p, out)
     else out.push(p)
@@ -117,7 +117,7 @@ const LAB_PATHS = ['dev/ai-benchmark', 'ai-lab', 'services/native/inference']
 const mainAppFiles = MAIN_APP_DIRS
   .filter(exists)
   .flatMap(d => walk(d))
-  .filter(f => !LAB_PATHS.some(lab => f.includes(lab)))
+  .filter(f => !LAB_PATHS.some(lab => f.replace(/\\/g, '/').includes(lab)))
 
 const offenders: string[] = []
 for (const f of mainAppFiles) {

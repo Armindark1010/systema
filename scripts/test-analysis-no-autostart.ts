@@ -305,7 +305,7 @@ ok('no BOOT_COMPLETED receiver exists',
 // reach the scheduler at all.
 const nativeFiles = walk('android/app/src/main/java').filter(
   f => (f.endsWith('.kt') || f.endsWith('.java'))
-    && !f.includes('/analysis/'),
+    && !f.replace(/\\/g, '/').includes('/analysis/'),
 )
 const schedulerLeaks = nativeFiles.filter(f => codeOnly(read(f)).includes('AudioAnalysisScheduler'))
 ok('nothing outside the analysis package references the scheduler',

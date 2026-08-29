@@ -16,10 +16,16 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * 2 — Phase 13: adds `song_analysis`, the on-device DSP results.
  * 3 — Phase 28: adds `track_ai_analysis`, the collected AI dataset
  *     (embeddings + measurements + HUMAN ground-truth labels).
+ * 4 — Phase 29: adds `playlist_sessions`, durable Room SQLite persistence
+ *     for active Playlist Listening Sessions (Continue Listening).
+ * 5 — Phase 29: adds `playlists` & `playlist_tracks`, durable Room SQLite
+ *     persistence for user and AI playlists.
+ * 6 — Phase 29: adds `listenedRangesJson` & `totalListenedSeconds` to `playlist_sessions`
+ *     for true listened-time tracking without index assumptions.
  *
  * Migration policy: destructive migration is deliberately NOT enabled.
  * A user's library index must survive app updates, and later phases
- * (AI analysis, playback stats) will store data that cannot be
+ * (AI analysis, playback stats, playlists) will store data that cannot be
  * regenerated from MediaStore. Every schema change ships an explicit
  * Migration in [MIGRATIONS].
  */
@@ -28,8 +34,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TrackEntity::class,
         AudioAnalysisEntity::class,
         TrackAiAnalysisEntity::class,
+        PlaylistSessionEntity::class,
+        PlaylistEntity::class,
+        PlaylistTrackEntity::class,
     ],
-    version = 3,
+    version = 6,
     exportSchema = true,
 )
 abstract class MusicLibraryDatabase : RoomDatabase() {
@@ -39,6 +48,10 @@ abstract class MusicLibraryDatabase : RoomDatabase() {
     abstract fun audioAnalysisDao(): AudioAnalysisDao
 
     abstract fun trackAiAnalysisDao(): TrackAiAnalysisDao
+
+    abstract fun playlistSessionDao(): PlaylistSessionDao
+
+    abstract fun playlistDao(): PlaylistDao
 
     companion object {
         private const val DB_NAME = "systema-music-library.db"
@@ -204,17 +217,129 @@ abstract class MusicLibraryDatabase : RoomDatabase() {
         }
 
         /**
+         * 3 -> 4: the Playlist Listening Session table (Phase 29).
+         *
+         * Purely additive. Tracks, DSP analysis and AI dataset are untouched.
+         */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `playlist_sessions` (
+                        `playlistId` TEXT NOT NULL,
+                        `trackId` TEXT NOT NULL,
+                        `trackIndex` INTEGER NOT NULL,
+                        `positionSeconds` REAL NOT NULL,
+                        `durationSeconds` REAL NOT NULL,
+                        `lastPlayedAt` INTEGER NOT NULL,
+                        `updatedAt` TEXT NOT NULL,
+                        `completed` INTEGER NOT NULL,
+                        PRIMARY KEY(`playlistId`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_playlist_sessions_lastPlayedAt` " +
+                        "ON `playlist_sessions` (`lastPlayedAt`)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_playlist_sessions_completed` " +
+                        "ON `playlist_sessions` (`completed`)",
+                )
+            }
+        }
+
+        /**
+         * 4 -> 5: the Playlists & Playlist Tracks tables (Phase 29 durable playlists).
+         *
+         * Purely additive. Tracks, DSP analysis, AI dataset and sessions are untouched.
+         */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                android.util.Log.i("SystemaDb", "DATABASE_VERSION upgrading 4 -> 5 (creating playlists & playlist_tracks)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `playlists` (
+                        `id` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `description` TEXT,
+                        `cover` TEXT,
+                        `kind` TEXT NOT NULL,
+                        `createdAt` TEXT NOT NULL,
+                        `updatedAt` TEXT NOT NULL,
+                        `aiMetaJson` TEXT,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_playlists_title` ON `playlists` (`title`)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_playlists_updatedAt` ON `playlists` (`updatedAt`)",
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `playlist_tracks` (
+                        `rowId` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `playlistId` TEXT NOT NULL,
+                        `trackId` TEXT NOT NULL,
+                        `position` INTEGER NOT NULL,
+                        `addedAt` INTEGER NOT NULL,
+                        FOREIGN KEY(`playlistId`) REFERENCES `playlists`(`id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_playlist_tracks_playlistId_position` " +
+                        "ON `playlist_tracks` (`playlistId`, `position`)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_playlist_tracks_playlistId` " +
+                        "ON `playlist_tracks` (`playlistId`)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_playlist_tracks_trackId` " +
+                        "ON `playlist_tracks` (`trackId`)",
+                )
+            }
+        }
+
+        /**
+         * 5 -> 6: True Listened Ranges & Time for Continue Listening.
+         *
+         * Purely additive columns on `playlist_sessions`.
+         */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                android.util.Log.i("SystemaDb", "DATABASE_VERSION upgrading 5 -> 6 (adding listenedRangesJson & totalListenedSeconds)")
+                db.execSQL("ALTER TABLE `playlist_sessions` ADD COLUMN `listenedRangesJson` TEXT")
+                db.execSQL("ALTER TABLE `playlist_sessions` ADD COLUMN `totalListenedSeconds` REAL NOT NULL DEFAULT 0.0")
+            }
+        }
+
+        /**
          * Explicit migrations. Every schema change appends one here
          * rather than dropping user data.
          */
-        private val MIGRATIONS = arrayOf<Migration>(MIGRATION_1_2, MIGRATION_2_3)
+        private val MIGRATIONS = arrayOf<Migration>(
+            MIGRATION_1_2,
+            MIGRATION_2_3,
+            MIGRATION_3_4,
+            MIGRATION_4_5,
+            MIGRATION_5_6,
+        )
 
         @Volatile
         private var instance: MusicLibraryDatabase? = null
 
         fun get(context: Context): MusicLibraryDatabase {
             return instance ?: synchronized(this) {
-                instance ?: build(context.applicationContext).also { instance = it }
+                instance ?: build(context.applicationContext).also {
+                    instance = it
+                    android.util.Log.i("SystemaDb", "DATABASE_OPEN db=systema-music-library.db version=6")
+                }
             }
         }
 

@@ -905,6 +905,11 @@ class PlayerEngine private constructor(context: Context) {
     fun setFavorites(ids: Collection<String>) {
         favoriteTrackIds.clear()
         favoriteTrackIds.addAll(ids)
+        val current = currentTrackId()
+        if (current != null) {
+            val isFav = favoriteTrackIds.contains(current)
+            forEachListener { it.onFavoriteToggled(current, isFav) }
+        }
     }
 
     fun isFavorite(trackId: String?): Boolean =
@@ -938,6 +943,25 @@ class PlayerEngine private constructor(context: Context) {
     fun setShuffle(enabled: Boolean) = onMain {
         player?.shuffleModeEnabled = enabled
         emitSnapshot()
+    }
+
+    fun repeatMode(): RepeatMode {
+        val p = player ?: return RepeatMode.OFF
+        return when (p.repeatMode) {
+            Player.REPEAT_MODE_ONE -> RepeatMode.ONE
+            Player.REPEAT_MODE_ALL -> RepeatMode.ALL
+            else -> RepeatMode.OFF
+        }
+    }
+
+    fun cycleRepeatMode(): RepeatMode {
+        val next = when (repeatMode()) {
+            RepeatMode.OFF -> RepeatMode.ALL
+            RepeatMode.ALL -> RepeatMode.ONE
+            RepeatMode.ONE -> RepeatMode.OFF
+        }
+        setRepeatMode(next)
+        return next
     }
 
     fun setRepeatMode(mode: RepeatMode) = onMain {

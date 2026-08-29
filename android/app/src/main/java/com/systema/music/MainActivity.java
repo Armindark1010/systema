@@ -90,6 +90,22 @@ public class MainActivity extends BridgeActivity {
             Log.e(TAG, "Failed to register AiDatasetPlugin", t);
         }
 
+        // Phase 29 Playlist Listening Session durable persistence (Room SQLite).
+        Log.i(TAG, "Registering PlaylistSessionPlugin");
+        try {
+            registerPlugin(com.systema.music.session.PlaylistSessionPlugin.class);
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to register PlaylistSessionPlugin", t);
+        }
+
+        // Phase 29 Playlists & Playlist Tracks durable persistence (Room SQLite).
+        Log.i(TAG, "Registering PlaylistsPlugin");
+        try {
+            registerPlugin(com.systema.music.playlists.PlaylistsPlugin.class);
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to register PlaylistsPlugin", t);
+        }
+
         super.onCreate(savedInstanceState);
 
         // Ask for POST_NOTIFICATIONS natively, right at startup.
@@ -129,6 +145,24 @@ public class MainActivity extends BridgeActivity {
                     TAG,
                     "AiDataset is NOT registered. The dataset page will report NOT PERSISTED "
                         + "and refuse to save labels. Look for an earlier PluginLoadException."
+                );
+            }
+
+            boolean sessionPresent = getBridge().getPlugin("PlaylistSession") != null;
+            Log.i(TAG, "PlaylistSession plugin registered with bridge: " + sessionPresent);
+            if (!sessionPresent) {
+                Log.e(
+                    TAG,
+                    "PlaylistSession is NOT registered. Listening sessions will fail to persist to Room SQLite."
+                );
+            }
+
+            boolean playlistsPresent = getBridge().getPlugin("Playlists") != null;
+            Log.i(TAG, "Playlists plugin registered with bridge: " + playlistsPresent);
+            if (!playlistsPresent) {
+                Log.e(
+                    TAG,
+                    "Playlists is NOT registered. Playlists will fail to persist to Room SQLite."
                 );
             }
             if (!present) {

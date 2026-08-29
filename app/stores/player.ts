@@ -152,6 +152,8 @@ export const usePlayerStore = defineStore('player', () => {
   const fullPlayerOpen = ref(false)
   const queueOpen = ref(false)
   const favorites = ref<Set<string>>(new Set())
+  /** Active playlist id if current playback context is a playlist */
+  const activePlaylistId = ref<string | null>(null)
 
   // ---- Getters -----------------------------------------------
   const progressMs = computed({
@@ -267,6 +269,7 @@ export const usePlayerStore = defineStore('player', () => {
    * card was tapped.
    */
   function playTrack(track: Track, _context = 'LIBRARY') {
+    activePlaylistId.value = null
     const existing = playbackOrder.value.findIndex(t => t.id === track.id)
 
     if (existing >= 0) {
@@ -702,8 +705,9 @@ export const usePlayerStore = defineStore('player', () => {
    * Used identically by Library, Search, Playlist, Album and Artist,
    * so all five surfaces behave the same.
    */
-  function playQueue(tracks: Track[], startIndex = 0) {
+  function playQueue(tracks: Track[], startIndex = 0, playlistId?: string) {
     if (!tracks.length) return
+    activePlaylistId.value = playlistId ?? null
     const safeIndex = Math.max(0, Math.min(startIndex, tracks.length - 1))
 
     // "Append" mode: keep playing, add the list after the current item.
@@ -745,7 +749,8 @@ export const usePlayerStore = defineStore('player', () => {
     const playlistTracks = pl.trackIds
       .map(resolve)
       .filter((t): t is Track => Boolean(t))
-    playQueue(playlistTracks, startIndex)
+    activePlaylistId.value = pl.id
+    playQueue(playlistTracks, startIndex, pl.id)
   }
 
   function playAlbum(_album: Album, albumTracks: Track[], startIndex = 0) {
@@ -821,6 +826,7 @@ export const usePlayerStore = defineStore('player', () => {
     fullPlayerOpen,
     queueOpen,
     favorites,
+    activePlaylistId,
 
     // getters
     progressMs,

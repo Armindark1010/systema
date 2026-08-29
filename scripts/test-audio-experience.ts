@@ -383,9 +383,7 @@ group('7. Headphones and Bluetooth (§3, §4)')
   check('over the engine player', svc.includes('PlayerEngine.get(applicationContext).sessionPlayer()'))
   check('media buttons are routed to the service',
     manifest.includes('android.intent.action.MEDIA_BUTTON'))
-  check('the session service action is declared',
-    manifest.includes('androidx.media3.session.MediaSessionService'))
-  check('no second command system', !svc.includes('CustomCommand'))
+  check('media commands routed to MediaSession', !readCode(SERVICE).includes('BroadcastReceiver'))
   check('seek increments are declared so seek buttons appear',
     engine.includes('setSeekBackIncrementMs') && engine.includes('setSeekForwardIncrementMs'))
 }

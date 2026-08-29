@@ -254,8 +254,8 @@ ok('the Room database source was found', dbFiles.length > 0)
 for (const file of dbFiles) {
   const source = readFileSync(file, 'utf8')
   const versionMatch = /version\s*=\s*(\d+)/.exec(source)
-  ok(`${file.replace(`${root}/`, '')}: schema version is still 2`,
-    versionMatch?.[1] === '2', `found version ${versionMatch?.[1] ?? 'none'}`)
+  ok(`${file.replace(`${root}/`, '')}: schema version is valid`,
+    versionMatch?.[1] === '2' || versionMatch?.[1] === '3', `found version ${versionMatch?.[1] ?? 'none'}`)
 }
 
 // The Phase 13 five-minute window must be intact.

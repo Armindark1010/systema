@@ -1,96 +1,108 @@
 <script setup lang="ts">
-import type { Album, Track } from '~/types'
+import type { ContinueListeningItem } from '~/composables/useContinueListening'
 
-interface ContinueItem {
-  album: Album
-  track: Track
-  progress: number
-}
-
-const { genreCatalog, continueListening, getArtist } = useMusicLibrary()
-const { playTrack, seek } = usePlayer()
-
-const catalogTracks = computed(() => genreCatalog.value.flatMap(entry => entry.tracks))
-
-const savedProgress: Record<string, number> = {
-  'al-blueprint': 62,
-  'al-outrun': 34,
-  'al-hg': 74,
-  'al-ram': 12,
-  'al-trilogy': 47,
-  'al-tbn': 88,
-}
-
-const priority = ['al-blueprint', 'al-outrun', 'al-hg', 'al-ram', 'al-trilogy', 'al-tbn']
-
-const items = computed<ContinueItem[]>(() =>
-  [...continueListening()]
-    .sort((a, b) => priority.indexOf(a.id) - priority.indexOf(b.id))
-    .map((album) => {
-      const track = catalogTracks.value
-        .filter(item => item.albumId === album.id)
-        .sort((a, b) => b.plays - a.plays)[0]
-
-      return track
-        ? { album, track, progress: savedProgress[album.id] ?? 30 }
-        : undefined
-    })
-    .filter((item): item is ContinueItem => Boolean(item)),
-)
-
-function resume(item: ContinueItem) {
-  playTrack(item.track, 'CONTINUE LISTENING')
-  seek(item.track.duration * 1000 * (item.progress / 100))
-}
+const { items, hasItems, showViewAll, storageEngineInfo, isDurableRoom, resumeSession } = useContinueListening()
 </script>
 
 <template>
-  <section aria-labelledby="home-continue-title">
+  <section v-if="hasItems" aria-labelledby="home-continue-title">
     <h2 id="home-continue-title" class="sr-only">Continue Listening</h2>
-    <SectionHeader label="CONTINUE LISTENING" to="/library/albums" />
+    <div class="flex items-center justify-between">
+      <SectionHeader
+        label="CONTINUE LISTENING"
+        :to="showViewAll ? '/playlists' : undefined"
+      />
+      <!-- Temporary diagnostic badge for Room SQLite vs LocalStorage -->
+      <span
+        v-if="storageEngineInfo"
+        class="text-[9px] font-mono tracking-wider px-2 py-0.5 rounded border"
+        :class="isDurableRoom ? 'border-primary/40 bg-primary/10 text-primary' : 'border-line bg-surface text-fg-faint'"
+      >
+        ● {{ isDurableRoom ? 'ROOM SQLITE (v6)' : 'LOCALSTORAGE' }}
+      </span>
+    </div>
 
     <div
-      class="mt-4 flex gap-4 overflow-x-auto no-scrollbar snap-x pb-2"
+      class="mt-4 flex gap-3.5 overflow-x-auto no-scrollbar snap-x snap-mandatory scroll-smooth pb-2"
       role="list"
-      aria-label="Partially played music"
+      aria-label="In-progress playlists to continue"
     >
       <div
-        v-for="(item, itemIndex) in items"
-        :key="item.album.id"
-        class="shrink-0 snap-start"
-        :class="itemIndex === 0 ? 'w-10' : 'w-9'"
+        v-for="item in items"
+        :key="item.playlist.id"
+        class="shrink-0 snap-start w-[270px] sm:w-[290px]"
         role="listitem"
       >
         <button
           type="button"
-          class="group block w-full text-left pressable focus-ring"
-          :aria-label="`Resume ${item.track.title} by ${getArtist(item.track.artistId)?.name} from ${item.progress} percent`"
-          @click="resume(item)"
+          class="group block w-full text-left p-3.5 border border-line bg-surface hover:border-fg-muted/60 active:bg-surface-elevated pressable focus-ring transition-colors duration-150"
+          :class="item.isCurrentlyPlaying ? 'border-primary/60 bg-primary-muted/20' : ''"
+          :aria-label="`Resume ${item.playlist.title} at ${item.track.title} by ${item.artistName} from ${item.currentTimeFormatted}`"
+          @click="resumeSession(item)"
         >
-          <Artwork
-            :src="item.album.cover"
-            :alt="item.album.title"
-            :seed="item.album.id"
-            class="w-full"
-            :class="itemIndex === 0 ? 'border-primary' : ''"
-          />
+          <!-- top: artwork + playlist title + track index -->
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-12 h-12 shrink-0 relative overflow-hidden rounded-sm border border-line bg-muted">
+              <Artwork
+                :src="item.playlist.cover"
+                :alt="item.playlist.title"
+                :seed="item.playlist.id"
+                class="w-full h-full object-cover"
+              />
+              <span
+                v-if="item.isCurrentlyPlaying"
+                class="absolute inset-0 bg-primary/20 flex items-center justify-center text-primary backdrop-blur-[1px]"
+                aria-hidden="true"
+              >
+                <UIcon name="lucide:volume-2" class="w-4 h-4 animate-pulse" />
+              </span>
+            </div>
 
-          <span class="mt-3 block min-w-0">
-            <span
-              class="block font-semibold text-fg truncate group-hover:text-primary t-col"
-              :class="itemIndex === 0 ? 'text-small' : 'text-micro'"
+            <div class="min-w-0 flex-1">
+              <p class="text-[13px] font-semibold text-fg truncate uppercase tracking-tight group-hover:text-primary transition-colors">
+                {{ item.playlist.title }}
+              </p>
+              <p class="mt-0.5 text-[10px] font-bold tracking-[0.14em] text-fg-faint uppercase tnum">
+                {{ item.trackNumberDisplay }}
+              </p>
+            </div>
+
+            <div
+              class="w-7 h-7 shrink-0 rounded-full border border-line flex items-center justify-center text-fg-muted group-hover:(border-primary bg-primary text-primary-fg) transition-colors"
+              aria-hidden="true"
             >
-              {{ item.track.title }}
-            </span>
-            <span class="mt-1 block text-micro text-fg-muted truncate">
-              {{ getArtist(item.track.artistId)?.name }}
-            </span>
-          </span>
+              <UIcon :name="item.isCurrentlyPlaying ? 'lucide:pause' : 'lucide:play'" class="w-3.5 h-3.5 translate-x-[0.5px]" />
+            </div>
+          </div>
 
-          <span class="mt-3 block h-1 bg-muted" aria-hidden="true">
-            <span class="block h-full bg-primary" :style="{ width: `${item.progress}%` }" />
-          </span>
-          <span class="mt-1 block label-faint tnum">{{ item.progress }}%</span>
+          <!-- middle: current track + artist -->
+          <div class="mt-3 min-w-0">
+            <p class="text-[12.5px] font-medium text-fg truncate group-hover:text-primary transition-colors">
+              {{ item.track.title }}
+            </p>
+            <p class="text-[11px] text-fg-muted truncate mt-0.5">
+              {{ item.artistName }}
+            </p>
+          </div>
+
+          <!-- bottom: delicate progress bar + time/percentage -->
+          <div class="mt-3" aria-hidden="true">
+            <div class="h-[3px] w-full bg-line/80 rounded-full overflow-hidden">
+              <div
+                class="h-full bg-primary transition-all duration-300 rounded-full"
+                :style="{ width: `${item.progressPct}%` }"
+              />
+            </div>
+
+            <div class="mt-1.5 flex items-center justify-between text-[10.5px] tnum">
+              <span class="text-fg-muted">
+                {{ item.currentTimeFormatted }} / {{ item.durationFormatted }}
+              </span>
+              <span class="font-semibold text-primary">
+                LISTENED {{ Math.round(item.progressPct) }}%
+              </span>
+            </div>
+          </div>
         </button>
       </div>
     </div>

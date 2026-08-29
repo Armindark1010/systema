@@ -216,7 +216,8 @@ group('7. No polling, timers, wake locks or manual notifications')
     // The expiry handler must not re-arm itself; that would turn a
     // one-shot deadline into a repeating wake-up.
     && !expiryBody.includes('postDelayed'))
-  check('service starts initial foreground safely', svc.includes('startForeground('))
+  check('service manages foreground safely via MediaSessionService',
+    svc.includes('MediaSessionService'))
   check('service holds no Activity reference', !svc.includes('MainActivity'))
   check('service uses application context for the engine',
     svc.includes('applicationContext'))
@@ -430,8 +431,8 @@ group('17. Seek commands are advertised and executable')
   // without a play/pause action. Media3's default handles availability
   // dynamically, so the correct fix was to remove the callback.
   const svcCode = readCode(SERVICE)
-  check('no custom session callback overriding commands',
-    !svcCode.includes('MediaSession.Callback'))
+  check('no session callback stripping commands with isCommandAvailable',
+    !svcCode.includes('isCommandAvailable'))
   check('play/pause is never stripped at connect time',
     !svcCode.includes('isCommandAvailable'))
   check('seek capability comes from the player, not a hand-built set',

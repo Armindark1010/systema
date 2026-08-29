@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.media3.common.Player
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
@@ -22,6 +23,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.systema.music.R
 import com.systema.music.player.model.PlayerException
 import com.systema.music.player.model.PlayerSnapshot
+import com.systema.music.player.model.RepeatMode
 
 /**
  * SYSTEMA — the foreground playback service.
@@ -30,6 +32,9 @@ import com.systema.music.player.model.PlayerSnapshot
  * session here, in a service the system keeps alive while audio is
  * playing, so locking the phone or pressing Home no longer takes the
  * player down with the UI.
+ *
+ * Media Controls layout:
+ * [Shuffle] [Previous] [Play/Pause] [Next] [Repeat]
  */
 class PlaybackService : MediaSessionService() {
 
@@ -38,8 +43,8 @@ class PlaybackService : MediaSessionService() {
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "systema_playback_channel"
 
-        const val ACTION_FAVORITE = "com.systema.music.ACTION_FAVORITE"
         const val ACTION_SHUFFLE = "com.systema.music.ACTION_SHUFFLE"
+        const val ACTION_REPEAT = "com.systema.music.ACTION_REPEAT"
     }
 
     private var mediaSession: MediaSession? = null
@@ -94,10 +99,14 @@ class PlaybackService : MediaSessionService() {
                 )
             }
 
-        // 4. Build MediaSession attached to the shared ExoPlayer with custom action callback
+        // 4. Build initial custom layout (Shuffle & Repeat)
+        val initialCustomLayout = buildCustomLayout()
+
+        // 5. Build MediaSession attached to the shared ExoPlayer with SessionCallback
         mediaSession = try {
             MediaSession.Builder(this, player)
                 .setCallback(SessionCallback())
+                .setCustomLayout(initialCustomLayout)
                 .apply { sessionActivity?.let(::setSessionActivity) }
                 .build()
         } catch (t: Throwable) {
@@ -105,7 +114,11 @@ class PlaybackService : MediaSessionService() {
             null
         }
 
-        // 5. Connect Media3 DefaultMediaNotificationProvider so live playback updates the card
+        // Apply media button preferences & custom layout immediately
+        mediaSession?.setMediaButtonPreferences(initialCustomLayout)
+        mediaSession?.setCustomLayout(initialCustomLayout)
+
+        // 6. Connect Media3 DefaultMediaNotificationProvider so live playback updates the card
         try {
             val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
                 .setChannelId(CHANNEL_ID)
@@ -117,7 +130,7 @@ class PlaybackService : MediaSessionService() {
             Log.e(TAG, "Failed to set DefaultMediaNotificationProvider", t)
         }
 
-        // 6. Start initial foreground notification with MediaStyle to satisfy Android's 5s deadline
+        // 7. Start initial foreground notification with MediaStyle to satisfy Android's 5s deadline
         startInitialForeground(sessionActivity)
 
         Log.i(TAG, "Playback service created (session=${mediaSession != null})")
@@ -130,29 +143,42 @@ class PlaybackService : MediaSessionService() {
             return emptyList()
         }
 
-        val currentTrackId = engine.currentTrackId()
-        val isFav = engine.isFavorite(currentTrackId)
         val isShuffle = engine.isShuffle()
+        val repeatMode = engine.repeatMode()
 
-        val favoriteButton = CommandButton.Builder()
-            .setDisplayName(if (isFav) "Unlike" else "Like")
-            .setIconResId(if (isFav) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline)
-            .setSessionCommand(SessionCommand(ACTION_FAVORITE, Bundle.EMPTY))
-            .build()
-
-        val shuffleButton = CommandButton.Builder()
+        val shuffleButton = CommandButton.Builder(CommandButton.ICON_UNDEFINED)
             .setDisplayName(if (isShuffle) "Shuffle On" else "Shuffle Off")
             .setIconResId(if (isShuffle) R.drawable.ic_shuffle_on else R.drawable.ic_shuffle)
             .setSessionCommand(SessionCommand(ACTION_SHUFFLE, Bundle.EMPTY))
+            .setEnabled(true)
             .build()
 
-        return listOf(favoriteButton, shuffleButton)
+        val repeatIcon = when (repeatMode) {
+            RepeatMode.ONE -> R.drawable.ic_repeat_one
+            RepeatMode.ALL -> R.drawable.ic_repeat_all
+            RepeatMode.OFF -> R.drawable.ic_repeat_off
+        }
+        val repeatName = when (repeatMode) {
+            RepeatMode.ONE -> "Repeat One"
+            RepeatMode.ALL -> "Repeat All"
+            RepeatMode.OFF -> "Repeat Off"
+        }
+        val repeatButton = CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+            .setDisplayName(repeatName)
+            .setIconResId(repeatIcon)
+            .setSessionCommand(SessionCommand(ACTION_REPEAT, Bundle.EMPTY))
+            .setEnabled(true)
+            .build()
+
+        return listOf(shuffleButton, repeatButton)
     }
 
     private fun updateCustomLayout() {
         val session = mediaSession ?: return
         try {
-            session.setCustomLayout(buildCustomLayout())
+            val layout = buildCustomLayout()
+            session.setCustomLayout(layout)
+            session.setMediaButtonPreferences(layout)
         } catch (t: Throwable) {
             Log.w(TAG, "Could not update custom layout", t)
         }
@@ -164,13 +190,23 @@ class PlaybackService : MediaSessionService() {
             controller: MediaSession.ControllerInfo
         ): MediaSession.ConnectionResult {
             val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
-                .add(SessionCommand(ACTION_FAVORITE, Bundle.EMPTY))
                 .add(SessionCommand(ACTION_SHUFFLE, Bundle.EMPTY))
+                .add(SessionCommand(ACTION_REPEAT, Bundle.EMPTY))
                 .build()
+
+            val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
+                .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                .add(Player.COMMAND_PLAY_PAUSE)
+                .add(Player.COMMAND_STOP)
+                .build()
+
+            val customLayout = buildCustomLayout()
 
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
-                .setCustomLayout(buildCustomLayout())
+                .setAvailablePlayerCommands(playerCommands)
+                .setCustomLayout(customLayout)
                 .build()
         }
 
@@ -182,12 +218,8 @@ class PlaybackService : MediaSessionService() {
         ): ListenableFuture<SessionResult> {
             val engine = PlayerEngine.get(applicationContext)
             when (customCommand.customAction) {
-                ACTION_FAVORITE -> {
-                    engine.toggleFavoriteCurrent()
-                }
-                ACTION_SHUFFLE -> {
-                    engine.toggleShuffle()
-                }
+                ACTION_SHUFFLE -> engine.toggleShuffle()
+                ACTION_REPEAT -> engine.cycleRepeatMode()
             }
             updateCustomLayout()
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))

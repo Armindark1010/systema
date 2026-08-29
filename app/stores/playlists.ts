@@ -1,8 +1,11 @@
 // ============================================================
-// SYSTEMA — Playlist Store (Pinia)
+// SYSTEMA — Playlist Store (Pinia + Room SQLite Persistence)
 // ============================================================
 // Normalized playlists (trackIds only). Virtual system lists
 // (Liked / Recently Played) are derived, never duplicated.
+//
+// Guaranteed durable on device via Room SQLite (systema-music-library.db).
+// ZERO fake data: only real user-created or imported playlists exist.
 // ============================================================
 
 import { defineStore } from 'pinia'
@@ -15,28 +18,41 @@ import {
   type PlaylistPersistState,
   type PlaylistSortKey,
 } from '~/types/playlists'
-import { playlists as seed } from '~/data/playlists'
 import { tracks as catalog } from '~/data/music'
 import { PLAYLISTS_STORAGE_KEY, readJSON, writeJSON } from '~/services/persistence/storageAdapter'
 import { sortPlaylists } from '~/services/playlists/playlistDocument'
 import { usePlayerStore } from '~/stores/player'
 import { usePlaybackHistory } from '~/composables/usePlaybackHistory'
+import {
+  PlaylistsNative,
+  checkPlaylistsAvailability,
+  isNativePlatform,
+  type PlaylistsPluginAvailability,
+} from '~/services/native/playlistPlugin'
 
-const knownIds = new Set(catalog.map(track => track.id))
-
-function cloneSeed(): Playlist[] {
-  return seed.map(item => ({ ...item, trackIds: [...item.trackIds] }))
-}
+const LEGACY_MOCK_PLAYLIST_IDS = new Set([
+  'pl-functional',
+  'pl-night-drive',
+  'pl-deep-focus',
+  'pl-late-night',
+  'pl-persian-nights',
+  'pl-morning-grid',
+  'pl-gym-protocol',
+  'pl-first-take',
+])
 
 function sanitizePlaylist(raw: unknown): Playlist | null {
   if (!raw || typeof raw !== 'object') return null
   const item = raw as Partial<Playlist>
   if (typeof item.id !== 'string' || !item.id) return null
-  if (isSystemPlaylistId(item.id)) return null
+  if (isSystemPlaylistId(item.id) || LEGACY_MOCK_PLAYLIST_IDS.has(item.id)) return null
   if (typeof item.title !== 'string' || !item.title.trim()) return null
+
+  // Accepts any non-empty string trackId from live library or catalog
   const trackIds = Array.isArray(item.trackIds)
-    ? item.trackIds.filter((id): id is string => typeof id === 'string' && knownIds.has(id))
+    ? item.trackIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
     : []
+
   const now = new Date().toISOString()
   return {
     id: item.id,
@@ -55,7 +71,7 @@ function readPersisted(): PlaylistPersistState {
   const stored = readJSON<Partial<PlaylistPersistState>>(PLAYLISTS_STORAGE_KEY)
   const playlists = Array.isArray(stored?.playlists)
     ? stored.playlists.map(sanitizePlaylist).filter((item): item is Playlist => Boolean(item))
-    : cloneSeed()
+    : []
   const sortBy: PlaylistSortKey = stored?.sortBy && [
     'updated', 'created', 'name-asc', 'name-desc', 'tracks-desc', 'tracks-asc',
   ].includes(stored.sortBy)
@@ -64,7 +80,7 @@ function readPersisted(): PlaylistPersistState {
   const gridColumns = ([1, 2, 3, 4] as const).includes(stored?.gridColumns as PlaylistGridColumns)
     ? stored!.gridColumns as PlaylistGridColumns
     : 2
-  return { version: 1, playlists: playlists.length ? playlists : cloneSeed(), sortBy, gridColumns }
+  return { version: 1, playlists, sortBy, gridColumns }
 }
 
 export const usePlaylistStore = defineStore('playlists', () => {
@@ -72,11 +88,45 @@ export const usePlaylistStore = defineStore('playlists', () => {
   const items = ref<Playlist[]>(persisted.playlists)
   const sortBy = ref<PlaylistSortKey>(persisted.sortBy)
   const gridColumns = ref<PlaylistGridColumns>(persisted.gridColumns)
+  const storageEngineInfo = ref<PlaylistsPluginAvailability | null>(null)
+  const isDurableRoom = computed(() => storageEngineInfo.value?.durable === true)
 
   const player = usePlayerStore()
   const history = usePlaybackHistory()
 
-  function persist() {
+  let hydrated = false
+
+  async function hydrate() {
+    if (hydrated || !import.meta.client) return
+    hydrated = true
+
+    console.info('[SystemaPlaylists] HYDRATION_START')
+
+    try {
+      const info = await checkPlaylistsAvailability()
+      storageEngineInfo.value = info
+
+      if (info.available && isNativePlatform()) {
+        const res = await PlaylistsNative.getAllPlaylists()
+        if (res && Array.isArray(res.playlists)) {
+          const sanitized = res.playlists
+            .map(sanitizePlaylist)
+            .filter((item): item is Playlist => Boolean(item))
+
+          items.value = sanitized
+          console.info(`[SystemaPlaylists] HYDRATION_COMPLETE source=room-sqlite count=${sanitized.length}`)
+          persistLocal()
+          return
+        }
+      }
+    } catch (err) {
+      console.error('[SystemaPlaylists] Error hydrating playlists from Room:', err)
+    }
+
+    console.info(`[SystemaPlaylists] HYDRATION_COMPLETE source=localstorage count=${items.value.length}`)
+  }
+
+  function persistLocal() {
     writeJSON(PLAYLISTS_STORAGE_KEY, {
       version: 1,
       playlists: items.value,
@@ -85,8 +135,27 @@ export const usePlaylistStore = defineStore('playlists', () => {
     } satisfies PlaylistPersistState)
   }
 
+  async function persistToRoom(playlist: Playlist) {
+    if (!import.meta.client || !isNativePlatform()) return
+    try {
+      await PlaylistsNative.savePlaylist(playlist)
+    } catch (err) {
+      console.error(`[SystemaPlaylists] PLAYLIST_WRITE_FAILED id=${playlist.id}`, err)
+    }
+  }
+
+  async function deleteFromRoom(id: string) {
+    if (!import.meta.client || !isNativePlatform()) return
+    try {
+      await PlaylistsNative.deletePlaylist({ id })
+    } catch (err) {
+      console.error(`[SystemaPlaylists] PLAYLIST_DELETE_FAILED id=${id}`, err)
+    }
+  }
+
   if (import.meta.client) {
-    watch([items, sortBy, gridColumns], persist, { deep: true })
+    hydrate()
+    watch([sortBy, gridColumns], persistLocal, { deep: true })
   }
 
   const likedSongs = computed<Playlist>(() => ({
@@ -125,16 +194,21 @@ export const usePlaylistStore = defineStore('playlists', () => {
 
   function createPlaylist(title: string, description?: string, trackIds: string[] = []): Playlist {
     const now = new Date().toISOString()
+    const validTrackIds = trackIds.filter(id => typeof id === 'string' && id.trim().length > 0)
     const playlist: Playlist = {
-      id: `pl-${Date.now().toString(36)}`,
+      id: `pl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
       title: title.trim(),
       description: description?.trim() || undefined,
       kind: 'user',
-      trackIds: trackIds.filter(id => knownIds.has(id)),
+      trackIds: validTrackIds,
       createdAt: now,
       updatedAt: now,
     }
     items.value = [playlist, ...items.value]
+    persistLocal()
+    persistToRoom(playlist)
+    console.info(`[SystemaPlaylists] PLAYLIST_WRITE id=${playlist.id} tracks=${validTrackIds.length}`)
+    console.info(`[SystemaPlaylists] PLAYLIST_COUNT count=${items.value.length}`)
     return playlist
   }
 
@@ -150,11 +224,17 @@ export const usePlaylistStore = defineStore('playlists', () => {
     if (patch.description !== undefined) playlist.description = patch.description.trim() || undefined
     if (patch.cover !== undefined) playlist.cover = patch.cover || undefined
     playlist.updatedAt = new Date().toISOString()
+    persistLocal()
+    persistToRoom(playlist)
   }
 
   function deletePlaylist(id: string) {
     if (isSystemPlaylistId(id)) return
     items.value = items.value.filter(item => item.id !== id)
+    persistLocal()
+    deleteFromRoom(id)
+    console.info(`[SystemaPlaylists] PLAYLIST_DELETE id=${id}`)
+    console.info(`[SystemaPlaylists] PLAYLIST_COUNT count=${items.value.length}`)
   }
 
   function addTrackToPlaylist(id: string, trackId: string) {
@@ -166,10 +246,13 @@ export const usePlaylistStore = defineStore('playlists', () => {
     const playlist = items.value.find(item => item.id === id)
     if (!playlist) return
     const existing = new Set(playlist.trackIds)
-    const next = trackIds.filter(trackId => knownIds.has(trackId) && !existing.has(trackId))
+    const next = trackIds.filter(trackId => typeof trackId === 'string' && trackId.trim().length > 0 && !existing.has(trackId))
     if (!next.length) return
     playlist.trackIds = [...playlist.trackIds, ...next]
     playlist.updatedAt = new Date().toISOString()
+    persistLocal()
+    persistToRoom(playlist)
+    console.info(`[SystemaPlaylists] PLAYLIST_WRITE id=${playlist.id} added=${next.length} totalTracks=${playlist.trackIds.length}`)
   }
 
   function removeTrackFromPlaylist(id: string, trackId: string) {
@@ -178,6 +261,9 @@ export const usePlaylistStore = defineStore('playlists', () => {
     if (!playlist) return
     playlist.trackIds = playlist.trackIds.filter(item => item !== trackId)
     playlist.updatedAt = new Date().toISOString()
+    persistLocal()
+    persistToRoom(playlist)
+    console.info(`[SystemaPlaylists] PLAYLIST_WRITE id=${playlist.id} removedTrack=${trackId} totalTracks=${playlist.trackIds.length}`)
   }
 
   function reorderPlaylistTracks(id: string, from: number, to: number) {
@@ -191,6 +277,8 @@ export const usePlaylistStore = defineStore('playlists', () => {
     next.splice(to, 0, moved)
     playlist.trackIds = next
     playlist.updatedAt = new Date().toISOString()
+    persistLocal()
+    persistToRoom(playlist)
   }
 
   function setSortBy(key: PlaylistSortKey) {
@@ -209,9 +297,12 @@ export const usePlaylistStore = defineStore('playlists', () => {
     items,
     sortBy,
     gridColumns,
+    storageEngineInfo,
+    isDurableRoom,
     likedSongs,
     recentlyPlayed,
     userPlaylists,
+    hydrate,
     getPlaylistById,
     resolveTracks,
     createPlaylist,

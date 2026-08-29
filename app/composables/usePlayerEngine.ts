@@ -94,6 +94,7 @@ export function usePlayerEngine() {
     // disk.
     const restore = usePlaybackRestore()
     restore.install()
+    useContinueListening().install()
 
     const nativeReady = await useNativePlayer().init()
 

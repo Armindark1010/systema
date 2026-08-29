@@ -102,7 +102,10 @@ function onPlayClick() {
 .library-track-item {
   display: grid;
   min-width: 0;
+  height: var(--library-row-height);
   min-height: var(--library-row-height);
+  box-sizing: border-box;
+  contain: layout paint;
   content-visibility: auto;
   contain-intrinsic-size: auto var(--library-row-height);
   grid-template-columns: minmax(0, 1fr) var(--library-duration-column) var(--library-menu-size);

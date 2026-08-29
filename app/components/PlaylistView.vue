@@ -42,13 +42,13 @@ const totalDuration = computed(() => playlistTracks.value.reduce((acc, t) => acc
 const kindLabel = computed(() => (props.playlist.kind === 'ai' ? 'AI GENERATED' : isSystem.value ? 'SYSTEM' : 'USER'))
 
 function play() {
-  if (playlistTracks.value.length) player.playQueue(playlistTracks.value, 0)
+  if (playlistTracks.value.length) player.playPlaylist(props.playlist, 0)
 }
 
 function shufflePlay() {
   if (!playlistTracks.value.length) return
   const start = Math.floor(Math.random() * playlistTracks.value.length)
-  player.playQueue(playlistTracks.value, start)
+  player.playPlaylist(props.playlist, start)
   if (!player.isShuffle.value) player.toggleShuffle()
 }
 
@@ -142,6 +142,7 @@ function onRemove(trackId: string) {
         <TrackList
           :tracks="playlistTracks"
           :context="playlist.title"
+          :playlist-id="playlist.id"
           draggable
           hide-album
           @reorder="onReorder"

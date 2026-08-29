@@ -275,26 +275,20 @@ section('3. ONNX Runtime is contained in exactly one file (§4)')
 // that document the invariant most carefully. Only real code counts.
 let candidates: string[] = []
 try {
-  const out = execSync(
-    'grep -rl "ai\\.onnxruntime" --include=*.kt --include=*.java --include=*.ts --include=*.vue . ' +
-    '|| true',
-    { cwd: ROOT, encoding: 'utf8' },
-  )
-  candidates = out.split('\n')
-    .map(s => s.trim())
-    .filter(Boolean)
-    .filter(p => !p.includes('node_modules') && !p.includes('/scripts/'))
+  const codeFiles = walk('.').filter(p => /\.(kt|java|ts|vue)$/.test(p) && !p.includes('node_modules') && !p.replace(/\\/g, '/').includes('scripts/'))
+  candidates = codeFiles.filter(p => read(p).includes('ai.onnxruntime'))
 } catch {
-  // grep unavailable; the check below will report it.
+  // scan unavailable
 }
 
 const ALLOWED = [
-  './android/app/src/main/java/com/systema/music/inference/OnnxInferenceRuntime.kt',
-  './android/app/src/test/java/com/systema/music/inference/OnnxRuntimeTest.kt',
+  'android/app/src/main/java/com/systema/music/inference/OnnxInferenceRuntime.kt',
+  'android/app/src/test/java/com/systema/music/inference/OnnxRuntimeTest.kt',
 ]
+const isAllowed = (p: string) => ALLOWED.some(a => p.replace(/\\/g, '/').replace(/^\.\//, '') === a.replace(/^\.\//, ''))
 
 const leaked = candidates.filter((p) => {
-  if (ALLOWED.includes(p)) return false
+  if (isAllowed(p)) return false
   // Real import/usage only, not a mention inside a comment.
   return stripComments(read(p)).includes('ai.onnxruntime')
 })
@@ -305,7 +299,7 @@ ok('no file outside the ONNX runtime implementation imports ai.onnxruntime',
 // boundary — worth confirming the invariant is documented, not just
 // accidentally true.
 ok('the boundary is documented in the files that respect it',
-  candidates.some(p => !ALLOWED.includes(p)))
+  candidates.some(p => !isAllowed(p)))
 
 const tsFiles = ['app/services/native/inferencePlugin.ts', 'app/services/native/inferenceService.ts']
 for (const f of tsFiles) {
@@ -330,7 +324,7 @@ function walk(dir: string, out: string[] = []): string[] {
     return out
   }
   for (const e of entries) {
-    if (e === 'node_modules' || e === '.git' || e === '.nuxt' || e === '.output') continue
+    if (e === 'node_modules' || e === '.git' || e === '.nuxt' || e === '.output' || e === '.gradle' || e === 'build' || e === 'dist') continue
     const p = join(dir, e)
     const s = statSync(resolve(ROOT, p))
     if (s.isDirectory()) walk(p, out)
