@@ -58,7 +58,7 @@ function onRemove(trackId: string) {
       @edit="openEdit"
       @import="importOpen = true"
       @export="exportOpen = true"
-      @remove="(pid: string) => (deleteOpen = true)"
+      @remove="() => deleteOpen = true"
     />
     <div v-else class="sys-container pt-16">
       <EmptyState label="PLAYLIST NOT FOUND" action-label="ALL PLAYLISTS" to="/playlists">
@@ -111,7 +111,7 @@ function onRemove(trackId: string) {
       </template>
     </UModal>
 
-    <PlaylistImport :open="importOpen" @update:open="(v: boolean) => (importOpen = v)" />
-    <PlaylistExport :open="exportOpen" :playlist-title="playlist?.title" @update:open="(v: boolean) => (exportOpen = v)" />
+    <PlaylistImport :open="importOpen" @update:open="v => importOpen = v" />
+    <PlaylistExport :open="exportOpen" :playlist-id="playlist?.id" :playlist-title="playlist?.title" @update:open="v => exportOpen = v" />
   </div>
 </template>

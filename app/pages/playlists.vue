@@ -77,7 +77,7 @@ function onCreate() {
       </template>
     </UModal>
 
-    <PlaylistImport :open="importOpen" @update:open="(v: boolean) => (importOpen = v)" />
-    <PlaylistExport :open="exportOpen" :playlist-title="playlists[0]?.title" @update:open="(v: boolean) => (exportOpen = v)" />
+    <PlaylistImport :open="importOpen" @update:open="v => importOpen = v" />
+    <PlaylistExport :open="exportOpen" @update:open="v => exportOpen = v" />
   </div>
 </template>
