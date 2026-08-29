@@ -506,6 +506,14 @@ class ClapSession(
             totalMs = decodeMs,
         )
 
+        val finite = embedding.embedding.all { it.isFinite() }
+        var norm = 0.0
+        for (v in embedding.embedding) norm += v.toDouble() * v.toDouble()
+        norm = kotlin.math.sqrt(norm)
+        // A correctly L2-normalised vector has norm 1.
+        val normalised = kotlin.math.abs(norm - 1.0) < 1e-3
+        val outputValid = finite && normalised && embedding.dimension > 0
+
         val peak = MemorySample.capture(context)
 
         // ---- RELEASE ----
