@@ -29,6 +29,11 @@ interface AiDatasetPlugin {
   getAll(): Promise<{ records: BridgeRecord[] }>
   deleteById(o: { id: string }): Promise<{ deleted: boolean }>
   stats(): Promise<{ total: number, labelled: number, withEmbedding: number }>
+  exportToFile(o: {
+    fileName: string
+    content: string
+    mimeType: string
+  }): Promise<{ path: string, bytes: number }>
 }
 
 export const AiDatasetNative = registerPlugin<AiDatasetPlugin>('AiDataset')
@@ -103,5 +108,29 @@ export class NativeDatasetGateway implements DatasetGateway {
   async all(): Promise<DatasetRecord[]> {
     const res = await AiDatasetNative.getAll()
     return res.records.map(fromBridge).filter((r): r is DatasetRecord => r !== null)
+  }
+}
+
+/**
+ * Writes an export to shared device storage.
+ *
+ * The Room database does not survive an uninstall; a file in the
+ * user's Documents folder does. This is what makes the collected
+ * dataset recoverable after a reinstall, via re-import.
+ *
+ * Returns null when there is no device bridge, so the caller can fall
+ * back to a browser download rather than failing.
+ */
+export async function exportToDevice(
+  fileName: string,
+  content: string,
+  mimeType: string,
+): Promise<{ ok: boolean, path?: string, bytes?: number, error?: string } | null> {
+  if (!isNativeDatasetAvailable()) return null
+  try {
+    const res = await AiDatasetNative.exportToFile({ fileName, content, mimeType })
+    return { ok: true, path: res.path, bytes: res.bytes }
+  } catch (e) {
+    return { ok: false, error: (e as Error)?.message ?? 'The export failed.' }
   }
 }

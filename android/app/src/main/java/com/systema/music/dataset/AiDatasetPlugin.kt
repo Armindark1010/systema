@@ -206,6 +206,40 @@ class AiDatasetPlugin : Plugin() {
         }
     }
 
+    /**
+     * Writes an export to shared Documents storage.
+     *
+     * The web layer produces the text (it owns the format); this only
+     * persists it somewhere that survives an uninstall, which the Room
+     * database itself cannot do.
+     */
+    @PluginMethod
+    fun exportToFile(call: PluginCall) {
+        val fileName = call.getString("fileName")
+        val content = call.getString("content")
+        val mimeType = call.getString("mimeType") ?: "application/json"
+
+        if (fileName.isNullOrBlank() || content == null) {
+            call.reject("A fileName and content are required.", "INVALID_ARGUMENT")
+            return
+        }
+
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                DatasetExporter(context).writeToDocuments(fileName, content, mimeType)
+            }
+            if (result.ok) {
+                call.resolve(
+                    JSObject()
+                        .put("path", result.displayPath)
+                        .put("bytes", result.bytesWritten),
+                )
+            } else {
+                call.reject(result.error ?: "The export failed.", "EXPORT_FAILED")
+            }
+        }
+    }
+
     @PluginMethod
     fun stats(call: PluginCall) {
         scope.launch {

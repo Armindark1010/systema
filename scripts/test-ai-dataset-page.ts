@@ -338,6 +338,73 @@ section('9. Nothing here changes playback or recommendations')
 }
 
 // =====================================================================
+section('10. Export to durable shared storage')
+{
+  const exporter = 'android/app/src/main/java/com/systema/music/dataset/DatasetExporter.kt'
+  const kt = read(exporter).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  ok('canary: exporter located', kt.includes('class DatasetExporter'))
+
+  // The whole point: app-specific storage dies on uninstall.
+  ok('the export does NOT use app-specific storage',
+    !/getExternalFilesDir/.test(kt))
+  ok('the export targets shared Documents',
+    /DIRECTORY_DOCUMENTS/.test(kt))
+  ok('exports are grouped in one folder', /SUBDIR = "SYSTEMA"/.test(kt))
+  ok('modern devices use MediaStore', /MediaStore\.MediaColumns/.test(kt))
+  ok('a partial write is marked pending', /IS_PENDING, 1/.test(kt))
+  ok('the pending flag is cleared on success', /IS_PENDING, 0/.test(kt))
+  ok('older devices have a legacy path', /getExternalStoragePublicDirectory/.test(kt))
+  ok('a failure is reported, not swallowed', /ok = false|ExportResult\(false/.test(kt))
+  ok('the reinstall rationale is documented',
+    /uninstall/i.test(read(exporter)))
+
+  // Logging discipline.
+  ok('the exporter does not log the file path',
+    !/Log\.[a-z]\(TAG, .*displayPath|Log\.[a-z]\(TAG, .*path=/.test(kt))
+  ok('the exporter does not log content', !/Log\.[a-z]\([^)]*content/.test(kt))
+
+  // Plugin wiring.
+  const plugin = read('android/app/src/main/java/com/systema/music/dataset/AiDatasetPlugin.kt')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  ok('the plugin exposes exportToFile', /fun exportToFile\(call: PluginCall\)/.test(plugin))
+  ok('the plugin uses the exporter', /DatasetExporter\(context\)/.test(plugin))
+  ok('export runs off the main thread', /withContext\(Dispatchers\.IO\)/.test(plugin))
+
+  // Web side prefers the durable path.
+  const gw = read('app/services/ai-dataset/nativeGateway.ts')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  ok('a device export helper exists', /export async function exportToDevice/.test(gw))
+  ok('it returns null without a bridge', /if \(!isNativeDatasetAvailable\(\)\) return null/.test(gw))
+  ok('the page prefers device storage', /await exportToDevice\(/.test(pageSrc))
+  ok('the page falls back to a download', /URL\.createObjectURL/.test(pageSrc))
+  ok('the page reports where the file went', /Saved to \$\{device\.path\}/.test(pageSrc))
+}
+
+// =====================================================================
+section('11. The device checklist is honest')
+{
+  const doc = read('docs/phase-28-device-verification.md')
+  ok('the checklist exists', doc.length > 1000)
+  ok('it states verification was NOT performed', /NOT PERFORMED/.test(doc))
+  ok('it covers analysing a real track', /Analyse a real track/i.test(doc))
+  ok('it covers the record appearing in the dataset page',
+    /\/dev\/ai-dataset/.test(doc))
+  ok('it covers adding manual labels', /Add manual labels/i.test(doc))
+  ok('it covers closing and reopening the app', /Reopen the app/i.test(doc))
+  ok('it covers re-analysis preserving labels',
+    /Labels unchanged/i.test(doc))
+  ok('it covers exporting JSON', /EXPORT JSON/.test(doc))
+  ok('it requires checking the COMPLETE vector in the export',
+    /COMPLETE vector/.test(doc))
+  ok('it is explicit that reinstall wipes the database',
+    /does \*not\* survive an uninstall|Empty — this is EXPECTED/.test(doc))
+  ok('it separates what WAS verified from what was not',
+    /What WAS verified in development/.test(doc))
+  ok('it does not claim Kotlin was compiled',
+    /never been compiled|KOTLIN_COMPILED: NO|has never been compiled/i.test(doc))
+}
+
+// =====================================================================
 console.log(`\n${'='.repeat(60)}`)
 console.log(`AI DATASET PAGE — ${passed} passed, ${failed} failed`)
 if (failed > 0) {

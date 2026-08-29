@@ -28,6 +28,7 @@ import { useAiDataset, useLabelDraft } from '~/composables/useAiDataset'
 import type { DatasetRecord } from '~/services/ai-dataset/datasetRecord'
 import { exportCsv, exportJson } from '~/services/ai-dataset/datasetExport'
 import { allRecords } from '~/services/ai-dataset/datasetService'
+import { exportToDevice } from '~/services/ai-dataset/nativeGateway'
 import {
   CONTEXT_VALUES,
   ENERGY_DISPLAY,
@@ -107,7 +108,20 @@ async function onDelete(id: string) {
  * On device this hands the text to a download; the shared-storage
  * export that survives a reinstall is a separate, later step.
  */
-function downloadText(name: string, text: string, mime: string) {
+async function downloadText(name: string, text: string, mime: string) {
+  // Prefer shared device storage: that file outlives an uninstall,
+  // which is the only way this dataset survives a reinstall.
+  const device = await exportToDevice(name, text, mime)
+  if (device?.ok) {
+    exportNote.value = `Saved to ${device.path} (${device.bytes} bytes)`
+    return
+  }
+  if (device && !device.ok) {
+    exportNote.value = device.error ?? 'The export failed.'
+    return
+  }
+
+  // No device bridge (web build): fall back to a browser download.
   try {
     const blob = new Blob([text], { type: mime })
     const url = URL.createObjectURL(blob)
@@ -116,7 +130,7 @@ function downloadText(name: string, text: string, mime: string) {
     a.download = name
     a.click()
     URL.revokeObjectURL(url)
-    exportNote.value = `Exported ${name}`
+    exportNote.value = `Downloaded ${name}`
   } catch (e) {
     exportNote.value = (e as Error)?.message ?? 'The export failed.'
   }
@@ -124,12 +138,16 @@ function downloadText(name: string, text: string, mime: string) {
 
 async function onExportJson() {
   const rows = await allRecords()
-  downloadText(`systema-dataset-${Date.now()}.json`, exportJson(rows, true), 'application/json')
+  await downloadText(
+    `systema-dataset-${Date.now()}.json`,
+    exportJson(rows, true),
+    'application/json',
+  )
 }
 
 async function onExportCsv() {
   const rows = await allRecords()
-  downloadText(`systema-dataset-${Date.now()}.csv`, exportCsv(rows), 'text/csv')
+  await downloadText(`systema-dataset-${Date.now()}.csv`, exportCsv(rows), 'text/csv')
 }
 
 const selectedQuality = computed(() =>
