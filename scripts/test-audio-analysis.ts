@@ -292,7 +292,12 @@ ok('upsert prevents duplicate rows per track',
   daoSrc.includes('OnConflictStrategy.REPLACE'))
 
 const dbSrc = read('android/app/src/main/java/com/systema/music/library/db/MusicLibraryDatabase.kt')
-ok('the database version was bumped', dbSrc.includes('version = 2'))
+// Phase 13 required version >= 2. Later phases add their own
+// migrations, so the check is "at or past the DSP schema", not an
+// exact number that every future migration would have to edit.
+const dbVersion = Number(dbSrc.match(/version = (\d+),/)?.[1] ?? 0)
+ok('the database version was bumped', dbVersion >= 2, `found ${dbVersion}`)
+ok('the DSP migration still ships', dbSrc.includes('MIGRATION_1_2'))
 ok('an explicit migration was added, not destructive migration',
   dbSrc.includes('MIGRATION_1_2') && !dbSrc.includes('fallbackToDestructiveMigration'))
 ok('the analysis DAO is exposed', dbSrc.includes('audioAnalysisDao'))
