@@ -260,6 +260,12 @@ const provenance = computed(() => {
                 </button>
               </div>
             </template>
+
+            <!-- Extra panels (Phase 22.1: experimental AI analysis).
+                 Rendered after the DSP content and inside the same
+                 scroll area, so the sheet stays one surface and the
+                 user never leaves the Full Player. -->
+            <slot />
           </div>
 
           <div class="player-sheet-footer-safe" />
