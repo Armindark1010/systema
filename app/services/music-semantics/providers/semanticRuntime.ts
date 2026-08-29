@@ -62,10 +62,10 @@ export type RuntimeOutcome<T> =
  * setup step has not been done.
  */
 export const RUNTIME_NOT_READY_MESSAGE
-  = 'The music semantic model is not installed on this device. It needs '
-    + 'the Discogs-EffNet embedding model plus a converted classifier '
-    + 'head, and a 16 kHz mel front-end that has not been built yet. See '
-    + 'docs/phase-29-semantic-model.md.'
+  = 'The music semantic model is not installed on this device. The mel '
+    + 'front-end is implemented, but the Discogs-EffNet embedding model '
+    + 'has to be side-loaded and the classifier heads converted to ONNX '
+    + 'first. See docs/phase-29-semantic-model.md.'
 
 /**
  * Everything that must be true before inference can be attempted.
@@ -92,15 +92,27 @@ export const RUNTIME_REQUIREMENTS: readonly {
   },
   {
     id: 'mel-frontend',
+    // DONE. EffnetDiscogsMelFrontEnd.kt implements the MusiCNN front
+    // end transcribed from Essentia's own source: 16 kHz, frame 512,
+    // hop 256, 96 slaneyMel bands with unit_tri normalisation,
+    // magnitude spectrum, log10(1 + 10000*m) compression, 128-frame
+    // patches with hop 62, batch 64. It is NOT CLAP's front end, whose
+    // parameters differ at every stage.
     description: 'Implement the 16 kHz / 96-mel / 128-frame front-end '
-      + 'producing [64, 128, 96] patches. CLAP\'s front-end has '
-      + 'different parameters and must not be reused.',
-    done: false,
+      + 'producing [64, 128, 96] patches.',
+    done: true,
   },
   {
     id: 'native-bridge',
     description: 'Expose the two-stage run (embedding then heads) through '
       + 'the existing InferenceRuntime and a Capacitor method.',
+    done: false,
+  },
+  {
+    id: 'head-labels-top50tags',
+    description: 'Retrieve the official 50 label strings for the tags '
+      + 'head before enabling it. Scores without a verified label list '
+      + 'cannot be interpreted.',
     done: false,
   },
 ] as const

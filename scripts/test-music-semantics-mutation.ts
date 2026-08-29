@@ -215,6 +215,78 @@ const MUTATIONS: Mutation[] = [
     to: "import { execSync } from 'node:child_process'\n\nexport function isRuntimeReady(): boolean {",
   },
 
+  // ---- Mel front end (silent-failure territory) --------------------
+  {
+    name: 'CLAP compression curve used for Discogs-EffNet',
+    danger: 'Silence becomes -100 instead of 0. Every embedding is wrong and nothing crashes.',
+    file: 'android/app/src/main/java/com/systema/music/inference/effnet/EffnetDiscogsMelFrontEnd.kt',
+    from: 'out[m] = log10(LOG_SHIFT + LOG_SCALE * max(0f, sum))',
+    to: 'out[m] = 10f * log10(max(1e-10f, sum))',
+  },
+  {
+    name: 'mel bands changed from 96 to CLAP\'s 64',
+    danger: 'The tensor no longer matches the model input; or worse, a dynamic axis accepts it silently.',
+    file: 'android/app/src/main/java/com/systema/music/inference/effnet/EffnetDiscogsMelFrontEnd.kt',
+    from: 'const val MEL_BANDS = 96',
+    to: 'const val MEL_BANDS = 64',
+  },
+  {
+    name: 'hop size changed to CLAP\'s 480',
+    danger: 'Frames land at the wrong times; the model sees a differently-paced spectrogram.',
+    file: 'android/app/src/main/java/com/systema/music/inference/effnet/EffnetDiscogsMelFrontEnd.kt',
+    from: 'const val HOP_SIZE = 256',
+    to: 'const val HOP_SIZE = 480',
+  },
+  {
+    name: 'sample rate changed to 48 kHz',
+    danger: 'Every frequency maps to the wrong mel band. Output stays perfectly well-formed.',
+    file: 'android/app/src/main/java/com/systema/music/inference/effnet/EffnetDiscogsMelFrontEnd.kt',
+    from: 'const val SAMPLE_RATE = 16_000',
+    to: 'const val SAMPLE_RATE = 48_000',
+  },
+  {
+    name: 'lastPatchMode flipped from discard to round-up',
+    danger: 'Invents a final patch out of padding and reports predictions about silence.',
+    file: 'android/app/src/main/java/com/systema/music/inference/effnet/EffnetDiscogsMelFrontEnd.kt',
+    from: 'if (frameCount < PATCH_SIZE) return 0',
+    to: 'if (frameCount < PATCH_SIZE) return 1',
+  },
+  {
+    name: 'too-short audio is zero-padded instead of refused',
+    danger: 'The model describes silence and the result is stored as a property of the track.',
+    file: 'android/app/src/main/java/com/systema/music/inference/effnet/EffnetDiscogsModel.kt',
+    from: 'if (pcm.size < minimum) {',
+    to: 'if (false) {',
+  },
+  {
+    name: 'embedding width check weakened',
+    danger: 'A 512-d CLAP model loads as Discogs-EffNet and the heads receive garbage.',
+    file: 'android/app/src/main/java/com/systema/music/inference/effnet/EffnetDiscogsModel.kt',
+    from: 'if (width != EMBEDDING_DIM) {',
+    to: 'if (width != null && width < 0) {',
+  },
+  {
+    name: 'the .pb is silently accepted',
+    danger: 'A full copy then an opaque ONNX parse error, with no hint that the ONNX build exists.',
+    file: 'android/app/src/main/java/com/systema/music/inference/effnet/EffnetDiscogsModel.kt',
+    from: 'lower.endsWith(".pb") ->',
+    to: 'lower.endsWith(".never-matches-pb") ->',
+  },
+  {
+    name: 'mel path opened to every log-mel model',
+    danger: 'Another model gets EffNet\'s filterbank — confident, meaningless embeddings.',
+    file: 'android/app/src/main/java/com/systema/music/inference/ModelInputPreparer.kt',
+    from: 'if (EffnetDiscogsModel.isEffnetDiscogs(model)) {',
+    to: 'if (true) {',
+  },
+  {
+    name: 'runtime declared ready before the weights exist',
+    danger: 'The UI would claim predictions are available when no model is installed.',
+    file: 'app/services/music-semantics/providers/semanticRuntime.ts',
+    from: "    id: 'embedding-weights',",
+    to: "    id: 'embedding-weights-renamed',",
+  },
+
   // ---- Export ------------------------------------------------------
   {
     name: 'export merges prediction into groundTruth',
@@ -227,13 +299,30 @@ const MUTATIONS: Mutation[] = [
 
 // ---------------------------------------------------------------------
 
+/**
+ * The suites a mutation must be caught by.
+ *
+ * Originally just test-music-semantics.ts. That silently under-tested
+ * the Phase 29 native work: ten mel-front-end mutations all "survived"
+ * simply because no suite in the list looked at those files. A mutation
+ * harness that does not run the relevant tests reports false safety,
+ * which is worse than no harness at all.
+ */
+const SUITES = [
+  'scripts/test-music-semantics.ts',
+  'scripts/test-effnet-discogs.ts',
+  'scripts/test-effnet-mel-math.ts',
+]
+
 function runSuite(): boolean {
-  try {
-    execSync('npx tsx scripts/test-music-semantics.ts', { stdio: 'pipe' })
-    return true
-  } catch {
-    return false
+  for (const suite of SUITES) {
+    try {
+      execSync(`npx tsx ${suite}`, { stdio: 'pipe' })
+    } catch {
+      return false
+    }
   }
+  return true
 }
 
 console.log('Mutation testing Phase 29 semantics\n')

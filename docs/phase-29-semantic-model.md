@@ -241,3 +241,68 @@ conversion.
 Verify each conversion by comparing TF and ONNX outputs on the same
 input before trusting it; a silently wrong conversion is
 indistinguishable from a working one in the UI.
+
+---
+
+## Addendum — verified preprocessing spec (Discogs-EffNet)
+
+Read from Essentia source, not inferred. This is the contract the mel
+front-end must reproduce exactly; approximating any line of it produces
+numerically different embeddings that fail silently.
+
+**Source:** `src/algorithms/spectral/tensorflowinputmusicnn.cpp`
+(`TensorflowInputMusiCNN::configure`) and
+`src/algorithms/machinelearning/tensorflowpredicteffnetdiscogs.{h,cpp}`,
+MTG/essentia @ master. `TensorflowPredictEffnetDiscogs` states it "uses
+TensorflowInputMusiCNN for the input feature extraction".
+
+### Framing
+
+| Parameter | Value | Source |
+|---|---|---|
+| Sample rate | **16000 Hz**, mono | `Real sampleRate = 16000.0` |
+| Frame size | **512** | `const int _frameSize = 512` |
+| Hop size | **256** (50% overlap) | `const int _hopSize = 256` |
+| Zero-centred first frame | yes | FrameCutter zero-pads so frame 0 is centred |
+| Patch size | **128** frames | `patchSize` default |
+| Patch hop | **62** frames (~1.008 Hz) | `patchHopSize` default |
+| Batch | **64** patches | `batchSize` default |
+| Last patch | `discard` | default |
+| Last batch | `same` (zero-pad, return only real patches) | default |
+
+### Mel filterbank — NOT the same as CLAP's
+
+| Parameter | Value | Note |
+|---|---|---|
+| Bands | **96** | `numberBands = 96` |
+| Warping | **slaneyMel** | same scale as CLAP |
+| Weighting | **linear** | |
+| Normalize | **`unit_tri`** | **differs from CLAP's Slaney "area" norm** |
+| Low bound | 0 Hz | default |
+| High bound | **8000 Hz** (`sampleRate / 2`) | |
+| Windowing | Hann, **`normalized = false`** | `_windowing->configure("normalized", false)` |
+| Spectrum | magnitude, size 512 | Essentia `Spectrum` is magnitude, **not power** |
+
+### Compression — the critical difference
+
+```
+bands = log10(1 + 10000 * melBands)
+```
+
+from `shift = 1`, `scale = 10000`, `comp = "log10"`.
+
+CLAP uses `10*log10(max(power, 1e-10))`. Discogs-EffNet uses a
+shift-and-scale log10 of **magnitude** mel bands. These are different
+functions of different inputs. **`ClapMelFrontEnd` must not be reused
+for this model** — only the stateless `Fft` primitive is shared.
+
+### Resulting input tensor
+
+`serving_default_melspectrogram`, float32 `[64, 128, 96]`
+= 64 patches x 128 frames x 96 bands.
+
+Note the ONNX input is 3-D `[batch, frames, bands]`, while the Essentia
+C++ builds a 4-D `[batch, 1, patchSize, numberBands]` for TensorFlow.
+The channel axis is absent from the published ONNX signature; the
+loader must read the real signature from the file rather than assume
+either form.

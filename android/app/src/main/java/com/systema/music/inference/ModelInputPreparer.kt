@@ -53,11 +53,35 @@ object ModelInputPreparer {
 
             InputFormat.RAW_WAVEFORM -> prepareWaveform(pcm, pcmSampleRate, model)
 
-            InputFormat.MEL_SPECTROGRAM,
-            InputFormat.LOG_MEL_SPECTROGRAM,
+            // Phase 29 implements a log-mel front end for ONE model:
+            // Discogs-EffNet. Its filterbank was transcribed from
+            // Essentia's own source (see EffnetDiscogsMelFrontEnd), so
+            // it is correct for that model and no other.
+            //
+            // Every other mel-consuming model still hits the refusal
+            // below. That is deliberate: "we have a mel front end now"
+            // must not become "any mel model will work", because a
+            // filterbank that does not match training produces
+            // confident, meaningless output.
+            InputFormat.LOG_MEL_SPECTROGRAM ->
+                if (EffnetDiscogsModel.isEffnetDiscogs(model)) {
+                    EffnetDiscogsModel.prepareMel(pcm, pcmSampleRate, model)
+                } else {
+                    throw InferenceException(
+                        InferenceErrorCode.INPUT_SHAPE_MISMATCH,
+                        "Model ${model.modelId} requires ${model.inputFormat}, and " +
+                            "SYSTEMA has no front end matching ITS training " +
+                            "configuration. A mel front end is only valid for the " +
+                            "model it was transcribed from; reusing another model's " +
+                            "would produce meaningless embeddings. Refusing rather " +
+                            "than guessing.",
+                    )
+                }
+
+            InputFormat.MEL_SPECTROGRAM
             -> throw InferenceException(
                 InferenceErrorCode.INPUT_SHAPE_MISMATCH,
-                "Model ${model.modelId} requires ${model.inputFormat}, which Phase 15 " +
+                "Model ${model.modelId} requires ${model.inputFormat}, which SYSTEMA " +
                     "does not implement. A mel front end must match the model's training " +
                     "configuration exactly; approximating it would produce meaningless " +
                     "embeddings. Refusing rather than guessing.",
