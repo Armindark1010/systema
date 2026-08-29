@@ -19,7 +19,9 @@ import com.systema.music.inference.TensorSignature
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedSendChannelException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.trySendBlocking
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
@@ -401,6 +403,18 @@ class ClapSession(
         // and each window is inferred and discarded as soon as it
         // fills. Peak memory is a function of the window size, not the
         // track length (§4).
+        // One id per analyse request, so the whole chain can be read as
+        // a sequence in logcat. Derived from the clock and this
+        // session's identity: no track data, no URI.
+        val requestId = java.lang.Long.toHexString(System.nanoTime())
+        ClapLog.event(
+            ClapLog.ANALYZE_START,
+            "requestId" to requestId,
+            "sessionId" to Integer.toHexString(System.identityHashCode(this@ClapSession)),
+            "modelId" to (activeModelId ?: ""),
+            "windowBudget" to (windowBudget?.toString() ?: "unbounded"),
+        )
+
         val stream = model.openStream(windowBudget)
         val decodeStart = System.nanoTime()
         var decodeMs: Double
@@ -450,6 +464,29 @@ class ClapSession(
                         if (e.code != AudioAnalysisException.Code.CANCELLED) throw e
                     } catch (e: ClosedSendChannelException) {
                         // The consumer stopped first; also expected.
+                    } catch (e: CancellationException) {
+                        // THE CONSUMER FINISHED FIRST — THIS IS SUCCESS.
+                        //
+                        // When the window budget fills, the consumer
+                        // breaks and calls channel.cancel(). If the
+                        // producer is parked on the rendezvous send at
+                        // that moment, its trySendBlocking().getOrThrow()
+                        // throws CancellationException. That is the
+                        // normal end of a capped run, not a failure.
+                        //
+                        // Only swallowed when THIS coroutine was not
+                        // itself cancelled: if the caller cancelled the
+                        // whole request, the exception must propagate so
+                        // structured concurrency stays correct.
+                        if (isActive) {
+                            ClapLog.event(
+                                ClapLog.DECODE_STOPPED,
+                                "requestId" to requestId,
+                                "reason" to "consumerSaturated",
+                            )
+                        } else {
+                            throw e
+                        }
                     } finally {
                         channel.close()
                     }
@@ -459,9 +496,23 @@ class ClapSession(
                     stream.accept(chunk, chunk.size)
                     if (stream.isSaturated()) break
                 }
-                // Drain rather than cancel: the producer may be parked
-                // on a rendezvous send, and cancelling it there would
-                // race with reading sourceInfo.
+                // The consumer has everything it needs. The producer
+                // may still be parked on a rendezvous send, so the
+                // channel is cancelled to release it; that surfaces in
+                // the producer as a CancellationException, which it
+                // recognises as this expected stop.
+                //
+                // shouldCancel = { stream.isSaturated() } is only polled
+                // at the top of the decode loop, so it cannot release a
+                // producer that is ALREADY parked mid-callback. The
+                // channel cancel is what actually unblocks it.
+                ClapLog.event(
+                    ClapLog.DECODE_STOPPED,
+                    "requestId" to requestId,
+                    "stage" to "consumerDone",
+                    "saturated" to stream.isSaturated(),
+                    "windows" to stream.windowsProcessed,
+                )
                 channel.cancel()
                 producer.join()
 
@@ -506,6 +557,12 @@ class ClapSession(
 
         val sum = stream.finish()
         decodeMs = (System.nanoTime() - decodeStart) / 1_000_000.0
+        ClapLog.event(
+            ClapLog.ANALYZE_SUCCESS,
+            "requestId" to requestId,
+            "windows" to stream.windowsProcessed,
+            "decodeMs" to decodeMs.toLong(),
+        )
 
         if (sum == null || stream.windowsProcessed == 0) {
             throw InferenceException(

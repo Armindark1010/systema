@@ -48,6 +48,16 @@ object ClapLog {
      */
     const val AUDIO_INPUT = "AUDIO_INPUT"
 
+    /**
+     * Phase 23.3. The decode ended early because the consumer had all
+     * the windows it needed. This is a normal, successful stop.
+     */
+    const val DECODE_STOPPED = "DECODE_STOPPED"
+
+    /** Phase 23.3 request correlation. Carries no track or audio data. */
+    const val ANALYZE_START = "ANALYZE_START"
+    const val ANALYZE_SUCCESS = "ANALYZE_SUCCESS"
+
     /** One structured line. Fields are `key=value`, space separated. */
     fun event(event: String, vararg fields: Pair<String, Any?>) {
         Log.i(TAG, render(event, fields))

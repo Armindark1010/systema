@@ -8,6 +8,7 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.os.Build
 import android.util.Log
+import kotlin.coroutines.cancellation.CancellationException
 import com.systema.music.analysis.AudioAnalysisException
 import com.systema.music.analysis.dsp.AudioAnalysisConfig
 import java.nio.ByteBuffer
@@ -146,6 +147,9 @@ class PcmDecoder(
 
             val codec = try {
                 MediaCodec.createDecoderByType(mime)
+            } catch (e: CancellationException) {
+                // Cancellation is never "no decoder available".
+                throw e
             } catch (e: Exception) {
                 throw AudioAnalysisException(
                     AudioAnalysisException.Code.UNSUPPORTED_FORMAT,
@@ -174,6 +178,20 @@ class PcmDecoder(
                 codec.start()
                 runDecodeLoop(codec, extractor, sink, sourceRate, channels, shouldCancel)
             } catch (e: AudioAnalysisException) {
+                throw e
+            } catch (e: CancellationException) {
+                // CANCELLATION IS NOT A DECODER FAULT.
+                //
+                // CancellationException is an Exception, so the generic
+                // catch below used to swallow it and relabel it
+                // DECODER_ERROR. That is what turned a deliberate,
+                // successful early stop into
+                // "The decoder failed while reading this file".
+                //
+                // It is rethrown unchanged so structured concurrency
+                // keeps working: swallowing a cancellation would also
+                // leave the parent coroutine believing the child was
+                // still running.
                 throw e
             } catch (e: OutOfMemoryError) {
                 throw AudioAnalysisException(
@@ -226,6 +244,9 @@ class PcmDecoder(
                 extractor.setDataSource(pfd.fileDescriptor)
             }
         } catch (e: AudioAnalysisException) {
+            throw e
+        } catch (e: CancellationException) {
+            // Cancellation must never be reported as an unreadable file.
             throw e
         } catch (e: SecurityException) {
             throw AudioAnalysisException(
