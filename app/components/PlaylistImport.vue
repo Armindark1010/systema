@@ -5,6 +5,7 @@
 // ============================================================
 
 import type { ImportedEntry, Track } from '~/types'
+import { useLibraryStore } from '~/stores/library'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ 'update:open': [v: boolean] }>()
@@ -26,7 +27,8 @@ const {
   resetImport,
 } = pl
 
-const { tracks: libraryTracks } = useMusicLibrary()
+const libraryStore = useLibraryStore()
+const libraryTracks = computed(() => libraryStore.tracks)
 const toast = useToast()
 
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -36,12 +38,16 @@ const pastedText = ref('')
 const manualSearchQuery = ref('')
 const selectedMissingId = ref<string | null>(null)
 
-watch(() => props.open, (isOpen) => {
+watch(() => props.open, async (isOpen) => {
   if (isOpen) {
     startImport('M3U')
     showPasteArea.value = false
     pastedText.value = ''
     selectedMissingId.value = null
+    // Ensure all tracks are loaded into memory for accurate matching
+    if (libraryStore.isNativeLibrary) {
+      void libraryStore.loadAllTracks()
+    }
   } else {
     resetImport()
   }
@@ -51,11 +57,20 @@ function triggerFileInput() {
   fileInput.value?.click()
 }
 
+async function getAvailableLibraryTracks(): Promise<Track[]> {
+  if (libraryStore.isNativeLibrary) {
+    const all = await libraryStore.loadAllTracks()
+    if (all.length) return all
+  }
+  return libraryStore.tracks.length ? libraryStore.tracks : libraryTracks.value
+}
+
 async function onFileSelected(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
   if (!file) return
-  await processM3UFile(file, libraryTracks.value)
+  const tracksToMatch = await getAvailableLibraryTracks()
+  await processM3UFile(file, tracksToMatch)
   target.value = ''
 }
 
@@ -63,16 +78,19 @@ async function onDrop(event: DragEvent) {
   isDragging.value = false
   const file = event.dataTransfer?.files?.[0]
   if (!file) return
-  await processM3UFile(file, libraryTracks.value)
+  const tracksToMatch = await getAvailableLibraryTracks()
+  await processM3UFile(file, tracksToMatch)
 }
 
 async function onProcessPastedText() {
   if (!pastedText.value.trim()) return
-  await processM3UText(pastedText.value, libraryTracks.value, 'Pasted M3U')
+  const tracksToMatch = await getAvailableLibraryTracks()
+  await processM3UText(pastedText.value, tracksToMatch, 'Pasted M3U')
 }
 
 async function onTrySample() {
-  await selectSampleFile(libraryTracks.value)
+  const tracksToMatch = await getAvailableLibraryTracks()
+  await selectSampleFile(tracksToMatch)
 }
 
 function onImport() {
@@ -94,8 +112,9 @@ function statusCounts() {
 
 const filteredManualCandidates = computed<Track[]>(() => {
   const q = manualSearchQuery.value.trim().toLowerCase()
-  if (!q) return libraryTracks.value.slice(0, 8)
-  return libraryTracks.value.filter(t =>
+  const list = libraryStore.tracks
+  if (!q) return list.slice(0, 8)
+  return list.filter(t =>
     t.title.toLowerCase().includes(q) || (t.artist && t.artist.toLowerCase().includes(q)),
   ).slice(0, 8)
 })
@@ -105,15 +124,21 @@ function selectManualTrack(missingEntryId: string, track: Track) {
   selectedMissingId.value = null
   manualSearchQuery.value = ''
 }
+const isOpen = computed({
+  get: () => props.open,
+  set: (val: boolean) => {
+    emit('update:open', val)
+    if (!val) resetImport()
+  },
+})
 </script>
 
 <template>
   <UModal
-    :model-value="open"
+    v-model:open="isOpen"
     :ui="{ width: 'max-w-[640px]', content: 'bg-surface text-fg' }"
     title="IMPORT PLAYLIST"
     description="UPLOAD .M3U FILE → PARSE → MATCH WITH ARCHIVE"
-    @update:model-value="(v: boolean) => { emit('update:open', v); if (!v) resetImport() }"
   >
     <template #body>
       <!-- Hidden file input -->
@@ -251,7 +276,7 @@ function selectManualTrack(missingEntryId: string, track: Track) {
                 class="chip text-[10px]"
                 :class="e.status === 'matched' ? 'border-success text-success' : 'border-warning text-warning'"
               >
-                {{ e.status === 'matched' ? 'MATCHED' : (e.status as any) === 'skip' ? 'SKIPPED' : 'MISSING' }}
+                {{ e.status === 'matched' ? 'MATCHED' : e.status === 'skip' ? 'SKIPPED' : 'MISSING' }}
               </span>
 
               <button
@@ -262,7 +287,7 @@ function selectManualTrack(missingEntryId: string, track: Track) {
                 MANUAL MATCH
               </button>
               <button
-                v-if="e.status !== 'matched' && (e.status as any) !== 'skip'"
+                v-if="e.status !== 'matched' && e.status !== 'skip'"
                 class="sys-btn-ghost !h-7 !px-2 !text-[10px]"
                 @click="resolveMissing(e.id, 'skip')"
               >

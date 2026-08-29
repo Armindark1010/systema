@@ -463,21 +463,97 @@ export const usePlayerStore = defineStore('player', () => {
   /**
    * Queue a track. `atStart` places it immediately after the current
    * item ("play next") rather than at the end of the order.
+   * If the track is already in the queue, it is moved to the new position.
    */
   function addToQueue(track: Track, atStart = false) {
-    const at = atStart
-      ? Math.max(0, currentIndex.value + 1)
-      : playbackOrder.value.length
+    if (!track) return
 
-    playbackOrder.value = [
-      ...playbackOrder.value.slice(0, at),
-      track,
-      ...playbackOrder.value.slice(at),
-    ]
+    // If nothing is playing or queue is empty
+    if (playbackOrder.value.length === 0 || currentIndex.value < 0) {
+      playbackOrder.value = [track]
+      currentIndex.value = 0
+      shuffleOrder.value = [0]
+      return
+    }
 
-    // Inserting before the current item would shift it.
-    if (at <= currentIndex.value) currentIndex.value += 1
-    rebuildShuffleOrder()
+    // Calling play next on the currently playing track is a no-op
+    if (currentTrack.value?.id === track.id) {
+      return
+    }
+
+    const existingIndex = playbackOrder.value.findIndex(t => t.id === track.id)
+
+    if (existingIndex >= 0) {
+      // Track is already in playbackOrder -> Move it
+      const [item] = playbackOrder.value.splice(existingIndex, 1)
+      if (!item) return
+
+      if (existingIndex < currentIndex.value) {
+        currentIndex.value -= 1
+      }
+
+      const targetIndex = atStart
+        ? Math.max(0, currentIndex.value + 1)
+        : playbackOrder.value.length
+
+      playbackOrder.value.splice(targetIndex, 0, item)
+
+      if (targetIndex <= currentIndex.value && existingIndex > currentIndex.value) {
+        currentIndex.value += 1
+      }
+
+      // Update shuffleOrder if active
+      if (isShuffle.value && shuffleOrder.value.length === playbackOrder.value.length) {
+        const updatedShuffle = shuffleOrder.value.map((idx) => {
+          if (idx === existingIndex) return targetIndex
+          if (existingIndex < targetIndex) {
+            if (idx > existingIndex && idx <= targetIndex) return idx - 1
+          } else if (existingIndex > targetIndex) {
+            if (idx >= targetIndex && idx < existingIndex) return idx + 1
+          }
+          return idx
+        })
+
+        if (atStart) {
+          const currentShufflePos = updatedShuffle.indexOf(currentIndex.value)
+          const itemShufflePos = updatedShuffle.indexOf(targetIndex)
+          if (currentShufflePos >= 0 && itemShufflePos >= 0 && itemShufflePos !== currentShufflePos + 1) {
+            updatedShuffle.splice(itemShufflePos, 1)
+            const insertPos = updatedShuffle.indexOf(currentIndex.value) + 1
+            updatedShuffle.splice(insertPos, 0, targetIndex)
+          }
+        }
+        shuffleOrder.value = updatedShuffle
+      } else {
+        shuffleOrder.value = []
+      }
+    } else {
+      // New track
+      const targetIndex = atStart
+        ? Math.max(0, currentIndex.value + 1)
+        : playbackOrder.value.length
+
+      playbackOrder.value.splice(targetIndex, 0, track)
+
+      if (targetIndex <= currentIndex.value) {
+        currentIndex.value += 1
+      }
+
+      if (isShuffle.value && shuffleOrder.value.length > 0) {
+        const updatedShuffle = shuffleOrder.value.map(idx => (idx >= targetIndex ? idx + 1 : idx))
+
+        if (atStart) {
+          const currentShufflePos = updatedShuffle.indexOf(currentIndex.value)
+          const insertPos = currentShufflePos >= 0 ? currentShufflePos + 1 : updatedShuffle.length
+          updatedShuffle.splice(insertPos, 0, targetIndex)
+        } else {
+          updatedShuffle.push(targetIndex)
+        }
+        shuffleOrder.value = updatedShuffle
+      } else {
+        shuffleOrder.value = []
+      }
+    }
   }
 
   /**
@@ -504,7 +580,14 @@ export const usePlayerStore = defineStore('player', () => {
 
     playbackOrder.value = playbackOrder.value.filter((_, i) => i !== orderIndex)
     if (orderIndex < currentIndex.value) currentIndex.value -= 1
-    rebuildShuffleOrder()
+
+    if (isShuffle.value && shuffleOrder.value.length > 0) {
+      shuffleOrder.value = shuffleOrder.value
+        .filter(i => i !== orderIndex)
+        .map(i => (i > orderIndex ? i - 1 : i))
+    } else {
+      shuffleOrder.value = []
+    }
   }
 
   /**

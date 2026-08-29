@@ -5,6 +5,7 @@
 // ============================================================
 
 import type { Playlist } from '~/types'
+import { useLibraryStore } from '~/stores/library'
 
 const props = defineProps<{
   open: boolean
@@ -16,7 +17,8 @@ const emit = defineEmits<{ 'update:open': [v: boolean] }>()
 
 const pl = usePlaylists()
 const { playlists, exportStep, exportFormat, setExportFormat, exportPlaylist, resetExport } = pl
-const { tracks } = useMusicLibrary()
+const libraryStore = useLibraryStore()
+const tracks = computed(() => libraryStore.tracks)
 const toast = useToast()
 
 const formats = ['M3U', 'SYSTEMA JSON']
@@ -71,6 +73,14 @@ function onExport() {
   })
 }
 
+const isOpen = computed({
+  get: () => props.open,
+  set: (val: boolean) => {
+    emit('update:open', val)
+    if (!val) resetExport()
+  },
+})
+
 function onDone() {
   emit('update:open', false)
   resetExport()
@@ -79,11 +89,10 @@ function onDone() {
 
 <template>
   <UModal
-    :model-value="open"
+    v-model:open="isOpen"
     :ui="{ width: 'max-w-[520px]', content: 'bg-surface text-fg' }"
     title="EXPORT PLAYLIST"
     description="GENERATE & DOWNLOAD M3U AUDIO PLAYLIST"
-    @update:model-value="(v: boolean) => { emit('update:open', v); if (!v) resetExport() }"
   >
     <template #body>
       <!-- Playlist selection if not provided by prop -->

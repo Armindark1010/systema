@@ -389,6 +389,14 @@ export function useNativePlayer() {
     return player.$onAction(({ name, args, after }) => {
       if (applyingNativeState) return
 
+      let preAddToQueueIndex = -1
+      if (name === 'addToQueue') {
+        const track = args[0] as Track | undefined
+        if (track) {
+          preAddToQueueIndex = player.playbackOrder.findIndex(t => t.id === track.id)
+        }
+      }
+
       after(() => {
         switch (name) {
           case 'playTrack': {
@@ -455,13 +463,15 @@ export function useNativePlayer() {
           }
 
           case 'addToQueue': {
-            const track = args[0] as { id: string } | undefined
-            const added = player.playbackOrder.find(t => t.id === track?.id)
-            if (!added || !isPlayableNatively(added)) return
-            // The store already inserted it; mirror the same absolute
-            // position so both lists stay identical.
-            const at = player.playbackOrder.findIndex(t => t.id === added.id)
-            void addToQueueNative(added, at >= 0 ? at : undefined)
+            const track = args[0] as Track | undefined
+            if (!track || !isPlayableNatively(track)) return
+            const newIndex = player.playbackOrder.findIndex(t => t.id === track.id)
+            if (newIndex < 0) return
+            if (preAddToQueueIndex >= 0 && preAddToQueueIndex !== newIndex) {
+              void moveInQueueNative(preAddToQueueIndex, newIndex)
+            } else if (preAddToQueueIndex < 0) {
+              void addToQueueNative(track, newIndex)
+            }
             break
           }
 

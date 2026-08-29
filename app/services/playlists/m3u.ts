@@ -7,7 +7,7 @@
 
 import type { Playlist, Track, ImportedEntry } from '../../types'
 import { getArtist } from '../../data/music'
-import { normalizeText } from '../search/normalization'
+import { normalizeQuery } from '../search/normalization'
 
 export interface ParsedM3UEntry {
   raw: string
@@ -15,6 +15,7 @@ export interface ParsedM3UEntry {
   artist?: string
   duration?: number
   uri?: string
+  filename?: string
 }
 
 export interface ParsedM3U {
@@ -77,14 +78,20 @@ export function parseM3U(content: string, fallbackTitle = 'Imported Playlist'): 
       } else if (line.startsWith('#EXT-X-TITLE:')) {
         playlistTitle = line.slice(13).trim()
       } else if (line.startsWith('#EXTINF:')) {
-        // Format: #EXTINF:180,Artist - Title or #EXTINF:180,Title
+        // Format: #EXTINF:180,Artist - Title or #EXTINF:180,Title or #EXTINF:268971,... (milliseconds)
         const commaIdx = line.indexOf(',')
         const colonIdx = line.indexOf(':')
 
         if (colonIdx !== -1) {
           const durationStr = commaIdx !== -1 ? line.slice(colonIdx + 1, commaIdx).trim() : line.slice(colonIdx + 1).trim()
-          const parsedDur = parseInt(durationStr, 10)
-          pendingDuration = Number.isNaN(parsedDur) ? undefined : parsedDur
+          let parsedDur = parseInt(durationStr, 10)
+          if (!Number.isNaN(parsedDur)) {
+            // If duration is in milliseconds (> 10000), convert to seconds
+            if (parsedDur > 10000) {
+              parsedDur = Math.round(parsedDur / 1000)
+            }
+            pendingDuration = parsedDur
+          }
         }
 
         if (commaIdx !== -1) {
@@ -103,13 +110,14 @@ export function parseM3U(content: string, fallbackTitle = 'Imported Playlist'): 
 
     // Line is an audio path, URI, or title
     const rawUri = line
+    // Deduce filename (strip folder paths & audio extension)
+    const cleanFileName = rawUri.split(/[\\/]/).pop()?.replace(/\.[a-zA-Z0-9]+$/, '') || rawUri
+
     let itemTitle = pendingTitle
     let itemArtist = pendingArtist
     const itemDuration = pendingDuration
 
     if (!itemTitle) {
-      // Deduce title from filename (strip folders & extension)
-      const cleanFileName = rawUri.split(/[\\/]/).pop()?.replace(/\.[a-zA-Z0-9]+$/, '') || rawUri
       if (cleanFileName.includes(' - ')) {
         const parts = cleanFileName.split(' - ')
         itemArtist = parts[0].trim()
@@ -121,10 +129,11 @@ export function parseM3U(content: string, fallbackTitle = 'Imported Playlist'): 
 
     entries.push({
       raw: rawUri,
-      title: itemTitle || 'Untitled Track',
+      title: itemTitle || cleanFileName || 'Untitled Track',
       artist: itemArtist,
       duration: itemDuration,
       uri: rawUri,
+      filename: cleanFileName,
     })
 
     // Reset pending state
@@ -140,46 +149,128 @@ export function parseM3U(content: string, fallbackTitle = 'Imported Playlist'): 
 }
 
 /**
+ * Helper to extract raw filename without folders and extension
+ */
+function extractFilename(pathOrUri?: string): string {
+  if (!pathOrUri) return ''
+  const decoded = decodeURIComponent(pathOrUri)
+  return decoded.split(/[\\/]/).pop()?.replace(/\.[a-zA-Z0-9]+$/, '').trim() || ''
+}
+
+/**
+ * Helper to split text into distinct normalized tokens
+ */
+function tokenize(text?: string): string[] {
+  if (!text) return []
+  return normalizeQuery(text)
+    .split(/\s+/)
+    .filter(token => token.length >= 2)
+}
+
+/**
  * Matches parsed M3U entries against the catalog / library tracks
  */
 export function matchM3UEntries(entries: ParsedM3UEntry[], catalogTracks: Track[]): ImportedEntry[] {
   return entries.map((entry, index) => {
-    const entryTitleNorm = normalizeText(entry.title)
-    const entryArtistNorm = entry.artist ? normalizeText(entry.artist) : ''
+    const entryRawNorm = normalizeQuery(entry.raw || '')
+    const entryUriNorm = normalizeQuery(entry.uri || '')
+    const entryFilename = entry.filename || extractFilename(entry.uri || entry.raw)
+    const entryFilenameNorm = normalizeQuery(entryFilename)
+    const entryTitleNorm = normalizeQuery(entry.title || '')
+    const entryArtistNorm = entry.artist ? normalizeQuery(entry.artist) : ''
 
-    // 1. Match by URI if available
-    let matched = catalogTracks.find(t => t.uri && entry.uri && t.uri === entry.uri)
+    const entryAllTokens = new Set([
+      ...tokenize(entry.title),
+      ...tokenize(entry.artist),
+      ...tokenize(entry.filename),
+      ...tokenize(entry.raw),
+    ])
 
-    // 2. Match by exact track id
-    if (!matched && entry.raw) {
-      matched = catalogTracks.find(t => t.id === entry.raw)
+    // 1. Direct match by URI / Path / ID
+    let matched = catalogTracks.find(t => {
+      if (entry.uri && t.uri && (t.uri === entry.uri || t.uri.toLowerCase() === entry.uri.toLowerCase())) {
+        return true
+      }
+      if (entry.raw && (t.id === entry.raw || t.uri === entry.raw)) {
+        return true
+      }
+      return false
+    })
+
+    // 2. Match by exact or normalized Filename (location-based match)
+    if (!matched && entryFilenameNorm) {
+      matched = catalogTracks.find(t => {
+        const tFilenameNorm = normalizeQuery(extractFilename(t.uri || ''))
+        const tTitleNorm = normalizeQuery(t.title || '')
+
+        // Check if track uri filename matches
+        if (tFilenameNorm && tFilenameNorm === entryFilenameNorm) return true
+        // Check if track title matches the file name directly
+        if (tTitleNorm === entryFilenameNorm) return true
+
+        return false
+      })
     }
 
     // 3. Match by normalized Title and Artist
     if (!matched && entryTitleNorm) {
       matched = catalogTracks.find(t => {
-        const tTitleNorm = normalizeText(t.title)
+        const tTitleNorm = normalizeQuery(t.title || '')
         const tArtistName = t.artist || (t.artistId ? getArtist(t.artistId)?.name : '') || ''
-        const tArtistNorm = normalizeText(tArtistName)
+        const tArtistNorm = normalizeQuery(tArtistName)
 
         if (entryArtistNorm) {
-          return tTitleNorm === entryTitleNorm && (tArtistNorm === entryArtistNorm || tArtistNorm.includes(entryArtistNorm) || entryArtistNorm.includes(tArtistNorm))
+          const artistMatches = tArtistNorm === entryArtistNorm ||
+            tArtistNorm.includes(entryArtistNorm) ||
+            entryArtistNorm.includes(tArtistNorm)
+          return tTitleNorm === entryTitleNorm && artistMatches
         }
         return tTitleNorm === entryTitleNorm
       })
     }
 
-    // 4. Loose match by title substring if no direct match
-    if (!matched && entryTitleNorm) {
+    // 4. Loose match by filename / title inclusion (handles Telegram tags, track numbers, etc.)
+    if (!matched) {
       matched = catalogTracks.find(t => {
-        const tTitleNorm = normalizeText(t.title)
-        return tTitleNorm.includes(entryTitleNorm) || entryTitleNorm.includes(tTitleNorm)
+        const tTitleNorm = normalizeQuery(t.title || '')
+        const tFilenameNorm = normalizeQuery(extractFilename(t.uri || ''))
+
+        if (entryFilenameNorm && tTitleNorm) {
+          if (entryFilenameNorm.includes(tTitleNorm) || tTitleNorm.includes(entryFilenameNorm)) {
+            return true
+          }
+        }
+
+        if (entryTitleNorm && tTitleNorm) {
+          if (entryTitleNorm.includes(tTitleNorm) || tTitleNorm.includes(entryTitleNorm)) {
+            return true
+          }
+        }
+
+        if (entryFilenameNorm && tFilenameNorm) {
+          if (entryFilenameNorm.includes(tFilenameNorm) || tFilenameNorm.includes(entryFilenameNorm)) {
+            return true
+          }
+        }
+
+        return false
+      })
+    }
+
+    // 5. Match by token subset (all words of track title exist in entry)
+    if (!matched && entryAllTokens.size > 0) {
+      matched = catalogTracks.find(t => {
+        const tTitleTokens = tokenize(t.title)
+        if (tTitleTokens.length > 0 && tTitleTokens.every(token => entryAllTokens.has(token))) {
+          return true
+        }
+        return false
       })
     }
 
     return {
       id: `m3u-entry-${index}-${Date.now()}`,
-      title: entry.title,
+      title: entry.title || entryFilename || 'Untitled Track',
       artist: entry.artist || (matched ? (matched.artist || getArtist(matched.artistId)?.name) : undefined),
       status: matched ? 'matched' : 'missing',
       matchedTrackId: matched?.id,

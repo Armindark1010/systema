@@ -27,6 +27,10 @@ const {
   toggleFavorite,
   queue,
   ensureFullPlayerNavigation,
+  isShuffle,
+  repeatMode,
+  toggleShuffle,
+  cycleRepeat,
 } = player
 
 const { playlists, addTracks, createPlaylist } = usePlaylists()
@@ -621,10 +625,14 @@ if (import.meta.client) {
               <PlayerControls
                 :is-playing="isPlaying"
                 :is-loading="false"
+                :is-shuffle="isShuffle"
+                :repeat-mode="repeatMode"
                 @prev="prev"
                 @next="next"
                 @toggle="togglePlay"
                 @seek-step="onSeekStep"
+                @toggle-shuffle="toggleShuffle"
+                @cycle-repeat="cycleRepeat"
               />
 
               <div v-if="sleepTimer.isActive.value" class="player-sleep-indicator">

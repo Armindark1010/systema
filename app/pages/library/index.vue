@@ -44,6 +44,7 @@ const {
   playTracks,
   shuffleLibrary,
   setSection,
+  setSortBy,
   // Native device library. All inert on the web, where the mock
   // catalog keeps rendering exactly as before.
   isNativeLibrary,
@@ -190,13 +191,13 @@ function openSort() {
 }
 
 function selectSort(key: LibrarySortKey) {
-  sortKey.value = key
+  setSortBy(key)
   react('thinking', 'SORTING LIBRARY')
 }
 
-function shuffle() {
+async function shuffle() {
   react('excited', 'SHUFFLING')
-  shuffleLibrary()
+  await shuffleLibrary()
 }
 
 /**

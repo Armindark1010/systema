@@ -6,8 +6,13 @@
 useHead({ title: 'Playlists' })
 
 const pl = usePlaylists()
+const player = usePlayer()
+const history = usePlaybackHistory()
 const { playlists } = pl
 const toast = useToast()
+
+const favoriteCount = computed(() => player.favorites.value.size)
+const recentsCount = computed(() => history.recentTrackIds.value.length)
 
 const createOpen = ref(false)
 const importOpen = ref(false)
@@ -47,6 +52,55 @@ function onCreate() {
         </div>
       </div>
     </header>
+
+    <!-- Primary System Playlists (Favorites & Recents) -->
+    <div class="sys-container mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+      <!-- FAVORITES (Red Border, Small Rectangular Card) -->
+      <NuxtLink
+        to="/playlists/favorites"
+        class="group relative flex items-center justify-between p-3.5 sm:p-4 bg-surface/80 hover:bg-surface border border-red-500/50 hover:border-red-500 rounded-sm transition-all duration-200 focus-ring pressable shadow-sm"
+      >
+        <div class="flex items-center gap-3.5 min-w-0">
+          <div class="w-10 h-10 rounded-sm bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-500 group-hover:scale-105 group-hover:bg-red-500/15 transition-all flex-shrink-0">
+            <UIcon name="lucide:heart" class="w-5 h-5 fill-current" />
+          </div>
+          <div class="min-w-0">
+            <h2 class="text-sm font-bold tracking-wider text-fg group-hover:text-red-400 transition-colors uppercase truncate">
+              FAVORITES
+            </h2>
+            <p class="text-[11px] text-fg-muted font-mono tracking-wider uppercase mt-0.5">
+              {{ favoriteCount }} TRACKS
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center text-fg-faint group-hover:text-red-400 group-hover:translate-x-0.5 transition-all">
+          <UIcon name="lucide:chevron-right" class="w-4 h-4" />
+        </div>
+      </NuxtLink>
+
+      <!-- RECENTS (Small Rectangular Card) -->
+      <NuxtLink
+        to="/playlists/recents"
+        class="group relative flex items-center justify-between p-3.5 sm:p-4 bg-surface/80 hover:bg-surface border border-line hover:border-line-strong rounded-sm transition-all duration-200 focus-ring pressable shadow-sm"
+      >
+        <div class="flex items-center gap-3.5 min-w-0">
+          <div class="w-10 h-10 rounded-sm bg-primary/10 border border-primary/25 flex items-center justify-center text-primary group-hover:scale-105 group-hover:bg-primary/15 transition-all flex-shrink-0">
+            <UIcon name="lucide:clock-3" class="w-5 h-5" />
+          </div>
+          <div class="min-w-0">
+            <h2 class="text-sm font-bold tracking-wider text-fg group-hover:text-primary transition-colors uppercase truncate">
+              RECENTS
+            </h2>
+            <p class="text-[11px] text-fg-muted font-mono tracking-wider uppercase mt-0.5">
+              {{ recentsCount }} TRACKS
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center text-fg-faint group-hover:text-primary group-hover:translate-x-0.5 transition-all">
+          <UIcon name="lucide:chevron-right" class="w-4 h-4" />
+        </div>
+      </NuxtLink>
+    </div>
 
     <div class="sys-container mt-8">
       <PlaylistList :playlists="playlists" @create="createOpen = true" />

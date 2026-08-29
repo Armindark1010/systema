@@ -121,4 +121,83 @@ assert.strictEqual(matchedMixed[1].status, 'matched')
 assert.strictEqual(matchedMixed[1].matchedTrackId, 'tr-02')
 console.log('✔ Missing track detection passed')
 
+// 5. Test Android Storage Path & Millisecond Duration Matching
+console.log('5. Testing Android Storage Path & Filename-based Matching...')
+const androidSampleM3U = `#EXTM3U
+#EXTINF:268971,Ahmad Solo ~ Music-Fa.Com - Eshghe Majazi ~ Music-Fa.Com
+/storage/emulated/0/Back/Web icon/Ahmad Solo - Eshghe Majazi (320).mp3
+#EXTINF:267781,Telegram:@iparparvaz - Farangis
+/storage/emulated/0/Back/Web icon/Telegram@iparparvaz Farangis.mp3
+#EXTINF:199694,Haamim - Avalash
+/storage/emulated/0/Back/Web icon/Haamim - Avalash.mp3
+`
+
+const androidLibraryTracks: Track[] = [
+  {
+    id: 'tr-ahmad',
+    title: 'Ahmad Solo - Eshghe Majazi (320)',
+    artist: 'Ahmad Solo ~ Music-Fa.Com',
+    artistId: 'ar-ahmad',
+    albumId: 'al-ahmad',
+    genreId: 'g-pop',
+    duration: 269,
+    year: 2023,
+    energy: 50,
+    mood: 'melancholic',
+    lang: 'fa',
+    plays: 10,
+    favorite: false,
+    addedAt: '2025-01-01T00:00:00Z',
+    uri: 'content://media/external/audio/media/501',
+  },
+  {
+    id: 'tr-farangis',
+    title: 'Farangis',
+    artist: 'Telegram@iparparvaz',
+    artistId: 'ar-farangis',
+    albumId: 'al-farangis',
+    genreId: 'g-persian',
+    duration: 268,
+    year: 1980,
+    energy: 40,
+    mood: 'melancholic',
+    lang: 'fa',
+    plays: 5,
+    favorite: false,
+    addedAt: '2025-01-01T00:00:00Z',
+    uri: '/storage/emulated/0/Back/Web icon/Telegram@iparparvaz Farangis.mp3',
+  },
+  {
+    id: 'tr-haamim',
+    title: 'Avalash',
+    artist: 'Haamim',
+    artistId: 'ar-haamim',
+    albumId: 'al-haamim',
+    genreId: 'g-pop',
+    duration: 200,
+    year: 2022,
+    energy: 55,
+    mood: 'calm',
+    lang: 'fa',
+    plays: 20,
+    favorite: false,
+    addedAt: '2025-01-01T00:00:00Z',
+    uri: 'content://media/external/audio/media/503',
+  },
+]
+
+const parsedAndroid = parseM3U(androidSampleM3U)
+assert.strictEqual(parsedAndroid.entries[0].duration, 269, 'Milliseconds must be converted to seconds')
+assert.strictEqual(parsedAndroid.entries[0].filename, 'Ahmad Solo - Eshghe Majazi (320)')
+
+const matchedAndroid = matchM3UEntries(parsedAndroid.entries, androidLibraryTracks)
+assert.strictEqual(matchedAndroid.length, 3)
+assert.strictEqual(matchedAndroid[0].status, 'matched', 'Must match Ahmad Solo based on filename')
+assert.strictEqual(matchedAndroid[0].matchedTrackId, 'tr-ahmad')
+assert.strictEqual(matchedAndroid[1].status, 'matched', 'Must match Farangis based on URI/filename')
+assert.strictEqual(matchedAndroid[1].matchedTrackId, 'tr-farangis')
+assert.strictEqual(matchedAndroid[2].status, 'matched', 'Must match Haamim based on title/artist')
+assert.strictEqual(matchedAndroid[2].matchedTrackId, 'tr-haamim')
+console.log('✔ Android storage path & filename matching passed')
+
 console.log('\n--- ALL M3U TESTS PASSED! ---')

@@ -1,19 +1,44 @@
 <script setup lang="ts">
 // ============================================================
-// PlayerControls — transport + hold-to-seek
+// PlayerControls — transport + hold-to-seek + shuffle + repeat
 // ============================================================
 
-const props = defineProps<{
+import type { RepeatMode } from '~/types'
+
+const props = withDefaults(defineProps<{
   isPlaying: boolean
   isLoading?: boolean
-}>()
+  isShuffle?: boolean
+  repeatMode?: RepeatMode
+}>(), {
+  isLoading: false,
+  isShuffle: false,
+  repeatMode: 'off',
+})
 
 const emit = defineEmits<{
   prev: []
   next: []
   toggle: []
   seekStep: [milliseconds: number]
+  toggleShuffle: []
+  cycleRepeat: []
 }>()
+
+const repeatIcon = computed(() => {
+  if (props.repeatMode === 'one') return 'lucide:repeat-1'
+  return 'lucide:repeat'
+})
+
+const repeatLabel = computed(() => {
+  if (props.repeatMode === 'one') return 'Repeat current track (Active)'
+  if (props.repeatMode === 'all') return 'Repeat all tracks (Active)'
+  return 'Repeat off'
+})
+
+const shuffleLabel = computed(() => {
+  return props.isShuffle ? 'Shuffle on' : 'Shuffle off'
+})
 
 const HOLD_DELAY = 420
 const HOLD_INTERVAL = 430
@@ -74,6 +99,19 @@ onBeforeUnmount(stopHold)
 
 <template>
   <div class="player-controls" role="group" aria-label="Playback controls">
+    <!-- SHUFFLE -->
+    <button
+      class="player-control-btn player-control-btn--secondary"
+      :class="{ 'is-active': isShuffle }"
+      :aria-label="shuffleLabel"
+      :aria-pressed="isShuffle"
+      @click="emit('toggleShuffle')"
+    >
+      <UIcon name="lucide:shuffle" class="player-control-icon" />
+      <span v-if="isShuffle" class="player-control-dot" aria-hidden="true" />
+    </button>
+
+    <!-- PREVIOUS -->
     <button
       class="player-control-btn"
       aria-label="Previous track. Hold to seek backward 15 seconds repeatedly."
@@ -87,6 +125,7 @@ onBeforeUnmount(stopHold)
       <UIcon name="lucide:skip-back" class="player-control-icon" />
     </button>
 
+    <!-- PLAY / PAUSE -->
     <button
       class="player-control-btn player-control-btn--play"
       :aria-label="isPlaying ? 'Pause' : 'Play'"
@@ -101,6 +140,7 @@ onBeforeUnmount(stopHold)
       />
     </button>
 
+    <!-- NEXT -->
     <button
       class="player-control-btn"
       aria-label="Next track. Hold to seek forward 15 seconds repeatedly."
@@ -113,6 +153,18 @@ onBeforeUnmount(stopHold)
     >
       <UIcon name="lucide:skip-forward" class="player-control-icon" />
     </button>
+
+    <!-- REPEAT -->
+    <button
+      class="player-control-btn player-control-btn--secondary"
+      :class="{ 'is-active': repeatMode !== 'off', 'is-repeat-one': repeatMode === 'one' }"
+      :aria-label="repeatLabel"
+      :aria-pressed="repeatMode !== 'off'"
+      @click="emit('cycleRepeat')"
+    >
+      <UIcon :name="repeatIcon" class="player-control-icon" />
+      <span v-if="repeatMode !== 'off'" class="player-control-dot" aria-hidden="true" />
+    </button>
   </div>
 </template>
 
@@ -121,7 +173,7 @@ onBeforeUnmount(stopHold)
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 1.25rem;
+  gap: clamp(0.75rem, 3.5vw, 1.25rem);
   padding-inline: var(--player-content-padding);
   flex-shrink: 0;
 }
@@ -129,6 +181,7 @@ onBeforeUnmount(stopHold)
 .player-control-btn {
   display: grid;
   place-items: center;
+  position: relative;
   width: var(--player-control-size);
   height: var(--player-control-size);
   border: 1px solid var(--player-line);
@@ -153,6 +206,35 @@ onBeforeUnmount(stopHold)
 .player-control-btn:focus-visible {
   border-color: var(--player-fg);
   box-shadow: 0 0 0 1px var(--player-fg);
+}
+
+.player-control-btn--secondary {
+  width: calc(var(--player-control-size) * 0.88);
+  height: calc(var(--player-control-size) * 0.88);
+  color: var(--player-fg-muted);
+  border-color: rgba(237, 240, 244, 0.08);
+  background: rgba(20, 23, 28, 0.6);
+}
+
+.player-control-btn--secondary:hover {
+  color: var(--player-fg);
+  background: var(--player-control-hover);
+  border-color: var(--player-line-strong);
+}
+
+.player-control-btn--secondary.is-active {
+  color: var(--player-primary);
+  border-color: var(--player-primary);
+  background: rgba(var(--sys-primary-rgb, 237, 240, 244), 0.12);
+}
+
+.player-control-dot {
+  position: absolute;
+  bottom: 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: var(--player-primary);
 }
 
 .player-control-btn--play {

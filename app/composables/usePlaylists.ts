@@ -10,7 +10,9 @@ import { playlists as seed } from '~/data/playlists'
 import { tracks as fallbackCatalog } from '~/data/music'
 import { PLAYLISTS_STORAGE_KEY, readJSON, writeJSON } from '~/services/persistence/storageAdapter'
 import { exportPlaylistToM3U, parseM3U, matchM3UEntries, downloadM3UFile } from '~/services/playlists/m3u'
-import type { PlaylistPersistState } from '~/types/playlists'
+import { LIKED_PLAYLIST_ID, RECENT_PLAYLIST_ID, isSystemPlaylistId, type PlaylistPersistState } from '~/types/playlists'
+import { usePlayerStore } from '~/stores/player'
+import { usePlaybackHistory } from '~/composables/usePlaybackHistory'
 
 function loadInitialPlaylists(): Playlist[] {
   const stored = readJSON<PlaylistPersistState | Playlist[]>(PLAYLISTS_STORAGE_KEY)
@@ -50,7 +52,41 @@ const exportStep = ref<'idle' | 'preparing' | 'done'>('idle')
 const exportFormat = ref('M3U')
 
 export function usePlaylists() {
-  function getPlaylist(id: string) {
+  function getPlaylist(id: string): Playlist | undefined {
+    if (id === 'favorites' || id === 'liked' || id === LIKED_PLAYLIST_ID) {
+      let favList: string[] = []
+      try {
+        favList = Array.from(usePlayerStore().favorites)
+      } catch {
+        favList = []
+      }
+      return {
+        id: 'favorites',
+        title: 'FAVORITES',
+        description: 'Your favorite tracks in one place.',
+        kind: 'system',
+        trackIds: favList,
+        createdAt: '2025-01-01T00:00:00Z',
+        updatedAt: new Date().toISOString(),
+      }
+    }
+    if (id === 'recents' || id === 'recent' || id === RECENT_PLAYLIST_ID) {
+      let recList: string[] = []
+      try {
+        recList = usePlaybackHistory().recentTrackIds.value
+      } catch {
+        recList = []
+      }
+      return {
+        id: 'recents',
+        title: 'RECENTS',
+        description: 'Recently played tracks from playback history.',
+        kind: 'system',
+        trackIds: recList,
+        createdAt: '2025-01-01T00:00:00Z',
+        updatedAt: new Date().toISOString(),
+      }
+    }
     return playlists.value.find((p) => p.id === id)
   }
 
@@ -72,6 +108,7 @@ export function usePlaylists() {
   }
 
   function updatePlaylist(id: string, patch: Partial<Playlist>) {
+    if (isSystemPlaylistId(id) || id === 'favorites' || id === 'recents') return
     const pl = getPlaylist(id)
     if (!pl) return
     Object.assign(pl, patch, { updatedAt: new Date().toISOString() })
@@ -79,11 +116,13 @@ export function usePlaylists() {
   }
 
   function deletePlaylist(id: string) {
+    if (isSystemPlaylistId(id) || id === 'favorites' || id === 'recents') return
     playlists.value = playlists.value.filter((p) => p.id !== id)
     persistPlaylists()
   }
 
   function addTracks(id: string, trackIds: string[]) {
+    if (isSystemPlaylistId(id) || id === 'favorites' || id === 'recents') return
     const pl = getPlaylist(id)
     if (!pl) return
     const existing = new Set(pl.trackIds)
@@ -93,6 +132,14 @@ export function usePlaylists() {
   }
 
   function removeTrack(id: string, trackId: string) {
+    if (id === 'favorites' || id === 'liked' || id === LIKED_PLAYLIST_ID) {
+      try {
+        usePlayerStore().toggleFavoriteId(trackId)
+      } catch {
+        /* store unavailable */
+      }
+      return
+    }
     const pl = getPlaylist(id)
     if (!pl) return
     pl.trackIds = pl.trackIds.filter((t) => t !== trackId)
