@@ -200,6 +200,9 @@ const aiResult = computed(() => aiAnalysis.resultFor(currentTrack.value?.id))
 const aiFailure = computed(() => aiAnalysis.failureFor(currentTrack.value?.id))
 const aiSaveWarning = computed(() => aiAnalysis.saveWarningFor(currentTrack.value?.id))
 const aiFromCache = computed(() => aiAnalysis.wasFromCache(currentTrack.value?.id))
+const aiSemantic = computed(() => aiAnalysis.semanticFor(currentTrack.value?.id))
+const aiSemanticNote = computed(() => aiAnalysis.semanticNoteFor(currentTrack.value?.id))
+const aiSemanticFromCache = computed(() => aiAnalysis.semanticFromCache(currentTrack.value?.id))
 
 /**
  * Runs the experimental model for the track on screen.
@@ -679,6 +682,9 @@ if (import.meta.client) {
             :failure="aiFailure"
             :save-warning="aiSaveWarning"
             :from-cache="aiFromCache"
+            :semantic="aiSemantic"
+            :semantic-note="aiSemanticNote"
+            :semantic-from-cache="aiSemanticFromCache"
             @analyze="onAiAnalyze"
           />
         </PlayerAnalysis>

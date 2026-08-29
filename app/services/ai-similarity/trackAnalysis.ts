@@ -49,6 +49,14 @@ export interface UnsupportedFeature {
   feature: SemanticFeature
   /** Plain-language reason. Shown to the user; never a stack trace. */
   reason: string
+  /**
+   * Set when a DIFFERENT subsystem addresses this field.
+   *
+   * The field remains unsupported by this analysis either way — this
+   * only lets the UI say "see SEMANTIC" instead of "nothing exists".
+   * It must never be read as a claim that a value is available here.
+   */
+  handledBy?: 'semantic-provider'
 }
 
 /**
@@ -57,22 +65,50 @@ export interface UnsupportedFeature {
  * Listed explicitly rather than inferred from `undefined`, so adding a
  * real classifier later is a deliberate edit here.
  */
+/**
+ * What the EMBEDDING analysis cannot tell you.
+ *
+ * Phase 29 added a separate semantic provider that targets some of
+ * these fields. These entries are deliberately NOT deleted: they
+ * describe this provider, and this provider still produces none of
+ * them. A CLAP vector did not become a mood label because a different
+ * model elsewhere can predict one.
+ *
+ * `handledBy` records where a field is addressed instead, so the UI can
+ * point at the semantic sheet rather than implying nothing exists.
+ * A field with `handledBy` set is still unsupported HERE.
+ */
 export const UNSUPPORTED_SEMANTICS: readonly UnsupportedFeature[] = [
   {
     feature: 'mood',
-    reason: 'No mood classifier is implemented. A CLAP embedding is a '
-      + 'vector, not a mood label.',
+    reason: 'This analysis produces an embedding, not a mood label. A '
+      + 'separate experimental semantic model predicts mood; its output '
+      + 'is shown under SEMANTIC and is never merged into this section.',
+    handledBy: 'semantic-provider',
   },
   {
     feature: 'language',
-    reason: 'No language detector is implemented. Lyrics are never '
-      + 'transcribed on this device.',
+    reason: 'No language detector is implemented anywhere in the app. '
+      + 'Lyrics are never transcribed on this device, and an artist or '
+      + 'file name is not evidence of a language.',
   },
-  { feature: 'genre', reason: 'No genre classifier is implemented.' },
-  { feature: 'tags', reason: 'No music tagger is implemented.' },
+  {
+    feature: 'genre',
+    reason: 'Not produced by the embedding. A separate experimental '
+      + 'semantic model predicts genre.',
+    handledBy: 'semantic-provider',
+  },
+  {
+    feature: 'tags',
+    reason: 'Not produced by the embedding. A semantic tagging head '
+      + 'exists but its official label vocabulary could not be '
+      + 'retrieved, so it is disabled rather than guessed at.',
+  },
   {
     feature: 'vocalInstrumental',
-    reason: 'No vocal/instrumental detector is implemented.',
+    reason: 'Not produced by the embedding. A separate experimental '
+      + 'semantic model predicts vocal versus instrumental.',
+    handledBy: 'semantic-provider',
   },
   { feature: 'danceability', reason: 'No danceability model is implemented.' },
   { feature: 'acousticness', reason: 'No acousticness model is implemented.' },
@@ -80,7 +116,8 @@ export const UNSUPPORTED_SEMANTICS: readonly UnsupportedFeature[] = [
     feature: 'contextSuitability',
     reason: 'Driving/workout/study/relaxing suitability needs a trained '
       + 'model or a validated rule set. Neither exists, and guessing '
-      + 'from tempo alone would be a fabricated recommendation.',
+      + 'from tempo or from a predicted mood would be a fabricated '
+      + 'recommendation.',
   },
 ] as const
 

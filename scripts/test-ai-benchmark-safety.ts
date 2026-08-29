@@ -251,11 +251,37 @@ ok('the Kotlin source tree was found', kotlinFiles.length > 0,
 const dbFiles = kotlinFiles.filter(f => /MusicLibraryDatabase\.kt$/.test(f))
 ok('the Room database source was found', dbFiles.length > 0)
 
+// The original assertion froze the version at 2. That was a proxy for
+// the real rule and it broke the moment a LATER phase added its own
+// table — which is permitted. Phase 28 went to 3, Phase 29 to 4, and
+// neither touched Phase 13.
+//
+// What must actually hold: Phase 13's own tables keep their shape, and
+// no migration is destructive. Assert that directly.
 for (const file of dbFiles) {
   const source = readFileSync(file, 'utf8')
+  const label = file.replace(`${root}/`, '')
+
   const versionMatch = /version\s*=\s*(\d+)/.exec(source)
-  ok(`${file.replace(`${root}/`, '')}: schema version is valid`,
-    versionMatch?.[1] === '2' || versionMatch?.[1] === '3', `found version ${versionMatch?.[1] ?? 'none'}`)
+  const version = Number(versionMatch?.[1] ?? 0)
+  ok(`${label}: schema version is declared`, Number.isFinite(version) && version >= 2,
+    `found ${versionMatch?.[1] ?? 'none'}`)
+
+  // Phase 13's tables must still be registered.
+  ok(`${label}: the Phase 13 track entity is still registered`,
+    /TrackEntity::class/.test(source))
+  ok(`${label}: the Phase 13 analysis entity is still registered`,
+    /AudioAnalysisEntity::class/.test(source))
+
+  // No migration may destroy Phase 13 data.
+  ok(`${label}: destructive migration is not enabled`,
+    !/fallbackToDestructiveMigration/.test(source))
+  ok(`${label}: no migration drops the tracks table`,
+    !/DROP TABLE[^\n]*`?tracks`?/i.test(source))
+  ok(`${label}: no migration drops the analysis table`,
+    !/DROP TABLE[^\n]*song_analysis/i.test(source))
+  ok(`${label}: schema export stays on so migrations stay reviewable`,
+    /exportSchema = true/.test(source))
 }
 
 // The Phase 13 five-minute window must be intact.

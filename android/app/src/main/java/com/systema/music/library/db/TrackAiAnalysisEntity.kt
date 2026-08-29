@@ -128,6 +128,20 @@ data class TrackAiAnalysisEntity(
     @ColumnInfo(name = "labelEnergy") val labelEnergy: String?,
     @ColumnInfo(name = "labelContexts") val labelContexts: String?,
     @ColumnInfo(name = "labelNotes") val labelNotes: String?,
+
+    /**
+     * Phase 29 model predictions, as a JSON document.
+     *
+     * A JSON column rather than exploded columns because the shape is a
+     * variable-length ranked list per classifier head — a relational
+     * encoding would need a second table and a join for data nothing
+     * queries by. Null for rows analysed before Phase 29, and null is
+     * the honest value: those rows genuinely have no prediction.
+     *
+     * NOT a label. Label columns above are human-authored; this is
+     * model output and the two are never merged.
+     */
+    @ColumnInfo(name = "semanticJson") val semanticJson: String?,
     @ColumnInfo(name = "labelledAt") val labelledAt: Long?,
     /** 0 = never labelled by a human. */
     @ColumnInfo(name = "labelRevision") val labelRevision: Int,

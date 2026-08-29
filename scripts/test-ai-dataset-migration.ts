@@ -67,6 +67,7 @@ function extractMigration(name: string, from: number, to: number): string[] {
 
 const mig12 = extractMigration('MIGRATION_1_2', 1, 2)
 const mig23 = extractMigration('MIGRATION_2_3', 2, 3)
+const mig34 = extractMigration('MIGRATION_3_4', 3, 4)
 
 // =====================================================================
 section('1. The migration SQL was extracted and is scoped')
@@ -139,6 +140,62 @@ try {
 
   ok('the dataset table now exists',
     (db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='track_ai_analysis'").get() as { n: number }).n === 1)
+}
+
+// =====================================================================
+section('2b. The 3 -> 4 migration adds semantics without losing data')
+{
+  // Populate the v3 table with a HAND-MADE label before upgrading. The
+  // question this answers is the only one that matters to a user with
+  // an installed app: does upgrading destroy work I cannot recreate?
+  db.exec(`
+    INSERT INTO track_ai_analysis (
+      id, schemaVersion, trackId, analyzerVersion, experimental,
+      labelMoods, labelVocal, labelRevision, status, createdAt, updatedAt
+    ) VALUES (
+      'rec-v3', 1, 'ms:1', 1, 1, '["melancholic"]', 'vocal', 3,
+      'COMPLETED', 100, 100
+    )
+  `)
+  const before = db.prepare(
+    'SELECT labelMoods, labelVocal, labelRevision FROM track_ai_analysis WHERE id = ?',
+  ).get('rec-v3') as { labelMoods: string, labelVocal: string, labelRevision: number }
+
+  ok('MIGRATION_3_4 statements were found', mig34.length >= 1, `found ${mig34.length}`)
+  ok('it is a single statement — nothing to go half-applied', mig34.length === 1)
+  ok('it is an ALTER, not a rebuild', /ALTER TABLE/i.test(mig34[0] ?? ''))
+
+  let err: string | null = null
+  try {
+    for (const st of mig34) db.exec(st)
+  } catch (e) {
+    err = (e as Error).message
+  }
+  ok('the 3 -> 4 migration executes without error', err === null, err ?? '')
+
+  const cols = (db.prepare('PRAGMA table_info(track_ai_analysis)').all() as { name: string }[])
+    .map(c => c.name)
+  ok('the semanticJson column now exists', cols.includes('semanticJson'))
+
+  const after = db.prepare(
+    'SELECT labelMoods, labelVocal, labelRevision, semanticJson FROM track_ai_analysis WHERE id = ?',
+  ).get('rec-v3') as typeof before & { semanticJson: string | null }
+
+  ok('the pre-existing row survived the upgrade', after !== undefined)
+  ok('hand-made mood labels survived', after.labelMoods === before.labelMoods)
+  ok('hand-made vocal label survived', after.labelVocal === before.labelVocal)
+  ok('label revision survived', after.labelRevision === before.labelRevision)
+  // NULL is the truthful value for a row analysed before any semantic
+  // model existed. A default of '{}' would fake an empty prediction.
+  ok('the new column is NULL for old rows, not a fabricated blank',
+    after.semanticJson === null)
+
+  ok('tracks are still intact after two migrations',
+    (db.prepare('SELECT COUNT(*) AS n FROM tracks').get() as { n: number }).n === 2)
+  ok('DSP analysis is still intact after two migrations',
+    (db.prepare('SELECT bpm FROM song_analysis WHERE trackId = ?').get('ms:1') as { bpm: number }).bpm === 78.4)
+
+  db.exec("DELETE FROM track_ai_analysis WHERE id = 'rec-v3'")
 }
 
 // =====================================================================

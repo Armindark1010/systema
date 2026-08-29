@@ -16,6 +16,13 @@
 import { reactive } from 'vue'
 
 import { createProvider } from '~/services/ai-similarity/index'
+import { createMusicSemanticProvider } from '~/services/music-semantics'
+import {
+  cachedSemanticFor,
+  persistSemanticToDataset,
+  toStoredSemantic,
+} from '~/services/ai-dataset/semanticBridge'
+import type { SemanticAnalysis } from '~/services/ai-dataset/semanticRecord'
 import type {
   TrackAnalysisFailureRecord,
   TrackAnalysisRecord,
@@ -38,6 +45,13 @@ const saveWarnings = reactive(new Map<string, string>())
 /** Tracks whose displayed result came from storage rather than a run. */
 const cacheHits = reactive(new Set<string>())
 
+/** Phase 29 semantic predictions, keyed by track id. */
+const semantics = reactive(new Map<string, SemanticAnalysis>())
+/** Why semantic analysis is unavailable for a track. Shown, not hidden. */
+const semanticNotes = reactive(new Map<string, string>())
+/** True when the semantic result came from the database, not a fresh run. */
+const semanticCacheHits = reactive(new Set<string>())
+
 /**
  * Tracks with a request in flight.
  *
@@ -49,6 +63,9 @@ const inFlight = new Set<string>()
 
 /** Resets everything. Test seam only. */
 export function __resetAiAnalysis(): void {
+  semantics.clear()
+  semanticNotes.clear()
+  semanticCacheHits.clear()
   states.clear()
   results.clear()
   failures.clear()
@@ -199,6 +216,13 @@ export function useTrackAiAnalysis() {
           const stored = await persistAnalysisToDataset(outcome.record, track, dspFeatures)
           if (!stored.ok && stored.error) saveWarnings.set(id, stored.error)
         }
+
+        // Phase 29: semantic classification, in the same Analyze press.
+        // Runs AFTER the embedding row exists, because predictions are
+        // written onto that row. Wrapped so that a semantic failure —
+        // the expected state until the models are installed — never
+        // affects the embedding result the user is already looking at.
+        await runSemantic(id, track, outcome.record.model, force)
       } else {
         failures.set(id, outcome.failure)
         states.set(id, 'failed')
@@ -219,6 +243,93 @@ export function useTrackAiAnalysis() {
     }
   }
 
+  /**
+   * Runs semantic classification for one track.
+   *
+   * Cache policy, per the phase brief:
+   *   · same model + version  -> reuse the stored prediction
+   *   · RE-RUN (force)        -> bypass the cache
+   *   · model version changed -> stored result is not reused
+   *
+   * The cache is the dataset row itself, not a second store, so there
+   * is nothing that can disagree with the database.
+   *
+   * Never throws and never sets a failure state: semantic analysis is
+   * additive. When it cannot run, the sheet says so and the embedding
+   * result stands on its own.
+   */
+  async function runSemantic(
+    id: string,
+    track: AudioInput,
+    embeddingModel: { id: string, version: string },
+    force: boolean,
+  ): Promise<void> {
+    semanticNotes.delete(id)
+    semanticCacheHits.delete(id)
+
+    const provider = createMusicSemanticProvider()
+    if (!provider) {
+      semanticNotes.set(id, 'No semantic model provider is configured on this build.')
+      return
+    }
+
+    try {
+      const status = await provider.status()
+
+      if (!force && status.model && status.modelVersion) {
+        const cached = await cachedSemanticFor(
+          id,
+          embeddingModel.id,
+          embeddingModel.version,
+          ANALYZER_VERSION,
+          status.model,
+          status.modelVersion,
+        )
+        if (cached) {
+          semantics.set(id, cached)
+          semanticCacheHits.add(id)
+          return
+        }
+      }
+
+      if (!status.ready) {
+        // The expected state today. Reported as a plain explanation
+        // rather than an error, because nothing is broken — a
+        // documented setup step has not been done.
+        semantics.delete(id)
+        semanticNotes.set(id, status.detail ?? 'The semantic model is not ready.')
+        return
+      }
+
+      const outcome = await provider.analyze({
+        trackId: id,
+        uri: track.uri,
+        title: track.title,
+      })
+
+      if (!outcome.ok) {
+        semantics.delete(id)
+        semanticNotes.set(id, outcome.message)
+        return
+      }
+
+      const stored = await persistSemanticToDataset(
+        outcome.result,
+        embeddingModel.id,
+        embeddingModel.version,
+        ANALYZER_VERSION,
+      )
+
+      // Display the live result whether or not the write succeeded, but
+      // never claim it was saved when it was not.
+      semantics.set(id, toStoredSemantic(outcome.result))
+      if (!stored.ok && stored.error) semanticNotes.set(id, stored.error)
+    } catch (e) {
+      semantics.delete(id)
+      semanticNotes.set(id, (e as Error)?.message ?? 'Semantic analysis failed.')
+    }
+  }
+
   /** Clears one track's in-memory state so it can be re-analysed. */
   function reset(trackId: string | null | undefined): void {
     if (!trackId) return
@@ -227,9 +338,28 @@ export function useTrackAiAnalysis() {
     failures.delete(trackId)
     saveWarnings.delete(trackId)
     cacheHits.delete(trackId)
+    semantics.delete(trackId)
+    semanticNotes.delete(trackId)
+    semanticCacheHits.delete(trackId)
+  }
+
+  function semanticFor(trackId: string | null | undefined): SemanticAnalysis | null {
+    return trackId ? semantics.get(trackId) ?? null : null
+  }
+
+  /** Why semantics are unavailable for this track, or null. */
+  function semanticNoteFor(trackId: string | null | undefined): string | null {
+    return trackId ? semanticNotes.get(trackId) ?? null : null
+  }
+
+  function semanticFromCache(trackId: string | null | undefined): boolean {
+    return trackId ? semanticCacheHits.has(trackId) : false
   }
 
   return {
+    semanticFor,
+    semanticNoteFor,
+    semanticFromCache,
     analyze,
     hydrate,
     stateFor,

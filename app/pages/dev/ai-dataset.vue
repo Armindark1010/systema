@@ -28,6 +28,14 @@ import { useAiDataset, useLabelDraft } from '~/composables/useAiDataset'
 import type { DatasetRecord } from '~/services/ai-dataset/datasetRecord'
 import { exportCsv, exportJson } from '~/services/ai-dataset/datasetExport'
 import { allRecords } from '~/services/ai-dataset/datasetService'
+import type { SemanticAnalysis } from '~/services/ai-dataset/semanticRecord'
+import { topFor, topNFor } from '~/services/ai-dataset/semanticRecord'
+import {
+  MOOD_LABEL_MAPPING,
+  VOCAL_LABEL_MAPPING,
+  computeCoverage,
+  evaluateField,
+} from '~/services/ai-dataset/semanticEvaluation'
 import { exportToDevice } from '~/services/ai-dataset/nativeGateway'
 import {
   CONTEXT_VALUES,
@@ -153,6 +161,63 @@ async function onExportCsv() {
 const selectedQuality = computed(() =>
   selected.value ? dataset.quality(selected.value) : null)
 
+/**
+ * Model-vs-human evaluation.
+ *
+ * Reads from every record, not the current page, because a metric
+ * computed over one page of 25 would change as you paginate.
+ */
+const semanticOf = (r: DatasetRecord) => r.semantic
+const moodEval = computed(() =>
+  evaluateField(dataset.allRows.value, semanticOf, MOOD_LABEL_MAPPING))
+const vocalEval = computed(() =>
+  evaluateField(dataset.allRows.value, semanticOf, VOCAL_LABEL_MAPPING))
+const moodCoverage = computed(() =>
+  computeCoverage(dataset.allRows.value, semanticOf, MOOD_LABEL_MAPPING))
+const vocalCoverage = computed(() =>
+  computeCoverage(dataset.allRows.value, semanticOf, VOCAL_LABEL_MAPPING))
+
+/** Paired metric + coverage per evaluated field, for the panel. */
+const evaluations = computed(() => [
+  { k: 'Mood', e: moodEval.value, c: moodCoverage.value },
+  { k: 'Vocal / Instrumental', e: vocalEval.value, c: vocalCoverage.value },
+])
+
+/**
+ * The prediction fields shown as table columns, in §9's order.
+ *
+ * `tags` is included even though no usable tagging head exists today:
+ * the column renders "n/a", which is the honest state. Hiding it would
+ * make a missing capability invisible.
+ */
+const SEMANTIC_COLUMNS = ['mood', 'genre', 'tags', 'vocalInstrumental'] as const
+
+/**
+ * Highest score the model emitted for a track, across all heads.
+ *
+ * Deliberately a max and not a mean: averaging 56 mostly-near-zero
+ * sigmoid outputs would produce a number that looks like a confidence
+ * and means nothing.
+ */
+function peakConfidence(s: SemanticAnalysis): number | null {
+  let best: number | null = null
+  for (const h of s.heads) {
+    for (const p of h.predictions) {
+      if (best === null || p.score > best) best = p.score
+    }
+  }
+  return best
+}
+
+/** Rows carrying any model prediction. */
+const semanticCount = computed(() =>
+  dataset.allRows.value.filter(r => r.semantic !== null).length)
+
+function pct(v: number | null | undefined): string {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return DASH
+  return `${(v * 100).toFixed(1)}%`
+}
+
 /** Distribution rows for the imbalance panel. */
 function distRows(d: { counts: Record<string, number>, unlabelled: number }) {
   return Object.entries(d.counts).map(([k, v]) => ({ label: k, count: v }))
@@ -263,6 +328,96 @@ function distRows(d: { counts: Record<string, number>, unlabelled: number }) {
       <!-- ---------------------------------------------------------- -->
       <section class="border border-line bg-surface">
         <div class="border-b border-line px-5 py-3">
+          <p class="label text-fg-muted">MODEL EVALUATION</p>
+          <p class="mt-2 text-small text-fg-muted max-w-[80ch] leading-relaxed">
+            Model predictions scored against human labels. Multi-label fields
+            use per-example precision/recall/F1, not accuracy: on 56 mostly-absent
+            mood tags a model that predicts nothing would score about 95%
+            accuracy and have learned nothing.
+          </p>
+
+          <div class="mt-4 grid gap-3 sm:grid-cols-2">
+            <div
+              v-for="ev in evaluations"
+              :key="ev.k"
+              class="border border-line px-4 py-3"
+            >
+              <p class="label text-fg-muted">{{ ev.k }}</p>
+
+              <p class="mt-1 text-small text-fg-faint tnum">
+                {{ ev.c.analysed }} analysed ·
+                {{ ev.c.labelled }} labelled ·
+                {{ ev.c.evaluable }} evaluable ·
+                coverage {{ pct(ev.c.coverage) }}
+              </p>
+
+              <p
+                v-if="ev.e.kind === 'insufficient'"
+                class="mt-2 text-small text-fg-muted"
+              >
+                {{ ev.e.message }}
+                ({{ ev.e.samples }}/{{ ev.e.required }})
+              </p>
+
+              <div v-else-if="ev.e.kind === 'multi-label'" class="mt-2 text-small tnum">
+                <p>Precision {{ pct(ev.e.precision) }}</p>
+                <p>Recall {{ pct(ev.e.recall) }}</p>
+                <p>F1 {{ pct(ev.e.f1) }}</p>
+                <p>Top-1 hit {{ pct(ev.e.topOneHit) }}</p>
+                <p>Top-3 hit {{ pct(ev.e.topThreeHit) }}</p>
+                <p class="text-fg-faint">
+                  n={{ ev.e.samples }} · threshold {{ ev.e.threshold }}
+                </p>
+              </div>
+
+              <div v-else class="mt-2 text-small tnum">
+                <p>Top-1 accuracy {{ pct(ev.e.topOneAccuracy) }}</p>
+                <p class="text-fg-faint">n={{ ev.e.samples }}</p>
+
+                <!-- Confusion breakdown. Only meaningful for a
+                     mutually-exclusive head, which is why it appears
+                     here and not in the multi-label branch. Shows where
+                     the model over- and under-predicts, which a single
+                     accuracy figure hides entirely. -->
+                <table class="mt-3 w-full text-small">
+                  <thead>
+                    <tr class="text-fg-faint border-b border-line">
+                      <th class="text-left font-normal py-1">Class</th>
+                      <th class="text-right font-normal py-1">Actual</th>
+                      <th class="text-right font-normal py-1">Predicted</th>
+                      <th class="text-right font-normal py-1">Correct</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="(c, label) in ev.e.confusion"
+                      :key="label"
+                      class="border-b border-line/50"
+                    >
+                      <td class="py-1 text-fg">{{ label }}</td>
+                      <td class="py-1 text-right text-fg-muted">{{ c.actual }}</td>
+                      <td class="py-1 text-right text-fg-muted">{{ c.predicted }}</td>
+                      <td class="py-1 text-right text-fg-muted">{{ c.correct }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p class="mt-1 text-fg-faint">
+                  Predicted much higher than actual means the model
+                  over-applies that class.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <p class="mt-3 text-small text-fg-faint max-w-[80ch] leading-relaxed">
+            Human labels are mapped onto the model's own vocabulary before
+            comparison. Unmappable labels
+            ({{ MOOD_LABEL_MAPPING.unmappable.join(', ') }}) are excluded rather
+            than counted as misses — the model has no equivalent tag for them.
+          </p>
+        </div>
+
+        <div class="border border-line bg-surface px-5 py-4">
           <p class="label text-fg-muted">LABEL DISTRIBUTION</p>
         </div>
         <p class="px-5 pt-4 text-small text-fg-muted max-w-[76ch] leading-relaxed">
@@ -390,6 +545,23 @@ function distRows(d: { counts: Record<string, number>, unlabelled: number }) {
         <div class="overflow-x-auto border-t border-line">
           <table class="w-full text-small">
             <thead>
+              <!-- Provenance banding. The single most important thing this
+                   table communicates is WHICH VALUES A HUMAN WROTE. Column
+                   names alone were not enough once model columns appeared
+                   next to identically-named human ones. -->
+              <tr class="border-b border-line text-fg-faint">
+                <th class="px-4 py-2" />
+                <th class="text-left font-normal px-4 py-2 label" colspan="6">
+                  HUMAN LABELS
+                </th>
+                <th
+                  class="text-left font-normal px-4 py-2 label bg-base/40 border-x border-line"
+                  colspan="6"
+                >
+                  MODEL PREDICTION · EXPERIMENTAL
+                </th>
+                <th class="px-4 py-2" colspan="5" />
+              </tr>
               <tr class="border-b border-line text-fg-faint">
                 <th class="text-left font-normal px-4 py-2">Track</th>
                 <th class="text-left font-normal px-4 py-2">Language</th>
@@ -398,6 +570,12 @@ function distRows(d: { counts: Record<string, number>, unlabelled: number }) {
                 <th class="text-left font-normal px-4 py-2">Vocal</th>
                 <th class="text-left font-normal px-4 py-2">Energy</th>
                 <th class="text-left font-normal px-4 py-2">Contexts</th>
+                <th class="text-left font-normal px-4 py-2 bg-base/40 border-l border-line">Model</th>
+                <th class="text-left font-normal px-4 py-2 bg-base/40">Mood</th>
+                <th class="text-left font-normal px-4 py-2 bg-base/40">Genre</th>
+                <th class="text-left font-normal px-4 py-2 bg-base/40">Tags</th>
+                <th class="text-left font-normal px-4 py-2 bg-base/40">Vocal</th>
+                <th class="text-left font-normal px-4 py-2 bg-base/40 border-r border-line">Confidence</th>
                 <th class="text-left font-normal px-4 py-2">Analysis</th>
                 <th class="text-left font-normal px-4 py-2">Embedding</th>
                 <th class="text-left font-normal px-4 py-2">Complete</th>
@@ -407,10 +585,10 @@ function distRows(d: { counts: Record<string, number>, unlabelled: number }) {
             </thead>
             <tbody>
               <tr v-if="dataset.loading.value">
-                <td colspan="12" class="px-4 py-6 text-fg-faint">Loading…</td>
+                <td colspan="18" class="px-4 py-6 text-fg-faint">Loading…</td>
               </tr>
               <tr v-else-if="!dataset.rows.value.length">
-                <td colspan="12" class="px-4 py-6 text-fg-faint">
+                <td colspan="18" class="px-4 py-6 text-fg-faint">
                   No records yet. Analyse a track from the Full Player.
                 </td>
               </tr>
@@ -435,6 +613,41 @@ function distRows(d: { counts: Record<string, number>, unlabelled: number }) {
                 <td class="px-4 py-3 text-fg-muted">{{ r.groundTruth.energy ?? DASH }}</td>
                 <td class="px-4 py-3 text-fg-muted">
                   {{ r.groundTruth.contexts.length ? r.groundTruth.contexts.join(', ') : DASH }}
+                </td>
+                <!-- MODEL region. Banded background, top-1 per field.
+                     A field the model cannot produce shows an explicit
+                     "n/a" rather than a dash, so "no prediction" and
+                     "cannot predict" stay distinguishable. -->
+                <td class="px-4 py-3 text-fg-muted bg-base/40 border-l border-line">
+                  <template v-if="r.semantic">
+                    <span class="text-fg-muted">{{ r.semantic.model }}</span>
+                    <span class="block text-fg-faint tnum">v{{ r.semantic.modelVersion }}</span>
+                  </template>
+                  <span v-else>{{ DASH }}</span>
+                </td>
+                <td
+                  v-for="f in SEMANTIC_COLUMNS"
+                  :key="f"
+                  class="px-4 py-3 text-fg-muted bg-base/40"
+                >
+                  <template v-if="r.semantic">
+                    <template v-if="topFor(r.semantic, f)">
+                      <span class="text-fg">{{ topFor(r.semantic, f)?.label }}</span>
+                      <span class="block text-fg-faint tnum">
+                        {{ pct(topFor(r.semantic, f)?.score) }}
+                      </span>
+                    </template>
+                    <span v-else class="text-fg-faint" title="This model has no head for this field">
+                      n/a
+                    </span>
+                  </template>
+                  <span v-else>{{ DASH }}</span>
+                </td>
+                <!-- Confidence = the strongest score the model emitted for
+                     this track across every head. A summary, never a
+                     substitute for the per-field scores beside it. -->
+                <td class="px-4 py-3 text-fg-muted tnum bg-base/40 border-r border-line">
+                  {{ r.semantic ? pct(peakConfidence(r.semantic)) : DASH }}
                 </td>
                 <td class="px-4 py-3 text-fg-muted">
                   {{ r.status }}<span v-if="r.supersededAt" class="text-fg-faint"> · old</span>
@@ -520,6 +733,91 @@ function distRows(d: { counts: Record<string, number>, unlabelled: number }) {
           </div>
           <button class="sys-btn-outline shrink-0" @click="closeRecord">CLOSE</button>
         </div>
+
+        <!-- MODEL PREDICTIONS. Complete ranked output, not a top-k
+             slice: this view is the evaluation surface. -->
+        <section v-if="selected.semantic" class="border border-line bg-surface">
+          <div class="border-b border-line px-5 py-3 flex items-center gap-3 flex-wrap">
+            <p class="label text-fg-muted">SEMANTIC PREDICTION · MODEL OUTPUT</p>
+            <span class="label text-fg-faint">EXPERIMENTAL</span>
+          </div>
+
+          <div class="px-5 py-4">
+            <p class="text-small text-fg-muted max-w-[80ch] leading-relaxed">
+              Produced by a model, not by a human. These values are never
+              treated as ground truth and are never copied into the labels
+              below. Scores are the model's raw output, uncalibrated.
+            </p>
+
+            <p class="mt-3 text-small text-fg-faint tnum">
+              {{ selected.semantic.model }} v{{ selected.semantic.modelVersion }}
+              · analyzer v{{ selected.semantic.analyzerVersion }}
+              · {{ selected.semantic.sampleRate ?? DASH }} Hz
+              · {{ selected.semantic.inferenceMs ?? DASH }} ms
+              · {{ selected.semantic.analyzedAt }}
+            </p>
+
+            <div
+              v-for="h in selected.semantic.heads"
+              :key="h.head"
+              class="mt-4 border border-line"
+            >
+              <div class="border-b border-line px-4 py-2 flex justify-between gap-3 flex-wrap">
+                <span class="label text-fg-muted">{{ h.field }}</span>
+                <span class="text-small text-fg-faint tnum">
+                  {{ h.head }} v{{ h.headVersion }} ·
+                  {{ h.activation }} ·
+                  {{ h.multiLabel ? 'multi-label' : 'single-label' }} ·
+                  {{ h.classCount }} classes
+                </span>
+              </div>
+
+              <div class="px-4 py-3">
+                <p class="label text-fg-faint">TOP 10</p>
+                <div
+                  v-for="p in topNFor(selected.semantic, h.field, 10)"
+                  :key="`${h.head}-${p.label}`"
+                  class="flex justify-between gap-4 py-1 text-small"
+                >
+                  <span class="text-fg">{{ p.label }}</span>
+                  <span class="text-fg-muted tnum">{{ pct(p.score) }}</span>
+                </div>
+
+                <!-- The complete list, for debugging and evaluation.
+                     Collapsed because 56 rows is unreadable by default,
+                     present because the tail is the data. -->
+                <details class="mt-3">
+                  <summary class="text-small text-fg-muted cursor-pointer">
+                    Raw output — all {{ h.predictions.length }} classes
+                  </summary>
+                  <div
+                    v-for="p in h.predictions"
+                    :key="`raw-${h.head}-${p.label}`"
+                    class="flex justify-between gap-4 py-0.5 text-small"
+                  >
+                    <span class="text-fg-muted">{{ p.label }}</span>
+                    <span class="text-fg-faint tnum">{{ p.score.toFixed(6) }}</span>
+                  </div>
+                </details>
+              </div>
+            </div>
+
+            <details
+              v-if="selected.semantic.unsupported.length"
+              class="mt-4"
+            >
+              <summary class="text-small text-fg-muted cursor-pointer">
+                Fields this model cannot produce
+                ({{ selected.semantic.unsupported.length }})
+              </summary>
+              <ul class="mt-2 text-small text-fg-faint leading-relaxed">
+                <li v-for="u in selected.semantic.unsupported" :key="u.field">
+                  <strong class="text-fg-muted">{{ u.field }}</strong> — {{ u.reason }}
+                </li>
+              </ul>
+            </details>
+          </div>
+        </section>
 
         <!-- Measurements: what the machine actually knows. -->
         <section class="border border-line bg-surface">

@@ -21,6 +21,8 @@ import type {
   TrackAnalysisFailureRecord,
   TrackAnalysisRecord,
 } from '~/services/ai-similarity/trackAnalysis'
+import type { SemanticAnalysis } from '~/services/ai-dataset/semanticRecord'
+import { topNFor } from '~/services/ai-dataset/semanticRecord'
 
 const props = defineProps<{
   state: AiAnalysisState
@@ -28,12 +30,43 @@ const props = defineProps<{
   failure: TrackAnalysisFailureRecord | null
   saveWarning?: string | null
   fromCache?: boolean
+  /** Phase 29 model predictions. Null when none have been produced. */
+  semantic?: SemanticAnalysis | null
+  /** Why semantics are unavailable. Shown rather than hidden. */
+  semanticNote?: string | null
+  semanticFromCache?: boolean
 }>()
 
 const emit = defineEmits<{ analyze: [force: boolean] }>()
 
 const isAnalyzing = computed(() => props.state === 'analyzing')
 const hasResult = computed(() => props.state === 'done' && props.result !== null)
+
+/**
+ * Top predictions per field, for display only.
+ *
+ * The COMPLETE ranked output stays in the dataset — this slice exists
+ * because a 56-row list in a player sheet is unreadable, not because
+ * the rest is disposable. /dev/ai-dataset shows every class.
+ */
+const SHEET_TOP_N = 5
+
+const moodPredictions = computed(() => topNFor(props.semantic, 'mood', SHEET_TOP_N))
+const genrePredictions = computed(() => topNFor(props.semantic, 'genre', SHEET_TOP_N))
+const tagPredictions = computed(() => topNFor(props.semantic, 'tags', SHEET_TOP_N))
+const vocalPredictions = computed(() =>
+  topNFor(props.semantic, 'vocalInstrumental', 2))
+
+const hasSemantic = computed(() =>
+  Boolean(props.semantic && props.semantic.heads.length > 0))
+
+/** Fields the model could not produce, with the reason. */
+const semanticUnsupported = computed(() => props.semantic?.unsupported ?? [])
+
+/** Score as a percentage string. The raw value is never discarded. */
+function pct(score: number): string {
+  return `${Math.round(score * 100)}%`
+}
 
 /** A dash, never a plausible-looking placeholder. */
 const DASH = '—'
@@ -144,6 +177,76 @@ const analysedAt = computed(() => {
         </div>
       </dl>
 
+      <!-- Phase 29 semantic predictions. MODEL OUTPUT, never ground
+           truth, and never shown without its score. -->
+      <div v-if="hasSemantic" class="ai-semantic">
+        <div class="ai-semantic-head">
+          <span class="ai-semantic-title">SEMANTIC</span>
+          <span class="ai-analysis-tag">EXPERIMENTAL</span>
+        </div>
+
+        <p class="ai-semantic-caption">
+          Predicted by a model, not verified. These are not your labels.
+        </p>
+
+        <div v-if="moodPredictions.length" class="ai-semantic-group">
+          <p class="ai-semantic-label">MOOD</p>
+          <div v-for="p in moodPredictions" :key="`mood-${p.label}`" class="ai-semantic-row">
+            <span class="ai-semantic-name">{{ p.label }}</span>
+            <span class="ai-semantic-score tnum">{{ pct(p.score) }}</span>
+          </div>
+        </div>
+
+        <div v-if="genrePredictions.length" class="ai-semantic-group">
+          <p class="ai-semantic-label">GENRE</p>
+          <div v-for="p in genrePredictions" :key="`genre-${p.label}`" class="ai-semantic-row">
+            <span class="ai-semantic-name">{{ p.label }}</span>
+            <span class="ai-semantic-score tnum">{{ pct(p.score) }}</span>
+          </div>
+        </div>
+
+        <div v-if="tagPredictions.length" class="ai-semantic-group">
+          <p class="ai-semantic-label">TAGS</p>
+          <div v-for="p in tagPredictions" :key="`tag-${p.label}`" class="ai-semantic-row">
+            <span class="ai-semantic-name">{{ p.label }}</span>
+            <span class="ai-semantic-score tnum">{{ pct(p.score) }}</span>
+          </div>
+        </div>
+
+        <div v-if="vocalPredictions.length" class="ai-semantic-group">
+          <p class="ai-semantic-label">VOCAL / INSTRUMENTAL</p>
+          <div v-for="p in vocalPredictions" :key="`voc-${p.label}`" class="ai-semantic-row">
+            <span class="ai-semantic-name">{{ p.label }}</span>
+            <span class="ai-semantic-score tnum">{{ pct(p.score) }}</span>
+          </div>
+        </div>
+
+        <div class="ai-semantic-meta">
+          <span>{{ semantic?.model }} v{{ semantic?.modelVersion }}</span>
+          <span v-if="semantic?.inferenceMs != null" class="tnum">
+            {{ semantic.inferenceMs }} ms
+          </span>
+          <span v-if="semanticFromCache">saved result</span>
+        </div>
+
+        <details v-if="semanticUnsupported.length" class="ai-unsupported">
+          <summary class="ai-unsupported-summary">
+            Model cannot produce ({{ semanticUnsupported.length }})
+          </summary>
+          <ul class="ai-unsupported-list">
+            <li v-for="u in semanticUnsupported" :key="`su-${u.field}`">
+              <strong>{{ u.field }}</strong> — {{ u.reason }}
+            </li>
+          </ul>
+        </details>
+      </div>
+
+      <!-- Why there is no mood/genre section. A plain statement beats an
+           empty panel that looks like a loading bug. -->
+      <p v-else-if="semanticNote" class="ai-semantic-note">
+        {{ semanticNote }}
+      </p>
+
       <!-- The honest gap. Not decoration: this is why the panel has no
            Mood or Language row. -->
       <details v-if="result?.unsupported?.length" class="ai-unsupported">
@@ -238,6 +341,69 @@ const analysedAt = computed(() => {
   border-radius: 0.25rem;
   border: 1px solid var(--line, rgba(255, 255, 255, 0.14));
   color: var(--fg-faint, rgba(255, 255, 255, 0.5));
+}
+
+.ai-semantic {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--player-line, rgba(255, 255, 255, 0.08));
+}
+.ai-semantic-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-semantic-title {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  opacity: 0.75;
+}
+.ai-semantic-caption {
+  margin: 6px 0 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  opacity: 0.6;
+}
+.ai-semantic-group {
+  margin-bottom: 10px;
+}
+.ai-semantic-label {
+  margin: 0 0 4px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  opacity: 0.55;
+}
+.ai-semantic-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+.ai-semantic-name {
+  opacity: 0.9;
+}
+.ai-semantic-score {
+  /* Not 0.65: that literal is a forbidden similarity threshold and a
+     source guard greps for it. A visual value is not worth weakening
+     the guard, so this is 0.66. */
+  opacity: 0.66;
+}
+.ai-semantic-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 10px;
+  opacity: 0.55;
+}
+.ai-semantic-note {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--player-line, rgba(255, 255, 255, 0.08));
+  font-size: 11px;
+  line-height: 1.55;
+  opacity: 0.6;
 }
 
 .ai-unsupported {

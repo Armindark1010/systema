@@ -120,6 +120,13 @@ export function useAiDataset() {
     pageCount,
     overview,
     distributions,
+    /**
+     * Every record, not just the current page.
+     *
+     * Evaluation metrics must be computed over the whole dataset — a
+     * figure that changed as you paginated would be worse than useless.
+     */
+    allRows: computed(() => everything.value),
     /** False when writes are not being persisted. The UI must warn. */
     durable: computed(() => isDatasetDurable()),
     /**

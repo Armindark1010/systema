@@ -50,3 +50,9 @@ scripts/phase19/**/teacher_cache/
 # Python bytecode from the Phase 19 offline pipeline
 __pycache__/
 *.pyc
+
+# Phase 29 semantic model weights.
+# ~90 MB of CC BY-NC-SA (non-commercial) binaries fetched by
+# scripts/phase29/fetch-and-convert-models.sh. Developer tooling output,
+# not source: re-fetchable, licence-encumbered, and far too large.
+build/phase29-models/

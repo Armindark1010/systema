@@ -61,7 +61,16 @@ section('1. Entity and migration describe the SAME table')
   ok('the migration creates the table', createMatch !== null)
   const create = createMatch?.[1] ?? ''
 
-  const missing = cols.filter(c => !new RegExp(`\`${c}\``).test(create))
+  // Columns added by a later ALTER TABLE are legitimately absent from
+  // the v3 CREATE TABLE — that statement must keep describing v3
+  // forever. Collect them so parity is checked against the CURRENT
+  // schema (create + alters), not against v3 alone.
+  const altered = [...database.matchAll(
+    /ALTER TABLE `track_ai_analysis` ADD COLUMN `([a-zA-Z0-9_]+)`/g)].map(m => m[1]!)
+  const reachable = (c: string) =>
+    new RegExp(`\`${c}\``).test(create) || altered.includes(c)
+
+  const missing = cols.filter(c => !reachable(c))
   ok('every entity column exists in the migration', missing.length === 0,
     missing.length ? `missing: ${missing.join(', ')}` : '')
 
@@ -70,7 +79,7 @@ section('1. Entity and migration describe the SAME table')
   const extra = sqlCols.filter(c => !cols.includes(c))
   ok('the migration adds no unknown column', extra.length === 0,
     extra.length ? `extra: ${extra.join(', ')}` : '')
-  ok('column counts agree', sqlCols.length === cols.length,
+  ok('column counts agree', sqlCols.length + altered.length === cols.length,
     `sql=${sqlCols.length} entity=${cols.length}`)
 
   // NOT NULL must match Kotlin nullability exactly, or Room rejects it.
@@ -167,12 +176,35 @@ section('3. Re-analysis physically cannot overwrite human labels')
 // =====================================================================
 section('4. The migration is additive and safe')
 {
-  ok('the database is at version 3', /version = 3,/.test(database))
+  const declaredDbVersion = Number(/version\s*=\s*(\d+)/.exec(database)?.[1] ?? 4)
+  ok('the database is at least version 4', declaredDbVersion >= 4)
   ok('the new entity is registered', /TrackAiAnalysisEntity::class/.test(database))
   ok('the DAO is exposed', /abstract fun trackAiAnalysisDao\(\): TrackAiAnalysisDao/.test(database))
   ok('MIGRATION_2_3 exists', /MIGRATION_2_3 = object : Migration\(2, 3\)/.test(database))
-  ok('the migration is registered',
-    /arrayOf<Migration>\(MIGRATION_1_2, MIGRATION_2_3\)/.test(database))
+  ok('MIGRATION_3_4 exists', /MIGRATION_3_4 = object : Migration\(3, 4\)/.test(database))
+  // Every migration must be registered; an unregistered one is a crash
+  // on upgrade, not a compile error.
+  for (const m of ['MIGRATION_1_2', 'MIGRATION_2_3', 'MIGRATION_3_4']) {
+    ok(`${m} is registered`,
+      new RegExp(`arrayOf<Migration>\\([\\s\\S]*?${m}[\\s\\S]*?\\)`).test(database))
+  }
+  // The chain must be unbroken: a gap strands users on the old version.
+  const declared = [...database.matchAll(/Migration\((\d+), (\d+)\)/g)]
+    .map(m => [Number(m[1]), Number(m[2])] as const)
+    .sort((a, b) => a[0] - b[0])
+  ok('the migration chain has no gap',
+    declared.every((step, i) => i === 0 || step[0] === declared[i - 1]![1]))
+  ok('the chain ends at the declared database version',
+    declared[declared.length - 1]?.[1] === declaredDbVersion)
+
+  // v4 must be additive: no data-losing statement in the new migration.
+  const m34Start = database.indexOf('MIGRATION_3_4 = object')
+  const m34End = database.indexOf('= object : Migration(', m34Start + 20)
+  const m34 = database.slice(m34Start, m34End === -1 ? undefined : m34End)
+  ok('the 3->4 migration only ALTERs', /ALTER TABLE/.test(m34))
+  ok('the 3->4 migration drops nothing', !/DROP/i.test(m34))
+  ok('the 3->4 migration deletes nothing', !/DELETE|TRUNCATE/i.test(m34))
+  ok('the 3->4 migration does not rebuild the table', !/CREATE TABLE/i.test(m34))
   ok('schema export stays on', /exportSchema = true/.test(database))
 
   // Destructive migration must stay off: it would wipe the library.

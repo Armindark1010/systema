@@ -29,6 +29,7 @@ import {
 } from './datasetRecord'
 import type { GroundTruthLabels } from './labels'
 import { emptyLabels, sanitiseLabels } from './labels'
+import { isSemanticAnalysis, type SemanticAnalysis } from './semanticRecord'
 
 // ---------------------------------------------------------------------
 // Gateway wiring
@@ -133,6 +134,11 @@ export async function saveAnalysis(input: SaveAnalysisInput): Promise<SaveAnalys
       },
       // The one line that guarantees rule 1.
       groundTruth: labels,
+      // Carried forward, never reset. An embedding re-run says nothing
+      // about the semantic analysis, and silently dropping it would
+      // destroy collected predictions as a side effect of an unrelated
+      // operation. Overwritten only by saveSemanticAnalysis().
+      semantic: existing?.semantic ?? null,
       status: input.status ?? 'COMPLETED',
       errorCode: input.errorCode ?? null,
       errorMessage: input.errorMessage ?? null,
@@ -195,6 +201,52 @@ export async function saveLabels(
     return { ok: Boolean(record), record, error: record ? undefined : 'The label write did not persist.' }
   } catch (e) {
     return { ok: false, record: null, error: (e as Error)?.message ?? 'The label write failed.' }
+  }
+}
+
+/**
+ * Writes MODEL predictions for one record.
+ *
+ * The mirror image of saveLabels: that function may only touch the
+ * human region, this one may only touch the model region. Neither can
+ * reach the other's data, which is what keeps prediction and ground
+ * truth separable for evaluation.
+ *
+ * Rejects when the row does not exist rather than creating one — a
+ * semantic prediction with no analysed track has nothing to describe.
+ */
+export async function saveSemanticAnalysis(
+  id: string,
+  semantic: SemanticAnalysis,
+): Promise<{ ok: boolean, record: DatasetRecord | null, error?: string }> {
+  try {
+    const existing = await gateway.getById(id)
+    if (!existing) return { ok: false, record: null, error: 'No dataset record with that id.' }
+
+    if (!isSemanticAnalysis(semantic)) {
+      // Malformed predictions are refused, not repaired. A truncated or
+      // out-of-range score set is evidence of a bug upstream, and
+      // storing a patched version would hide it.
+      return { ok: false, record: null, error: 'The semantic analysis was malformed.' }
+    }
+
+    const next: DatasetRecord = {
+      ...existing,
+      semantic,
+      // Human labels are copied through untouched. Re-running the model
+      // must never revise, clear or bump the ground truth.
+      groundTruth: existing.groundTruth,
+      updatedAt: new Date().toISOString(),
+    }
+
+    const saved = await gateway.upsert(next)
+    return { ok: true, record: saved }
+  } catch (e) {
+    return {
+      ok: false,
+      record: null,
+      error: (e as Error)?.message ?? 'The semantic write failed.',
+    }
   }
 }
 

@@ -13,6 +13,7 @@
  */
 
 import type { DatasetRecord } from './datasetRecord'
+import { topFor } from './semanticRecord'
 import { assessRecord, coerceDatasetRecord } from './datasetRecord'
 
 export const DATASET_EXPORT_VERSION = 1
@@ -40,9 +41,10 @@ export function exportJson(records: DatasetRecord[], pretty = false): string {
     exportedAt: new Date().toISOString(),
     recordCount: records.length,
     notice:
-      'groundTruth values are human-assigned labels. No model predictions '
-      + 'are included. Embeddings are experimental and the model is not '
-      + 'production-selected.',
+      'groundTruth values are HUMAN-assigned labels. prediction values are '
+      + 'RAW MODEL OUTPUT and are never ground truth. The two are separate '
+      + 'keys and must stay separate. All models are experimental and none '
+      + 'is production-selected.',
     records: records.map(r => ({
       id: r.id,
       // Carried so an export can be re-imported: the validator needs
@@ -62,6 +64,37 @@ export function exportJson(records: DatasetRecord[], pretty = false): string {
           }
         : null,
       processing: r.processing,
+      /**
+       * MODEL OUTPUT. Deliberately a sibling of groundTruth, never
+       * merged into it. Complete ranked predictions per head — the
+       * whole list, because recall and PR-AUC cannot be recomputed
+       * from a top-3 slice.
+       */
+      prediction: r.semantic
+        ? {
+            source: r.semantic.source,
+            model: r.semantic.model,
+            version: r.semantic.modelVersion,
+            analyzerVersion: r.semantic.analyzerVersion,
+            experimental: r.semantic.experimental,
+            analyzedAt: r.semantic.analyzedAt,
+            sampleRate: r.semantic.sampleRate,
+            sourceDurationSec: r.semantic.sourceDurationSec,
+            processedDurationSec: r.semantic.processedDurationSec,
+            decodeMs: r.semantic.decodeMs,
+            inferenceMs: r.semantic.inferenceMs,
+            heads: r.semantic.heads.map(h => ({
+              field: h.field,
+              head: h.head,
+              version: h.headVersion,
+              activation: h.activation,
+              multiLabel: h.multiLabel,
+              classCount: h.classCount,
+              predictions: h.predictions,
+            })),
+            unsupported: r.semantic.unsupported,
+          }
+        : null,
       groundTruth: {
         language: r.groundTruth.language,
         genre: r.groundTruth.genres,
@@ -93,8 +126,17 @@ const CSV_COLUMNS = [
   'sourceDurationSec', 'analysedDurationSec', 'sourceSampleRate',
   'modelSampleRate', 'windowsProcessed',
   'embeddingModel', 'embeddingVersion', 'embeddingDimension', 'normalized',
+  // HUMAN labels.
   'language', 'genres', 'moods', 'vocal', 'energy', 'contexts',
   'labelSource', 'labelRevision',
+  // MODEL predictions. Prefixed `predicted*` so a column can never be
+  // mistaken for its human counterpart in a spreadsheet — the CSV is
+  // where that confusion would be easiest and most damaging.
+  'semanticModel', 'semanticVersion',
+  'predictedMoodTop', 'predictedMoodScore',
+  'predictedGenreTop', 'predictedGenreScore',
+  'predictedVocalTop', 'predictedVocalScore',
+  'predictionSource',
   'status', 'analyzerVersion', 'completeness', 'createdAt', 'updatedAt',
 ] as const
 
@@ -123,6 +165,17 @@ export function exportCsv(records: DatasetRecord[]): string {
       r.embedding?.dimension ?? '', r.embedding?.normalized ?? '',
       g.language, g.genres, g.moods, g.vocal, g.energy, g.contexts,
       g.source, g.revision,
+      r.semantic?.model ?? '', r.semantic?.modelVersion ?? '',
+      // Top-1 only in CSV, because a 56-value ranked list does not fit a
+      // cell. The COMPLETE output is in the JSON export; the CSV is a
+      // convenience view and says so in the column names.
+      topFor(r.semantic, 'mood')?.label ?? '',
+      topFor(r.semantic, 'mood')?.score ?? '',
+      topFor(r.semantic, 'genre')?.label ?? '',
+      topFor(r.semantic, 'genre')?.score ?? '',
+      topFor(r.semantic, 'vocalInstrumental')?.label ?? '',
+      topFor(r.semantic, 'vocalInstrumental')?.score ?? '',
+      r.semantic?.source ?? '',
       r.status, r.processing.analyzerVersion,
       assessRecord(r).completeness, r.createdAt, r.updatedAt,
     ]

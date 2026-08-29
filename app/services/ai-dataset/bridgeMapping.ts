@@ -12,6 +12,7 @@
 
 import type { DatasetRecord } from './datasetRecord'
 import { DATASET_SCHEMA_VERSION, emptyMeasurements } from './datasetRecord'
+import { coerceSemanticAnalysis } from './semanticRecord'
 import type { GroundTruthLabels } from './labels'
 import { emptyLabels, sanitiseLabels } from './labels'
 
@@ -116,6 +117,11 @@ export function fromBridge(raw: BridgeRecord): DatasetRecord | null {
       inferenceDurationMs: num(raw.inferenceDurationMs),
       experimental: raw.experimental !== false,
     },
+    // Stored as a JSON blob in one column rather than exploded into
+    // columns: the shape is a variable-length ranked list per head, and
+    // a relational encoding would need a second table plus a join for
+    // data nothing queries by. A corrupt blob degrades to null.
+    semantic: coerceSemanticAnalysis(parseJson(raw.semanticJson)),
     groundTruth: labels,
     status: raw.status === 'FAILED' ? 'FAILED' : 'COMPLETED',
     errorCode: str(raw.errorCode),
@@ -124,6 +130,19 @@ export function fromBridge(raw: BridgeRecord): DatasetRecord | null {
     updatedAt: isoOrNull(raw.updatedAt) ?? new Date().toISOString(),
     supersededAt: isoOrNull(raw.supersededAt),
   }
+}
+
+/**
+ * Parses a JSON column, tolerating an already-parsed object.
+ *
+ * Returns null on malformed JSON instead of throwing: one bad row must
+ * not take down the whole dataset read.
+ */
+function parseJson(v: unknown): unknown {
+  if (v == null) return null
+  if (typeof v === 'object') return v
+  if (typeof v !== 'string') return null
+  try { return JSON.parse(v) } catch { return null }
 }
 
 /** Domain record → the analysis half of the bridge payload. */
@@ -137,6 +156,9 @@ export function toBridge(r: DatasetRecord): Record<string, unknown> {
     album: r.track.album,
     sourceUri: r.track.sourceUri,
     ...r.measurements,
+    // Complete ranked predictions, serialised whole. Never top-k'd on
+    // the way to storage — the tail is what evaluation needs.
+    semanticJson: r.semantic ? JSON.stringify(r.semantic) : null,
     // The complete vector. Never sliced on the way to storage.
     embeddingVector: r.embedding?.vector ?? null,
     embeddingDimension: r.embedding?.dimension ?? null,

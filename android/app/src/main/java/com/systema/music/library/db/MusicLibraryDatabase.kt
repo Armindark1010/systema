@@ -217,12 +217,29 @@ abstract class MusicLibraryDatabase : RoomDatabase() {
         }
 
         /**
-         * 3 -> 4: the Playlist Listening Session table (Phase 29).
+         * 3 -> 4: adds the semantic prediction column to `track_ai_analysis` (Phase 29).
          *
-         * Purely additive. Tracks, DSP analysis and AI dataset are untouched.
+         * ADDITIVE AND NULLABLE. One ALTER TABLE, no table rebuild, no
+         * data copy, so it cannot lose collected analyses or labels.
+         * Existing rows get NULL, which is the truthful value — they
+         * were analysed before any semantic model existed.
          */
         private val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `track_ai_analysis` ADD COLUMN `semanticJson` TEXT",
+                )
+            }
+        }
+
+        /**
+         * 4 -> 5: the Playlists, Playlist Tracks & Listening Sessions tables (Phase 29).
+         *
+         * Purely additive. Tracks, DSP analysis and AI dataset are untouched.
+         */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                android.util.Log.i("SystemaDb", "DATABASE_VERSION upgrading 4 -> 5 (creating playlist_sessions, playlists & playlist_tracks)")
                 db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS `playlist_sessions` (
@@ -246,17 +263,6 @@ abstract class MusicLibraryDatabase : RoomDatabase() {
                     "CREATE INDEX IF NOT EXISTS `index_playlist_sessions_completed` " +
                         "ON `playlist_sessions` (`completed`)",
                 )
-            }
-        }
-
-        /**
-         * 4 -> 5: the Playlists & Playlist Tracks tables (Phase 29 durable playlists).
-         *
-         * Purely additive. Tracks, DSP analysis, AI dataset and sessions are untouched.
-         */
-        private val MIGRATION_4_5 = object : Migration(4, 5) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                android.util.Log.i("SystemaDb", "DATABASE_VERSION upgrading 4 -> 5 (creating playlists & playlist_tracks)")
                 db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS `playlists` (
