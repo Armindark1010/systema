@@ -1,10 +1,13 @@
 package com.systema.music.analysis.decode
 
 import android.content.Context
+import android.media.AudioFormat
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import android.os.Build
+import android.util.Log
 import com.systema.music.analysis.AudioAnalysisException
 import com.systema.music.analysis.dsp.AudioAnalysisConfig
 import java.nio.ByteBuffer
@@ -151,6 +154,21 @@ class PcmDecoder(
                 )
             }
 
+            // ASK FOR 16-BIT PCM EXPLICITLY.
+            //
+            // The decode loop reads the output as 16-bit shorts. Most
+            // decoders emit that by default, but lossless/high-res
+            // paths (FLAC, WAV, ALAC, and some AAC decoders on newer
+            // devices) can emit 32-bit FLOAT or 24/32-bit PCM instead.
+            // Reading float samples as shorts does not throw a clean
+            // error, so state the requirement rather than hoping.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                format.setInteger(
+                    MediaFormat.KEY_PCM_ENCODING,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                )
+            }
+
             try {
                 codec.configure(format, null, null, 0)
                 codec.start()
@@ -163,9 +181,22 @@ class PcmDecoder(
                     "Ran out of memory while decoding.",
                 )
             } catch (e: Exception) {
+                // Name the real exception. "The decoder failed" alone
+                // is unactionable: it cannot distinguish a codec fault
+                // from an unexpected PCM encoding or a truncated file.
+                // The cause was always attached but never surfaced,
+                // which is why the device report carried no detail.
+                Log.w(
+                    "CLAP",
+                    "[DECODE_FAILURE] mime=$mime rate=$sourceRate ch=$channels " +
+                        "exception=${e.javaClass.name}",
+                    e,
+                )
                 throw AudioAnalysisException(
                     AudioAnalysisException.Code.DECODER_ERROR,
-                    "The decoder failed while reading this file.",
+                    "The decoder failed while reading this file " +
+                        "(${mime}, ${sourceRate} Hz, ${channels}ch): " +
+                        "${e.javaClass.simpleName}: ${e.message}",
                     e,
                 )
             } finally {
@@ -240,6 +271,11 @@ class PcmDecoder(
         // if a codec hands us an unusually large buffer.
         var monoScratch = FloatArray(4096)
 
+        // The codec's ACTUAL sample encoding. Requested as 16-bit at
+        // configure() time, but a decoder may still report something
+        // else, and INFO_OUTPUT_FORMAT_CHANGED is where it says so.
+        var pcmEncoding = AudioFormat.ENCODING_PCM_16BIT
+
         var inputDone = false
         var outputDone = false
         var decodedFrames = 0L
@@ -287,22 +323,38 @@ class PcmDecoder(
                         outputBuffer.position(info.offset)
                         outputBuffer.limit(info.offset + info.size)
 
-                        val shorts = outputBuffer.order(ByteOrder.nativeOrder()).asShortBuffer()
-                        val sampleCount = shorts.remaining()
-                        val frameCount = sampleCount / channels
+                        val ordered = outputBuffer.order(ByteOrder.nativeOrder())
 
-                        if (frameCount > monoScratch.size) {
-                            monoScratch = FloatArray(frameCount)
-                        }
-
-                        // 16-bit PCM -> float, with the channel downmix
-                        // folded into the same pass.
-                        for (f in 0 until frameCount) {
-                            var sum = 0f
-                            for (c in 0 until channels) {
-                                sum += shorts.get(f * channels + c) / 32768f
+                        // Downmix to mono, honouring the encoding the
+                        // codec actually produced. Float PCM is already
+                        // in [-1,1]; 16-bit needs the /32768 scale.
+                        val frameCount: Int
+                        if (pcmEncoding == AudioFormat.ENCODING_PCM_FLOAT) {
+                            val floats = ordered.asFloatBuffer()
+                            frameCount = floats.remaining() / channels
+                            if (frameCount > monoScratch.size) {
+                                monoScratch = FloatArray(frameCount)
                             }
-                            monoScratch[f] = sum / channels
+                            for (f in 0 until frameCount) {
+                                var sum = 0f
+                                for (c in 0 until channels) {
+                                    sum += floats.get(f * channels + c)
+                                }
+                                monoScratch[f] = sum / channels
+                            }
+                        } else {
+                            val shorts = ordered.asShortBuffer()
+                            frameCount = shorts.remaining() / channels
+                            if (frameCount > monoScratch.size) {
+                                monoScratch = FloatArray(frameCount)
+                            }
+                            for (f in 0 until frameCount) {
+                                var sum = 0f
+                                for (c in 0 until channels) {
+                                    sum += shorts.get(f * channels + c) / 32768f
+                                }
+                                monoScratch[f] = sum / channels
+                            }
                         }
                         decodedFrames += frameCount
 
@@ -348,8 +400,30 @@ class PcmDecoder(
 
                 outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     // Some decoders only report the real format here.
-                    // The values are re-read but the pipeline is
-                    // already configured for them.
+                    // Read the PCM encoding rather than assuming: a
+                    // FLOAT-emitting decoder read as 16-bit shorts
+                    // produces noise or a buffer fault, not a clean
+                    // error, so the assumption has to be checked.
+                    val outFormat = codec.outputFormat
+                    pcmEncoding = if (
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.N &&
+                        outFormat.containsKey(MediaFormat.KEY_PCM_ENCODING)
+                    ) {
+                        outFormat.getInteger(MediaFormat.KEY_PCM_ENCODING)
+                    } else {
+                        AudioFormat.ENCODING_PCM_16BIT
+                    }
+                    if (
+                        pcmEncoding != AudioFormat.ENCODING_PCM_16BIT &&
+                        pcmEncoding != AudioFormat.ENCODING_PCM_FLOAT
+                    ) {
+                        throw AudioAnalysisException(
+                            AudioAnalysisException.Code.UNSUPPORTED_FORMAT,
+                            "This file decodes to an unsupported PCM " +
+                                "encoding ($pcmEncoding). Only 16-bit and " +
+                                "float PCM are handled.",
+                        )
+                    }
                 }
             }
         }

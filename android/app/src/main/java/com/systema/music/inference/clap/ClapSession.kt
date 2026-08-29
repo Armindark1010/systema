@@ -485,9 +485,22 @@ class ClapSession(
                 memoryAfterKb = after.totalPssKb,
             )
             runCatching { stream.finish() }
+            // Include the underlying cause. The wrapper's own message
+            // ("The decoder failed while reading this file") cannot
+            // distinguish a permission problem from an unexpected PCM
+            // encoding, which is exactly the ambiguity that made this
+            // failure undiagnosable from the device report.
+            val cause = generateSequence(t) { it.cause }
+                .drop(1)
+                .firstOrNull()
+            val detail = if (cause != null) {
+                "${t.message} (cause: ${cause.javaClass.simpleName}: ${cause.message})"
+            } else {
+                t.message
+            }
             throw InferenceException(
                 InferenceErrorCode.INPUT_SHAPE_MISMATCH,
-                "Could not decode the selected track: ${t.message}",
+                "Could not decode the selected track: $detail",
             )
         }
 

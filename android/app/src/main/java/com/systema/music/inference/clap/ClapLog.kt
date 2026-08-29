@@ -41,6 +41,13 @@ object ClapLog {
     const val SESSION_IDENTITY = "SESSION_IDENTITY"
     const val SESSION_STATE = "SESSION_STATE"
 
+    /**
+     * Phase 23.2. Structural facts about the audio handed to CLAP:
+     * scheme and authority only, never the full URI (a content:// path
+     * can carry a filename) and never audio data.
+     */
+    const val AUDIO_INPUT = "AUDIO_INPUT"
+
     /** One structured line. Fields are `key=value`, space separated. */
     fun event(event: String, vararg fields: Pair<String, Any?>) {
         Log.i(TAG, render(event, fields))

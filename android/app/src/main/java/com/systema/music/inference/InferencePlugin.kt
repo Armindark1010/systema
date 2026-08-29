@@ -475,6 +475,19 @@ class InferencePlugin : Plugin() {
         // Defaults to false so the existing lab payload is unchanged.
         val includeVector = call.getBoolean("includeVector") ?: false
 
+        // Structural facts only (Step 1). The full URI is NOT logged:
+        // a content:// path can carry a filename, and the scheme plus
+        // authority is enough to tell a MediaStore URI from a file
+        // path or a WebView-converted URL.
+        val parsed = runCatching { android.net.Uri.parse(uri) }.getOrNull()
+        ClapLog.event(
+            ClapLog.AUDIO_INPUT,
+            "trackId" to trackId,
+            "uriScheme" to (parsed?.scheme ?: "none"),
+            "uriAuthority" to (parsed?.authority ?: "none"),
+            "durationSec" to durationSec,
+        )
+
         scope.launch {
             try {
                 call.resolve(

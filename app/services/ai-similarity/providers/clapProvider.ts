@@ -326,6 +326,22 @@ export class ClapProvider implements AudioEmbeddingProvider {
         modelVersion: this.cachedVersion,
       }
     }
+    // An all-zero vector is not a valid embedding. It is what a
+    // silently-failed inference looks like, and because it has a
+    // defined cosine against everything it would enter the dataset
+    // looking like a real measurement. The similarity engine refuses
+    // it later; refusing it HERE means the analysis is reported as
+    // failed rather than as a successful embedding of nothing.
+    if (raw.every(v => v === 0)) {
+      return {
+        ok: false,
+        code: 'INVALID_EMBEDDING',
+        message: `CLAP returned an all-zero embedding for "${audio.trackId}". `
+          + 'A zero vector has no direction, so it is not a measurement.',
+        model: this.id,
+        modelVersion: this.cachedVersion,
+      }
+    }
     if (result.dimension > 0 && raw.length !== result.dimension) {
       return {
         ok: false,
