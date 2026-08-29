@@ -169,6 +169,52 @@ const MUTATIONS: Mutation[] = [
     to: '            semanticJson = excluded.semanticJson,\n            labelMoods = excluded.labelMoods',
   },
 
+  // ---- Dataset page presentation ----------------------------------
+  {
+    name: 'human and model columns lose their visual separation',
+    danger: 'Two "Mood" columns side by side with no banding is how a reader mistakes a guess for a label.',
+    file: 'app/pages/dev/ai-dataset.vue',
+    from: 'MODEL PREDICTION · EXPERIMENTAL',
+    to: 'Predictions',
+  },
+  {
+    name: 'a field the model cannot produce renders as a dash',
+    danger: 'Collapses "cannot predict" into "no data", hiding a missing capability.',
+    file: 'app/pages/dev/ai-dataset.vue',
+    from: "<span v-else class=\"text-fg-faint\" title=\"This model has no head for this field\">\n                      n/a\n                    </span>",
+    to: '<span v-else>{{ DASH }}</span>',
+  },
+  {
+    name: 'confusion breakdown removed from the single-label panel',
+    danger: 'A bare accuracy figure hides systematic over-prediction of one class.',
+    file: 'app/pages/dev/ai-dataset.vue',
+    from: '<td class="py-1 text-right text-fg-muted">{{ c.predicted }}</td>',
+    to: '',
+  },
+
+  // ---- Tooling isolation -------------------------------------------
+  {
+    name: 'shape verification dropped from the conversion script',
+    danger: 'A checkpoint with a different class count would zip scores onto the wrong labels at runtime.',
+    file: 'scripts/phase29/fetch-and-convert-models.sh',
+    from: 'MISMATCH — do NOT ship this. Either the checkpoint',
+    to: 'shapes differ, continuing anyway',
+  },
+  {
+    name: 'model weights become committable',
+    danger: '~90 MB of non-commercially-licensed binaries entering Git history is effectively irreversible.',
+    file: '.gitignore',
+    from: 'build/phase29-models/',
+    to: '# build/phase29-models/',
+  },
+  {
+    name: 'the runtime shells out to Python',
+    danger: 'Exactly the dependency the brief forbids, and it would look like it works on a dev machine.',
+    file: 'app/services/music-semantics/providers/semanticRuntime.ts',
+    from: 'export function isRuntimeReady(): boolean {',
+    to: "import { execSync } from 'node:child_process'\n\nexport function isRuntimeReady(): boolean {",
+  },
+
   // ---- Export ------------------------------------------------------
   {
     name: 'export merges prediction into groundTruth',

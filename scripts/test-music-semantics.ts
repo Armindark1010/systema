@@ -604,6 +604,125 @@ section('11. Full Player: same sheet, cached, no fabrication')
 }
 
 // =====================================================================
+section('11b. UI states are all reachable and distinct')
+{
+  const sheet = strip(read('app/components/player/PlayerAiAnalysis.vue'))
+  const comp = strip(read('app/composables/useTrackAiAnalysis.ts'))
+  const player = strip(read('app/components/FullPlayer.vue'))
+
+  // LOADING. Must be driven by real in-flight state, not a timer.
+  ok('a loading state exists', /isAnalyzing/.test(comp))
+  ok('loading is backed by an in-flight set, not a timeout',
+    /inFlight\.add\(id\)/.test(comp) && /inFlight\.delete\(id\)/.test(comp))
+  ok('the in-flight entry is released in a finally — a crash cannot wedge the spinner',
+    /finally \{[\s\S]{0,200}inFlight\.delete\(id\)/.test(comp))
+  ok('a second press while running is ignored', /if \(inFlight\.has\(id\)\) return/.test(comp))
+
+  // SUCCESS.
+  ok('a success state renders predictions', /hasSemantic/.test(sheet))
+  ok('success requires an actual head, not merely a non-null object',
+    /heads\.length/.test(sheet) || /heads\?\.length/.test(sheet))
+
+  // ERROR / NOT-READY — must be distinct from each other and from empty.
+  ok('a note channel exists for explanations', /semanticNotes/.test(comp))
+  ok('the not-ready reason comes from the provider, not a constant',
+    /status\.detail/.test(comp))
+  ok('an inference failure records its own message', /outcome\.message/.test(comp))
+  ok('a persistence failure is reported separately from an inference failure',
+    /stored\.ok && stored\.error|!stored\.ok && stored\.error/.test(comp))
+  ok('a missing provider is its own message',
+    /No semantic model provider is configured/.test(comp))
+  ok('the sheet renders the note when there is no result',
+    /v-else-if="semanticNote"/.test(sheet))
+
+  // The critical negative: semantics failing must NOT fail the analysis.
+  // Scoped to the function body. A fixed-width window ran past the end
+  // of runSemantic into analyze(), where failures.set is correct.
+  const bodyStart = comp.indexOf('async function runSemantic')
+  // runSemantic is the last async function in the file, so also stop at
+  // the next top-level `function` — otherwise the slice runs to EOF and
+  // picks up reset(), where clearing state is correct.
+  const ends = ['\n  async function', '\n  function']
+    .map(t => comp.indexOf(t, bodyStart + 10))
+    .filter(i => i !== -1)
+  const bodyEnd = ends.length ? Math.min(...ends) : -1
+  const runSemanticBody = comp.slice(bodyStart, bodyEnd === -1 ? undefined : bodyEnd)
+  ok('canary: runSemantic body was isolated',
+    bodyStart !== -1 && runSemanticBody.includes('semanticNotes'))
+  ok('runSemantic never sets an embedding failure state',
+    !/failures\.set/.test(runSemanticBody))
+  ok('runSemantic never clears the embedding result',
+    !/results\.delete/.test(runSemanticBody))
+
+  // UNSUPPORTED.
+  ok('unsupported fields have a dedicated block', /semanticUnsupported/.test(sheet))
+  ok('unsupported is rendered as a reason, not a blank', /u\.reason/.test(sheet))
+
+  // PERSISTED vs LIVE.
+  ok('a persisted result is labelled as saved', /saved result/i.test(sheet))
+  ok('the saved marker is driven by cache provenance, not assumed',
+    /semanticFromCache/.test(sheet))
+
+  // RE-RUN.
+  ok('re-run forces a bypass', /force/.test(comp))
+  ok('the force flag reaches runSemantic', /runSemantic\([^)]*force/.test(comp))
+
+  // NAVIGATION. The sheet must stay in the Full Player.
+  ok('the sheet triggers no route change',
+    !/router\.push|navigateTo|useRouter/.test(sheet))
+  ok('the sheet is a child of the Full Player, not a page',
+    /<PlayerAiAnalysis/.test(player))
+  ok('analysis does not close the player', !/closePlayer|minimi[sz]e\(\)/.test(sheet))
+}
+
+// =====================================================================
+section('11c. Failed analyses are never stored as successes')
+{
+  const svc = strip(read('app/services/ai-dataset/datasetService.ts'))
+  const bridge = strip(read('app/services/ai-dataset/semanticBridge.ts'))
+
+  // The bridge takes an already-unwrapped result, so its guarantee is
+  // that a caller cannot hand it a failure: it accepts only the success
+  // type and stamps provenance itself.
+  ok('the bridge accepts only a successful result type',
+    /result: SemanticAnalysisResult/.test(bridge))
+  ok('the bridge stamps provenance itself rather than trusting input',
+    /source: 'model'/.test(bridge))
+  ok('the bridge never throws into the analyze path',
+    /catch/.test(bridge))
+  ok('a malformed prediction is rejected, not repaired',
+    /isSemanticAnalysis/.test(svc))
+  ok('saveSemanticAnalysis will not create a row for an unanalysed track',
+    /return \{ ok: false/.test(svc))
+
+  // Live check: a not-ready provider must leave the dataset untouched.
+  const { setDatasetGateway, saveAnalysis, allRecords, resetDatasetGateway }
+    = await import('../app/services/ai-dataset/datasetService')
+  const { MemoryDatasetGateway } = await import('../app/services/ai-dataset/memoryGateway')
+  const { persistSemanticToDataset } = await import('../app/services/ai-dataset/semanticBridge')
+
+  setDatasetGateway(new MemoryDatasetGateway())
+  await saveAnalysis({
+    track: { trackId: 'fail-1', title: 'T', artist: null, album: null, sourceUri: null },
+    measurements: {}, embedding: null, analyzerVersion: 1, status: 'COMPLETED',
+  } as never)
+
+  const provider = (await import('../app/services/music-semantics/index'))
+    .createMusicSemanticProvider()
+  const outcome = await provider!.analyze({ trackId: 'fail-1', uri: 'content://x' })
+  ok('the provider failed as expected', outcome.ok === false)
+
+  if (!outcome.ok) {
+    const rows = await allRecords()
+    const row = rows.find(r => r.track.trackId === 'fail-1')
+    ok('a failed analysis leaves semantic null — not an empty success',
+      row?.semantic === null)
+    ok('the row itself still exists, unharmed', row !== undefined)
+  }
+  resetDatasetGateway()
+}
+
+// =====================================================================
 section('12. No heuristic semantics anywhere')
 {
   const files = [
@@ -642,7 +761,18 @@ section('13. Dataset page exposes predictions and evaluation')
   const page = strip(read('app/pages/dev/ai-dataset.vue'))
   ok('canary: page located', page.includes('dataset'))
 
-  ok('a model-prediction column exists', /Predicted \(model\)/.test(page))
+  // §9 asks for these as separate columns, not one merged cell.
+  ok('the model region is banded and labelled',
+    /MODEL PREDICTION · EXPERIMENTAL/.test(page))
+  ok('the human region is labelled', /HUMAN LABELS/.test(page))
+  for (const col of ['Model', 'Mood', 'Genre', 'Tags', 'Vocal', 'Confidence']) {
+    ok(`the "${col}" prediction column exists`,
+      new RegExp(`>${col}</th>`).test(page))
+  }
+  ok('prediction columns are driven by a field list, not hardcoded cells',
+    /SEMANTIC_COLUMNS/.test(page))
+  ok('a field the model cannot produce shows n/a, not a dash',
+    /n\/a/.test(page))
   ok('the detail view is labelled model output',
     /SEMANTIC PREDICTION · MODEL OUTPUT/.test(page))
   ok('the detail view says it is not ground truth',
@@ -659,6 +789,16 @@ section('13. Dataset page exposes predictions and evaluation')
   ok('the label mapping caveat is visible',
     /Unmappable labels/.test(page))
   ok('coverage is reported', /coverage/.test(page))
+
+  // Confusion must be RENDERED, not merely computed. Assert each
+  // column, since dropping one silently halves the table's value.
+  ok('the confusion breakdown is rendered', /ev\.e\.confusion/.test(page))
+  for (const col of ['actual', 'predicted', 'correct']) {
+    ok(`the confusion table shows "${col}"`,
+      new RegExp(`c\\.${col}`).test(page))
+  }
+  ok('the confusion table is explained, not just dumped',
+    /over-applies/.test(page))
 }
 
 // =====================================================================
@@ -694,6 +834,72 @@ section('14. Kotlin storage is additive and label-safe')
 
   ok('the plugin reads semanticJson', /getString\("semanticJson"\)/.test(plugin))
   ok('the plugin returns semanticJson', /put\("semanticJson", semanticJson\)/.test(plugin))
+}
+
+// =====================================================================
+section('14b. Conversion tooling stays outside the application')
+{
+  const sh = read('scripts/phase29/fetch-and-convert-models.sh')
+
+  ok('the acquisition script exists', sh.length > 1000)
+  ok('it states plainly that it is not part of the app',
+    /NOT PART OF THE ANDROID APP/.test(sh))
+  ok('it fetches the embedding model', /discogs-effnet-bs64-1\.onnx/.test(sh))
+  ok('it fetches the mood head', /mtg_jamendo_moodtheme-discogs-effnet-1/.test(sh))
+  ok('it fetches the voice head', /voice_instrumental-discogs-effnet-1/.test(sh))
+  ok('it converts with tf2onnx', /tf2onnx\.convert/.test(sh))
+  ok('it pins the opset', /--opset 13/.test(sh))
+  ok('it verifies output shapes against the declared taxonomy',
+    /MISMATCH/.test(sh) && /56/.test(sh) && /87/.test(sh))
+  ok('it refuses to ship a mismatched model',
+    /do NOT ship this/i.test(sh))
+  ok('it says to fix the taxonomy, never the model',
+    /never the reverse/i.test(sh))
+  ok('it skips the head with no verified labels',
+    /top50tags head skipped on purpose/.test(sh))
+  ok('it surfaces the non-commercial licence', /NON-COMMERCIAL/.test(sh))
+  ok('it installs Python into a throwaway venv, not globally',
+    /venv/.test(sh) && /never global/i.test(sh))
+  ok('it fails loudly when the host is unreachable',
+    /Cannot reach/.test(sh))
+
+  // Python must never become an app runtime dependency.
+  const appFiles = [
+    'app/services/music-semantics/providers/semanticRuntime.ts',
+    'app/services/music-semantics/index.ts',
+    'app/composables/useTrackAiAnalysis.ts',
+  ]
+  for (const f of appFiles) {
+    const src = strip(read(f))
+    // Naming tf2onnx in a human-readable requirements string is fine
+    // and useful — it tells the developer what is missing. EXECUTING
+    // it, or shelling out at all, is what must never happen.
+    ok(`${f.split('/').pop()} never shells out`,
+      !/child_process|execSync|spawn\(|exec\(/.test(src))
+    ok(`${f.split('/').pop()} declares no Python dependency`,
+      !/import .*python|require\(.*python/i.test(src))
+    ok(`${f.split('/').pop()} does not run pip`, !/pip install/i.test(src))
+    ok(`${f.split('/').pop()} does not reference the tooling directory`,
+      !/scripts\/phase29/.test(src))
+  }
+
+  // Weights must not be committed.
+  const ignore = read('.gitignore')
+  // A commented-out ignore rule still matches a naive regex, which is
+  // precisely how this protection would silently disappear.
+  const activeIgnores = ignore.split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0 && !l.startsWith('#'))
+  ok('model weights are gitignored by an ACTIVE rule',
+    activeIgnores.some(l => l.includes('build/phase29-models')))
+  ok('the ignore rule explains itself', /non-commercial/i.test(ignore))
+
+  // Android must not gain a Python or TensorFlow dependency.
+  const gradle = read('android/app/build.gradle')
+  ok('no TensorFlow dependency was added to Android',
+    !/tensorflow/i.test(gradle))
+  ok('ONNX Runtime remains the inference dependency',
+    /onnxruntime-android/.test(gradle))
 }
 
 // =====================================================================

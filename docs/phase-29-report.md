@@ -85,6 +85,19 @@ cachedSemanticFor ◄─ DatasetRecord.semantic ──► Room semanticJson (v4)
 only through `saveLabels()`. The two regions have no code path between
 them.
 
+On `/dev/ai-dataset` that separation is also visual — the table carries
+a banded group header:
+
+```
+|        | HUMAN LABELS                    | MODEL PREDICTION · EXPERIMENTAL      |
+| Track  | Lang Genre Mood Vocal Energy Ctx | Model Mood Genre Tags Vocal Confidence |
+```
+
+Two columns are both called "Mood". Without banding, a reader would
+eventually mistake a guess for a label — so removing that separation is
+a tested mutation. A field the model has no head for renders `n/a`,
+never a dash, keeping "cannot predict" distinct from "no data".
+
 ---
 
 ## 3. Files changed
@@ -102,6 +115,10 @@ them.
 **New — dataset (3):** `semanticRecord.ts` (stored shape + guards),
 `semanticEvaluation.ts` (multi-label metrics, label mapping),
 `semanticBridge.ts` (the only place `source: 'model'` is stamped).
+
+**New — tooling (1):** `scripts/phase29/fetch-and-convert-models.sh`
+— acquisition, ONNX conversion and shape verification. Outside the app
+by construction; tests assert it never becomes a runtime dependency.
 
 **Modified — TypeScript (8):** `datasetRecord.ts` (schema 1→2),
 `datasetService.ts` (`saveSemanticAnalysis`, carry-forward),
@@ -122,9 +139,9 @@ staged or reverted it.
 
 | | Result |
 |---|---|
-| New: `test-music-semantics.ts` | **243 passed, 0 failed** |
-| New: `test-music-semantics-mutation.ts` | **19/19 sabotages caught** |
-| Full sweep, all 46 suites | **5307 passed, 4 failed** |
+| New: `test-music-semantics.ts` | **319 passed, 0 failed** |
+| New: `test-music-semantics-mutation.ts` | **25/25 sabotages caught** |
+| Full sweep, all 46 suites | **5383 passed, 4 failed** |
 | Typecheck | **98 errors = unchanged baseline** |
 | DSP / inference shells | skip honestly (no Android SDK here) |
 | Gradle build | **not run** — no Android SDK in this environment |
@@ -142,6 +159,27 @@ voice/instrumental order, accuracy on multi-label, metrics from too
 little data, cache ignoring version, vendor leak, weakened
 `experimental`, destructive migration, label overwrite in SQL, and
 export merging the two regions.
+
+**Model acquisition was retried and is definitively blocked here.**
+`essentia.upf.edu`, `huggingface.co`, `hf-mirror.com` and
+`cdn-lfs.huggingface.co` all return HTTP 000 from this sandbox, while
+npm, PyPI and GitHub return 200. GitHub code search finds no mirror of
+these weights, and the `essentia.js` npm package ships none (it fetches
+them at runtime from the unreachable host). This is a network boundary,
+not a solvable engineering problem — so it is handed to you as one
+command instead:
+
+```
+bash scripts/phase29/fetch-and-convert-models.sh
+```
+
+It checks reachability, downloads the embedding model (already ONNX) and
+the three heads (frozen `.pb`), converts them with `tf2onnx` in a
+throwaway venv, and **verifies each output tensor against the class
+counts the app declares** — 56 mood, 87 genre, 2 vocal. On a mismatch it
+refuses and tells you to fix the taxonomy, never the model. Output goes
+to a gitignored directory; the weights are ~90 MB and non-commercially
+licensed, so they must not enter Git.
 
 **Four Phase 28 guards had to be rewritten**, because they asserted
 proxies this phase legitimately invalidated. I sharpened rather than
@@ -215,19 +253,16 @@ v3→v4 migration is proven against real SQLite in
 
 ## 7. What remains
 
-1. **Obtain the weights.** Every download from `essentia.upf.edu`
-   returned HTTP 000 from this sandbox; only JSON metadata resolved. The
-   paths are correct — the network is the blocker.
-2. **Convert the three heads to ONNX** (`tf2onnx`, commands in
-   `phase-29-semantic-model.md`). The embedding model already publishes
-   ONNX.
-3. **Implement the mel front-end.** The largest remaining piece: the
+1. **Run `scripts/phase29/fetch-and-convert-models.sh`** on a networked
+   machine. It handles acquisition, conversion and shape verification in
+   one pass. Steps 1 and 2 of the old plan are now this single command.
+2. **Implement the mel front-end.** The largest remaining piece: the
    embedding takes `[64,128,96]` mel patches, not audio, and nothing in
    SYSTEMA produces them today.
-4. **Wire `semanticRuntime` to `InferenceRuntime.kt`**, the existing
+3. **Wire `semanticRuntime` to `InferenceRuntime.kt`**, the existing
    ONNX boundary.
-5. **Retrieve the `top50tags` label list** before that head is enabled.
-6. **Then collect real predictions and evaluate** — the actual goal.
+4. **Retrieve the `top50tags` label list** before that head is enabled.
+5. **Then collect real predictions and evaluate** — the actual goal.
    Given PR-AUC 0.14, the honest expected outcome is that the mood head
    may not be worth keeping. The pipeline is built to answer that with
    evidence rather than assumption.
