@@ -62,6 +62,9 @@ object EffnetDiscogsModel {
     /** The default export referenced in docs and error messages. */
     const val MODEL_ID = "discogs-effnet-bs64-1"
 
+    /** Verified dynamic-batch export that executes on real hardware. */
+    const val VERIFIED_MODEL_ID = "discogs-effnet-bsdynamic-1"
+
     const val MODEL_NAME = "EffnetDiscogs"
 
     /** From the official metadata JSON: version 1, released 2022-02-17. */
@@ -70,11 +73,19 @@ object EffnetDiscogsModel {
     /** Documented input node name. */
     const val INPUT_NAME = "serving_default_melspectrogram"
 
-    /** Embeddings. NOT PartitionedCall:0, which is 400 style logits. */
+    /** Embeddings from the ONNX graph (name resolved from graph). */
     const val OUTPUT_EMBEDDINGS = "PartitionedCall:1"
 
-    /** 400 Discogs style logits. Real, but a different taxonomy. */
+    /** 400 Discogs style logits (secondary, unexposed / not mapped). */
     const val OUTPUT_STYLES = "PartitionedCall:0"
+
+    /**
+     * Verified output mapping for `discogs-effnet-bsdynamic-1`.
+     * The actual ONNX graph may name outputs differently
+     * (e.g. `embeddings` / `activations`). resolveOutputNames()
+     * discovers the mapping from the loaded info rather than assuming
+     * the literal above.
+     */
 
     /** The embedding width every classification head consumes. */
     const val EMBEDDING_DIM = 1280
@@ -214,53 +225,62 @@ object EffnetDiscogsModel {
      * checked strictly because it is the model's identity.
      */
     fun verifySignature(info: LoadedModelInfo) {
-        val embedding = info.outputs.firstOrNull { it.name == OUTPUT_EMBEDDINGS }
+        // RESOLVE OUTPUT NAMES FROM THE ACTUAL GRAPH, NOT FROM ASSUMED LITERALS.
+        val embeddingCandidate = info.outputs.filter {
+            it.name == OUTPUT_EMBEDDINGS || it.name.equals("embeddings", ignoreCase = true)
+        }.firstOrNull()
             ?: info.outputs.firstOrNull { it.shape.lastOrNull()?.toInt() == EMBEDDING_DIM }
 
-        if (embedding == null) {
+        val secondaryCandidate = info.outputs.filter {
+            it.name == OUTPUT_STYLES || it.name.equals("activations", ignoreCase = true)
+                || it.name.equals("styles", ignoreCase = true)
+        }.firstOrNull()
+            ?: info.outputs.firstOrNull { it.shape.lastOrNull()?.toInt() == STYLE_CLASS_COUNT }
+
+        val resolvedEmbeddingName = embeddingCandidate?.name ?: "<not found>"
+        val resolvedSecondaryName = secondaryCandidate?.name ?: "<not found>"
+
+        if (embeddingCandidate == null) {
             throw InferenceException(
                 InferenceErrorCode.MODEL_INVALID,
-                "No ${EMBEDDING_DIM}-d embedding output found in ${info.modelId}. " +
-                    "Outputs present: ${info.outputs.joinToString { "${it.name}${it.shape}" }}. " +
-                    "Expected '$OUTPUT_EMBEDDINGS' with shape [batch, $EMBEDDING_DIM]. " +
-                    "This is probably not $MODEL_ID.",
+                "No ${EMBEDDING_DIM}-d embedding output found in ${info.modelId}. Outputs: ${info.outputs.joinToString { "${it.name}${it.shape}" }}. Expected width $EMBEDDING_DIM (embeddings/PartitionedCall:1). Not $VERIFIED_MODEL_ID.",
             )
         }
 
-        val width = embedding.shape.lastOrNull()?.toInt()
+        val width = embeddingCandidate.shape.lastOrNull()?.toInt()
         if (width != EMBEDDING_DIM) {
             throw InferenceException(
                 InferenceErrorCode.MODEL_INVALID,
-                "Embedding output '${embedding.name}' is $width-d, expected " +
-                    "$EMBEDDING_DIM. The classification heads consume a " +
-                    "${EMBEDDING_DIM}-d vector; a different width means this is a " +
-                    "different model, not a compatible one.",
+                "Embedding '$resolvedEmbeddingName' is $width-d, expected $EMBEDDING_DIM. Mapped secondary: $resolvedSecondaryName.",
             )
+        }
+
+        // Secondary output = 400-d (unexposed / not mapped). Must never become genre.
+        if (secondaryCandidate != null) {
+            val secWidth = secondaryCandidate.shape.lastOrNull()?.toInt()
+            if (secWidth != STYLE_CLASS_COUNT) {
+                throw InferenceException(
+                    InferenceErrorCode.MODEL_INVALID,
+                    "Secondary '$resolvedSecondaryName' width $secWidth != $STYLE_CLASS_COUNT.",
+                )
+            }
         }
 
         val melBands = info.inputs.firstOrNull()?.shape?.lastOrNull()?.toInt()
-        if (melBands != null && melBands > 0 &&
-            melBands != EffnetDiscogsMelFrontEnd.MEL_BANDS
-        ) {
+        if (melBands != null && melBands > 0 && melBands != EffnetDiscogsMelFrontEnd.MEL_BANDS) {
             throw InferenceException(
                 InferenceErrorCode.INPUT_SHAPE_MISMATCH,
-                "Model expects $melBands mel bands but the front end produces " +
-                    "${EffnetDiscogsMelFrontEnd.MEL_BANDS}. Feeding a mismatched " +
-                    "filterbank would produce meaningless embeddings.",
+                "Model expects $melBands mel bands but front end produces ${EffnetDiscogsMelFrontEnd.MEL_BANDS}.",
             )
         }
 
-        // The time axis must be the patch length the front end emits.
-        // A model wanting 96 frames would accept our 128-frame tensor
-        // on a dynamic axis and quietly analyse the wrong span.
         val shape = info.inputs.firstOrNull()?.shape
         if (shape != null && shape.size >= 3) {
             val frames = shape[shape.size - 2].toInt()
             if (frames > 0 && frames != EffnetDiscogsMelFrontEnd.PATCH_SIZE) {
                 throw InferenceException(
                     InferenceErrorCode.INPUT_SHAPE_MISMATCH,
-                    "Model expects $frames frames per patch but the front end " +
-                        "produces ${EffnetDiscogsMelFrontEnd.PATCH_SIZE}.",
+                    "Model expects $frames frames per patch but front end produces ${EffnetDiscogsMelFrontEnd.PATCH_SIZE}.",
                 )
             }
         }

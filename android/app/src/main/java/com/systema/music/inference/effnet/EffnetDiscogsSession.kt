@@ -322,6 +322,9 @@ class EffnetDiscogsSession(
         val preprocessMs = (System.nanoTime() - prepStartNs) / 1_000_000.0
 
         // ---- INFER ----
+        // The descriptor selects the embedding output (1280-d). The secondary
+        // output (activations, 400-d, unexposed / not mapped) is verified
+        // at load time but must NEVER be presented as a genre prediction.
         val result = try {
             runtime.infer(batch.data)
         } catch (e: InferenceException) {
@@ -339,11 +342,51 @@ class EffnetDiscogsSession(
         // Mean over the REAL patches only. Averaging the zero-padded
         // tail of a fixed-batch run would drag every embedding toward
         // the origin by an amount that varies with track length.
-        val embedding = meanPool(
+        val pooled = meanPool(
             output = result.output,
             patches = batch.realPatchCount,
             dim = EffnetDiscogsModel.EMBEDDING_DIM,
         )
+
+        // ---- NORMALIZE ----
+        // L2 normalization produces a unit-length vector required by similarity.
+        val embedding = normalizeL2(pooled)
+
+        // ---- VALIDATE FINAL EMBEDDING ----
+        // Before storing: dimension == 1280, all finite, not zero, L2 > 0,
+        // and normalized approximate unit norm.
+        if (embedding.size != EffnetDiscogsModel.EMBEDDING_DIM) {
+            throw InferenceException(
+                InferenceErrorCode.MODEL_INFERENCE_FAILED,
+                "INFERENCE_FAILED: pooled embedding dimension ${embedding.size} != ${EffnetDiscogsModel.EMBEDDING_DIM}.",
+            )
+        }
+        if (embedding.all { it == 0f }) {
+            throw InferenceException(
+                InferenceErrorCode.MODEL_INFERENCE_FAILED,
+                "INFERENCE_FAILED: embedding is all zeros after pooling/normalization.",
+            )
+        }
+        if (!embedding.all { it.isFinite() }) {
+            throw InferenceException(
+                InferenceErrorCode.MODEL_INFERENCE_FAILED,
+                "INFERENCE_FAILED: embedding contains non-finite values.",
+            )
+        }
+        val l2 = kotlin.math.sqrt(embedding.sumOf { (it * it).toDouble() })
+        if (l2 <= 0) {
+            throw InferenceException(
+                InferenceErrorCode.MODEL_INFERENCE_FAILED,
+                "INFERENCE_FAILED: embedding L2 norm $l2 <= 0.",
+            )
+        }
+        // After normalization, should be approximately 1.
+        if (kotlin.math.abs(l2 - 1.0) > 0.05) {
+            throw InferenceException(
+                InferenceErrorCode.MODEL_INFERENCE_FAILED,
+                "INFERENCE_FAILED: normalized embedding L2 norm $l2 is not ~1 (expected after L2 norm).",
+            )
+        }
 
         val totalMs = (System.nanoTime() - startNs) / 1_000_000.0
 
@@ -393,6 +436,15 @@ class EffnetDiscogsSession(
      * is, and quietly reshaping would produce a plausible vector from
      * misaligned memory.
      */
+    private fun normalizeL2(vec: FloatArray): FloatArray {
+        val sumSq = vec.sumOf { (it * it).toDouble() }
+        val norm = kotlin.math.sqrt(sumSq).toFloat()
+        if (norm <= 0f) return vec // guard; validation above will reject
+        val out = FloatArray(vec.size)
+        for (i in vec.indices) out[i] = vec[i] / norm
+        return out
+    }
+
     private fun meanPool(output: FloatArray, patches: Int, dim: Int): FloatArray {
         if (patches <= 0) {
             throw InferenceException(
