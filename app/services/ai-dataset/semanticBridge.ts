@@ -54,6 +54,10 @@ export function toStoredSemantic(result: SemanticAnalysisResult): SemanticAnalys
       predictions: h.predictions.map(p => ({ label: p.label, score: p.score })),
     })),
     unsupported: result.unsupported.map(u => ({ field: u.field, reason: u.reason })),
+    // Copied, not referenced: the caller keeps its own array and a
+    // later mutation there must not rewrite what was stored.
+    embedding: result.embedding ? [...result.embedding] : null,
+    embeddingDim: result.embeddingDim ?? result.embedding?.length ?? null,
     sourceDurationSec: result.sourceDurationSec,
     processedDurationSec: result.processedDurationSec,
     sampleRate: result.sampleRate,

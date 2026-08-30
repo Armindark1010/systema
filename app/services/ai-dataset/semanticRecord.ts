@@ -74,6 +74,19 @@ export interface SemanticAnalysis {
   /** Fields the provider could not produce, with reasons. */
   unsupported: { field: SemanticField, reason: string }[]
 
+  /**
+   * The real backbone embedding, when the provider produced one.
+   *
+   * Persisted because it is the actual model output in this phase and
+   * because it is reusable: a classifier head added later can be run
+   * over stored vectors without re-decoding every track.
+   *
+   * Optional so every row written before Phase 29.x stays valid — an
+   * absent field means "not recorded", not "the model returned none".
+   */
+  embedding?: number[] | null
+  embeddingDim?: number | null
+
   sourceDurationSec: number | null
   processedDurationSec: number | null
   sampleRate: number | null
@@ -140,6 +153,37 @@ export function isSemanticAnalysis(value: unknown): value is SemanticAnalysis {
       // Activations are bounded. Out-of-range means logits were stored.
       if (p.score < 0 || p.score > 1) return false
     }
+  }
+
+  // THE EMBEDDING, WHEN PRESENT (Phase 29.x).
+  //
+  // Optional, because rows written before this phase have none and are
+  // still valid. But if one IS present it must be a real vector: a
+  // corrupt embedding stored here is indistinguishable from a good one
+  // later, and it would silently poison every similarity computation
+  // that reads it back.
+  if (s.embedding !== undefined && s.embedding !== null) {
+    if (!Array.isArray(s.embedding)) return false
+    if (s.embedding.length === 0) return false
+    if (!s.embedding.every(v => typeof v === 'number' && Number.isFinite(v))) return false
+    // All-zero is the signature of a graph fed silence or an
+    // uninitialised buffer, not of a track.
+    if (s.embedding.every(v => v === 0)) return false
+    // The recorded dimension must agree with the actual length, or a
+    // truncated write would go undetected.
+    if (s.embeddingDim !== undefined && s.embeddingDim !== null) {
+      if (typeof s.embeddingDim !== 'number') return false
+      if (s.embeddingDim !== s.embedding.length) return false
+    }
+  }
+  else if (
+    s.embeddingDim !== undefined
+    && s.embeddingDim !== null
+    && s.embeddingDim !== 0
+  ) {
+    // A dimension without a vector means the vector was lost in
+    // transit. Better to reject than to store a claim with no data.
+    return false
   }
 
   return true

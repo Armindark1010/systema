@@ -14,6 +14,7 @@ import com.getcapacitor.annotation.ActivityCallback
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.systema.music.inference.clap.ClapLog
 import com.systema.music.inference.clap.ClapSession
+import com.systema.music.inference.effnet.EffnetDiscogsSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -79,6 +80,19 @@ class InferencePlugin : Plugin() {
      * touch a model, and nothing is loaded until asked.
      */
     private val clap: ClapSession by lazy { ClapSession(context, registry) }
+
+    /**
+     * Phase 29 Discogs-EffNet lifecycle owner.
+     *
+     * Deliberately a SEPARATE object from [clap]. They are different
+     * models with different front ends, rates and output widths, and
+     * the one thing that must never happen is an embedding being
+     * attributed to the wrong one. Sharing the runtime registry keeps
+     * a single ONNX abstraction underneath.
+     */
+    private val effnet: EffnetDiscogsSession by lazy {
+        EffnetDiscogsSession(context, registry) { benchmark.runtime(it) }
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -502,6 +516,101 @@ class InferencePlugin : Plugin() {
                 )
             }
         }
+    }
+
+
+    // ---- PHASE 29: DISCOGS-EFFNET (EXPERIMENTAL SEMANTIC EMBEDDING) ----
+    //
+    // Separate from the clap* methods on purpose. A caller must name
+    // the model it wants; there is no "semantic analysis" method that
+    // silently picks one, because that is how a CLAP vector ends up
+    // stored as an EffNet one.
+
+    /** Is an EffNet export installed, and what can it actually do? */
+    @PluginMethod
+    fun effnetStatus(call: PluginCall) {
+        call.resolve(effnet.status())
+    }
+
+    /** Loads the installed export. MODEL_NOT_INSTALLED when absent. */
+    @PluginMethod
+    fun effnetLoadModel(call: PluginCall) {
+        scope.launch {
+            try {
+                call.resolve(effnet.load())
+            } catch (e: InferenceException) {
+                call.reject(e.message ?: "EffNet failed to load.", errorCodeFor(e))
+            } catch (e: Throwable) {
+                call.reject(
+                    e.message ?: "EffNet failed to load.",
+                    "MODEL_INCOMPATIBLE",
+                )
+            }
+        }
+    }
+
+    /**
+     * Embeds ONE named track and returns the REAL vector.
+     *
+     * The track is never auto-selected: the caller supplies both id
+     * and uri, so a result can always be traced to the audio that
+     * produced it.
+     */
+    @PluginMethod
+    fun effnetEmbedTrack(call: PluginCall) {
+        val trackId = call.getString("trackId")
+        val uri = call.getString("uri")
+        if (trackId.isNullOrBlank() || uri.isNullOrBlank()) {
+            call.reject(
+                "Both trackId and uri are required. The track is never auto-selected.",
+                "PREPROCESSING_FAILED",
+            )
+            return
+        }
+        val durationSec = call.getInt("durationSec") ?: 120
+        val includeVector = call.getBoolean("includeVector") ?: true
+
+        scope.launch {
+            try {
+                call.resolve(effnet.embedTrack(trackId, uri, durationSec, includeVector))
+            } catch (e: InferenceException) {
+                call.reject(e.message ?: "EffNet inference failed.", errorCodeFor(e))
+            } catch (e: Throwable) {
+                // No fallback. Not to CLAP, not to a synthetic vector.
+                call.reject(e.message ?: "EffNet inference failed.", "INFERENCE_FAILED")
+            }
+        }
+    }
+
+    /** Releases the EffNet session. Safe when nothing is loaded. */
+    @PluginMethod
+    fun effnetRelease(call: PluginCall) {
+        scope.launch {
+            try {
+                call.resolve(effnet.release())
+            } catch (e: Throwable) {
+                call.reject(e.message ?: "Release failed.", "INFERENCE_FAILED")
+            }
+        }
+    }
+
+    /**
+     * Maps a runtime code to the Phase 29 vocabulary.
+     *
+     * The web layer distinguishes four situations because each has a
+     * different remedy: import the model, import a DIFFERENT model,
+     * fix the audio, or report a runtime bug. Collapsing them into one
+     * "failed" would make every one of those indistinguishable.
+     */
+    private fun errorCodeFor(e: InferenceException): String = when (e.code) {
+        InferenceErrorCode.MODEL_NOT_FOUND -> "MODEL_NOT_INSTALLED"
+        InferenceErrorCode.MODEL_INVALID -> "MODEL_INCOMPATIBLE"
+        InferenceErrorCode.INPUT_SHAPE_MISMATCH -> "PREPROCESSING_FAILED"
+        InferenceErrorCode.PREPROCESSING_UNAVAILABLE -> "PREPROCESSING_FAILED"
+        InferenceErrorCode.MODEL_LOAD_FAILED -> "MODEL_INCOMPATIBLE"
+        InferenceErrorCode.RUNTIME_UNAVAILABLE -> "INFERENCE_FAILED"
+        InferenceErrorCode.MODEL_INFERENCE_FAILED -> "INFERENCE_FAILED"
+        InferenceErrorCode.MODEL_UNLOADED -> "INFERENCE_FAILED"
     }
 
     /** RELEASE + MEMORY CHECK. Safe when nothing is loaded. */

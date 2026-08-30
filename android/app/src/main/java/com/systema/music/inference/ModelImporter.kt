@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
 import com.getcapacitor.JSArray
+import com.systema.music.inference.effnet.EffnetDiscogsModel
 import com.getcapacitor.JSObject
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -97,6 +98,23 @@ class ModelImporter(
                         "${formatBytes(ModelStorage.MAX_IMPORT_BYTES)} import limit.",
                     fileName = declaredName,
                     sizeBytes = declaredSize,
+                )
+            }
+
+            // Fail fast on a format SYSTEMA structurally cannot load.
+            //
+            // Without this, importing a .pb costs a full file copy and
+            // then surfaces an ONNX Runtime parse error, which tells a
+            // developer nothing about what to do next. The named
+            // alternative matters: for Discogs-EffNet an ONNX build is
+            // published, so the fix is "download the other file", not
+            // "convert it" and certainly not "add TensorFlow".
+            EffnetDiscogsModel.rejectionReasonFor(declaredName)?.let { reason ->
+                return@withContext ImportReport.failure(
+                    InferenceErrorCode.MODEL_INVALID,
+                    reason,
+                    fileName = declaredName,
+                    sizeBytes = declaredSize ?: -1L,
                 )
             }
 

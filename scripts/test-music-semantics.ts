@@ -157,7 +157,13 @@ section('4. The runtime never fabricates')
 
   const emb = await rt.runEmbedding({ trackId: 't', uri: 'content://x' })
   ok('runEmbedding fails rather than returning data', emb.ok === false)
-  ok('and says why', !emb.ok && emb.code === 'PROVIDER_NOT_READY')
+  // Off-device (this test runs in Node) the honest answer is
+  // PROVIDER_UNAVAILABLE: there is no native runtime here at all, which
+  // is a different situation from a device that simply lacks the model.
+  // Both are refusals; neither returns a vector.
+  ok('and says why', !emb.ok
+    && (emb.code === 'PROVIDER_UNAVAILABLE' || emb.code === 'PROVIDER_NOT_READY'))
+  ok('a refusal never carries a value', !emb.ok && !('value' in emb))
 
   const head = await rt.runHead('any', [0.1])
   ok('runHead fails rather than returning scores', head.ok === false)
@@ -185,7 +191,10 @@ section('5. Provider contract: injectable, replaceable, honest')
 
   const notReady = await real!.analyze({ trackId: 't1', uri: 'content://media/1' })
   ok('an unready provider fails', notReady.ok === false)
-  ok('with PROVIDER_NOT_READY', !notReady.ok && notReady.code === 'PROVIDER_NOT_READY')
+  ok('with an honest not-ready code, not a fabricated result',
+    !notReady.ok
+    && (notReady.code === 'PROVIDER_NOT_READY'
+      || notReady.code === 'PROVIDER_UNAVAILABLE'))
   ok('the failure names no fabricated prediction',
     !notReady.ok && !JSON.stringify(notReady).includes('melancholic'))
 
