@@ -267,6 +267,16 @@ export function validateEmbedding(
         + 'not receive real audio.',
     }
   }
+  // Normalized embedding should have approximately unit L2 norm.
+  const l2 = Math.sqrt(embedding.reduce((s, v) => s + v * v, 0))
+  if (l2 < 0.95 || l2 > 1.05) {
+    return {
+      ok: false,
+      code: 'INVALID_OUTPUT',
+      message: `Normalized embedding L2 norm ${l2.toFixed(3)} is not ~1. `
+        + 'Pool/normalization step may have failed.',
+    }
+  }
   return { ok: true }
 }
 

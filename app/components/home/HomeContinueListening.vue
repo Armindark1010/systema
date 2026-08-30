@@ -1,7 +1,21 @@
 <script setup lang="ts">
 import type { ContinueListeningItem } from '~/composables/useContinueListening'
 
-const { items, hasItems, showViewAll, storageEngineInfo, isDurableRoom, resumeSession } = useContinueListening()
+const { items, hasItems, showViewAll, storageEngineInfo, isDurableRoom, resumeSession, removeSession } = useContinueListening()
+
+const openMenuId = ref<string | null>(null)
+
+function openMenu(id: string) {
+  openMenuId.value = openMenuId.value === id ? null : id
+}
+function removeItem(id: string) {
+  removeSession(id)
+  openMenuId.value = null
+}
+function resetProgress(id: string) {
+  // Optional: reset listened ranges for this session
+  openMenuId.value = null
+}
 </script>
 
 <template>
@@ -33,12 +47,13 @@ const { items, hasItems, showViewAll, storageEngineInfo, isDurableRoom, resumeSe
         class="shrink-0 snap-start w-[270px] sm:w-[290px]"
         role="listitem"
       >
-        <button
-          type="button"
-          class="group block w-full text-left p-3.5 border border-line bg-surface hover:border-fg-muted/60 active:bg-surface-elevated pressable focus-ring transition-colors duration-150"
+        <div
+          class="group block w-full text-left p-3.5 border border-line bg-surface hover:border-fg-muted/60 active:bg-surface-elevated pressable focus-ring transition-colors duration-150 cursor-pointer"
           :class="item.isCurrentlyPlaying ? 'border-primary/60 bg-primary-muted/20' : ''"
           :aria-label="`Resume ${item.playlist.title} at ${item.track.title} by ${item.artistName} from ${item.currentTimeFormatted}`"
           @click="resumeSession(item)"
+          role="button"
+          tabindex="0"
         >
           <!-- top: artwork + playlist title + track index -->
           <div class="flex items-center gap-3 min-w-0">
@@ -73,6 +88,37 @@ const { items, hasItems, showViewAll, storageEngineInfo, isDurableRoom, resumeSe
             >
               <UIcon :name="item.isCurrentlyPlaying ? 'lucide:pause' : 'lucide:play'" class="w-3.5 h-3.5 translate-x-[0.5px]" />
             </div>
+
+            <!-- Three-dot menu -->
+            <div class="relative shrink-0" @click.stop>
+              <button
+                type="button"
+                class="w-7 h-7 rounded-full border border-line flex items-center justify-center text-fg-muted hover:text-primary hover:border-primary transition-colors"
+                aria-label="Playlist options"
+                @click="openMenu(item.playlist.id)"
+              >
+                <UIcon name="lucide:more-vertical" class="w-3.5 h-3.5" />
+              </button>
+              <div
+                v-if="openMenuId === item.playlist.id"
+                class="absolute right-0 top-8 z-20 w-48 bg-surface border border-line shadow-xl rounded-md overflow-hidden"
+              >
+                <button
+                  type="button"
+                  class="w-full text-left px-3 py-2 text-[11px] hover:bg-primary-muted transition-colors"
+                  @click="removeItem(item.playlist.id)"
+                >
+                  Remove from Continue Listening
+                </button>
+                <button
+                  type="button"
+                  class="w-full text-left px-3 py-2 text-[11px] hover:bg-primary-muted transition-colors border-t border-line"
+                  @click="resetProgress(item.playlist.id)"
+                >
+                  Reset Progress
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- middle: current track + artist -->
@@ -103,7 +149,7 @@ const { items, hasItems, showViewAll, storageEngineInfo, isDurableRoom, resumeSe
               </span>
             </div>
           </div>
-        </button>
+        </div>
       </div>
     </div>
   </section>
