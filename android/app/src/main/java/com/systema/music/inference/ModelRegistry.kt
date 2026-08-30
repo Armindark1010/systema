@@ -107,7 +107,11 @@ class ModelRegistry(context: Context) {
         return ModelDescriptor(
             modelId = modelId,
             modelName = fileName,
-            version = if (contract != null) "imported" else "side-loaded",
+            // The version has to be a REAL property of the installed
+            // file, because it keys the analysis cache: if two different
+            // checkpoints both call themselves "imported", swapping one
+            // for the other silently reuses the old embeddings.
+            version = versionForInstalled(fileName, contract != null),
             filePath = path,
             inputShape = inputShape ?: contract?.inputShape?.takeIf { it.isNotEmpty() }
                 ?: listOf(-1L),
@@ -123,6 +127,33 @@ class ModelRegistry(context: Context) {
             // RAW_WAVEFORM, which it would happily run.
             inputFormat = inputFormat ?: contract?.inputFormat ?: InputFormat.RAW_TENSOR,
         )
+    }
+
+
+    /**
+     * A version string derived from the installed file, never invented.
+     *
+     * Published model files overwhelmingly carry their revision as a
+     * trailing token — `discogs-effnet-bsdynamic-1.onnx`, `yamnet-1`,
+     * `msd-musicnn-1`. When that token is present it IS the version,
+     * and using it means re-importing a newer checkpoint invalidates
+     * the cache by itself.
+     *
+     * When it is absent, the answer is a checksum-free honest label
+     * rather than a fabricated "1": claiming a version SYSTEMA cannot
+     * observe would make two different files indistinguishable, which
+     * is the exact failure this is here to prevent.
+     */
+    internal fun versionForInstalled(fileName: String, declared: Boolean): String {
+        val stem = fileName.removeSuffix(ModelStorage.EXTENSION)
+        val token = stem.substringAfterLast('-', missingDelimiterValue = "")
+        // Accept 1, 2, 1.0, 2.1.3 — a revision, not a word like "dynamic".
+        if (token.isNotEmpty() && token.all { it.isDigit() || it == '.' } &&
+            token.any { it.isDigit() }
+        ) {
+            return token
+        }
+        return if (declared) "imported" else "side-loaded"
     }
 
     /**
@@ -207,12 +238,25 @@ class ModelRegistry(context: Context) {
 
         // Only formats with an implemented preparation path can be
         // VERIFIED. Declaring "log-mel" does not make a mel front end
-        // exist, so those record as BLOCKED however confident the
-        // developer is.
+        // exist, so a format with no implementation records as BLOCKED
+        // however confident the developer is.
+        //
+        // The rule is IMPLEMENTATION-DRIVEN, not model-specific: the
+        // registry asks whether a front end exists for this model and
+        // agrees with the graph it was built for. Phase 29 added one
+        // (Discogs-EffNet / MusiCNN), so that model can now be
+        // VERIFIED; every other log-mel model still records BLOCKED
+        // because reusing a mismatched filterbank produces confident,
+        // meaningless embeddings.
         val status = when (inputFormat) {
-            InputFormat.MEL_SPECTROGRAM,
-            InputFormat.LOG_MEL_SPECTROGRAM,
-            -> PreprocessingStatus.BLOCKED
+            InputFormat.LOG_MEL_SPECTROGRAM ->
+                if (MelFrontEnds.hasFrontEndFor(modelId, sampleRate)) {
+                    PreprocessingStatus.VERIFIED
+                } else {
+                    PreprocessingStatus.BLOCKED
+                }
+
+            InputFormat.MEL_SPECTROGRAM -> PreprocessingStatus.BLOCKED
 
             InputFormat.RAW_WAVEFORM ->
                 if (sampleRate != null && sampleRate > 0) PreprocessingStatus.VERIFIED

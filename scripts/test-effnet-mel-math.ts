@@ -40,6 +40,9 @@ const HOP_SIZE = 256
 const MEL_BANDS = 96
 const PATCH_SIZE = 128
 const PATCH_HOP = 62
+// The DEFAULT batch, used only when a graph declares a fixed axis and
+// the caller has nothing better. The real batch is read from the model:
+// the bsdynamic export has a dynamic axis and runs a whole track at once.
 const BATCH_SIZE = 64
 const LOG_SHIFT = 1
 const LOG_SCALE = 10000
@@ -320,7 +323,7 @@ section('7. The Kotlin implementation declares the same constants')
     ['MEL_BANDS', MEL_BANDS],
     ['PATCH_SIZE', PATCH_SIZE],
     ['PATCH_HOP', PATCH_HOP],
-    ['BATCH_SIZE', BATCH_SIZE],
+    ['DEFAULT_BATCH_SIZE', BATCH_SIZE],
   ]
   for (const [name, value] of pairs) {
     const m = new RegExp(`const val ${name} = ([0-9_]+)`).exec(kt)

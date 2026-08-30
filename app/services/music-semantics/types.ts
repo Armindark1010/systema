@@ -147,6 +147,26 @@ export interface SemanticAnalysisResult {
   /** Declared-but-unavailable fields, with reasons. */
   unsupported: UnsupportedSemanticField[]
 
+  /**
+   * The real backbone embedding (Phase 29.x).
+   *
+   * WHY THE VECTOR IS PART OF THE RESULT
+   * ------------------------------------
+   * Until the classifier heads exist, this IS the model's output. If
+   * only labels were carried, a successful EffNet run would produce a
+   * result with `heads: []` and nothing else — indistinguishable from
+   * a failure, and the expensive inference would be thrown away.
+   *
+   * It is also the durable artefact: heads can be added later and
+   * re-run over stored embeddings without decoding the audio again.
+   *
+   * Null when a provider produces labels without exposing a backbone
+   * vector, which is a real possibility for a different model.
+   */
+  embedding: number[] | null
+  /** Length of [embedding], recorded separately so a truncated read is detectable. */
+  embeddingDim: number | null
+
   /** Audio actually seen by the model. */
   sourceDurationSec: number | null
   processedDurationSec: number | null

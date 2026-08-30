@@ -60,6 +60,35 @@ const vocalPredictions = computed(() =>
 const hasSemantic = computed(() =>
   Boolean(props.semantic && props.semantic.heads.length > 0))
 
+/**
+ * A real embedding was produced, whether or not any head ran.
+ *
+ * Phase 29.x: Discogs-EffNet produces a 1280-d vector and NO labels,
+ * because no classifier head has been converted or imported. Gating
+ * the whole section on `heads.length > 0` would render an entirely
+ * successful, expensive inference as if nothing had happened.
+ */
+const hasEmbedding = computed(() =>
+  Boolean(props.semantic?.embedding && props.semantic.embedding.length > 0))
+
+/** Shown whenever the model produced anything at all. */
+const hasSemanticOutput = computed(() => hasSemantic.value || hasEmbedding.value)
+
+const embeddingDim = computed(() =>
+  props.semantic?.embeddingDim ?? props.semantic?.embedding?.length ?? null)
+
+/**
+ * The model identity that ACTUALLY produced this row.
+ *
+ * Read from the stored record rather than from a constant, so a row
+ * written by a different export is labelled with that export.
+ */
+const semanticModelLabel = computed(() => {
+  const m = props.semantic
+  if (!m?.model) return null
+  return m.modelVersion ? `${m.model} v${m.modelVersion}` : m.model
+})
+
 /** Fields the model could not produce, with the reason. */
 const semanticUnsupported = computed(() => props.semantic?.unsupported ?? [])
 
@@ -179,7 +208,7 @@ const analysedAt = computed(() => {
 
       <!-- Phase 29 semantic predictions. MODEL OUTPUT, never ground
            truth, and never shown without its score. -->
-      <div v-if="hasSemantic" class="ai-semantic">
+      <div v-if="hasSemanticOutput" class="ai-semantic">
         <div class="ai-semantic-head">
           <span class="ai-semantic-title">SEMANTIC</span>
           <span class="ai-analysis-tag">EXPERIMENTAL</span>
@@ -188,6 +217,29 @@ const analysedAt = computed(() => {
         <p class="ai-semantic-caption">
           Predicted by a model, not verified. These are not your labels.
         </p>
+
+        <!-- The embedding is the real output in this phase. Shown as a
+             fact about the run, never dressed up as a label. -->
+        <div v-if="hasEmbedding" class="ai-semantic-group">
+          <p class="ai-semantic-label">EMBEDDING</p>
+          <div class="ai-semantic-row">
+            <span class="ai-semantic-name">dimensions</span>
+            <span class="ai-semantic-score tnum">{{ embeddingDim }}</span>
+          </div>
+          <div v-if="semanticModelLabel" class="ai-semantic-row">
+            <span class="ai-semantic-name">model</span>
+            <span class="ai-semantic-score">{{ semanticModelLabel }}</span>
+          </div>
+          <div v-if="semantic?.inferenceMs != null" class="ai-semantic-row">
+            <span class="ai-semantic-name">inference</span>
+            <span class="ai-semantic-score tnum">{{ Math.round(semantic.inferenceMs) }} ms</span>
+          </div>
+          <p v-if="!hasSemantic" class="ai-semantic-caption">
+            This model produces an embedding only. Genre, mood, tags and
+            vocal detection need separate classifier heads that are not
+            installed, so none are shown.
+          </p>
+        </div>
 
         <div v-if="moodPredictions.length" class="ai-semantic-group">
           <p class="ai-semantic-label">MOOD</p>

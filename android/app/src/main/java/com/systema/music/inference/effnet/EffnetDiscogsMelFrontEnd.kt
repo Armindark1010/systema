@@ -89,8 +89,19 @@ class EffnetDiscogsMelFrontEnd(
         /** Frames between patch starts. ~1.008 Hz prediction rate. */
         const val PATCH_HOP = 62
 
-        /** The bs64 checkpoint requires exactly this batch size. */
-        const val BATCH_SIZE = 64
+        /**
+         * Default batch, matching the `bs64` checkpoint.
+         *
+         * NOT a property of the front end. Essentia publishes both a
+         * fixed-batch (`bs64`) and a dynamic-batch (`bsdynamic`) export
+         * of the same network, and the batch axis is the ONLY
+         * difference. [toBatch] therefore takes the size as an
+         * argument and the caller passes whatever the loaded graph
+         * actually declares. Baking 64 in here would silently
+         * zero-pad 61 slots for a three-patch track on a model that
+         * never needed padding at all.
+         */
+        const val DEFAULT_BATCH_SIZE = 64
 
         /** TensorflowInputMusiCNN shift. */
         const val LOG_SHIFT = 1.0f
@@ -280,15 +291,21 @@ class EffnetDiscogsMelFrontEnd(
      * signal. Predictions from the padding slots MUST be discarded —
      * they describe silence, not the track.
      */
-    fun toBatch(frames: Array<FloatArray>, batchIndex: Int = 0): PatchBatch? {
+    fun toBatch(
+        frames: Array<FloatArray>,
+        batchIndex: Int = 0,
+        batchSize: Int = DEFAULT_BATCH_SIZE,
+    ): PatchBatch? {
+        require(batchSize > 0) { "batchSize must be positive, was $batchSize" }
+
         val available = patchCountFor(frames.size)
         if (available <= 0) return null
 
-        val first = batchIndex * BATCH_SIZE
+        val first = batchIndex * batchSize
         if (first >= available) return null
-        val real = min(BATCH_SIZE, available - first)
+        val real = min(batchSize, available - first)
 
-        val tensor = FloatArray(BATCH_SIZE * PATCH_SIZE * melBands)
+        val tensor = FloatArray(batchSize * PATCH_SIZE * melBands)
         for (p in 0 until real) {
             val frameStart = (first + p) * PATCH_HOP
             for (t in 0 until PATCH_SIZE) {
@@ -297,20 +314,36 @@ class EffnetDiscogsMelFrontEnd(
                 System.arraycopy(src, 0, tensor, dst, melBands)
             }
         }
-        // Slots [real, BATCH_SIZE) stay zero — deliberately.
+        // Slots [real, batchSize) stay zero — deliberately. On a
+        // dynamic-batch graph the caller passes batchSize == real and
+        // there are none.
         return PatchBatch(
             data = tensor,
-            shape = listOf(BATCH_SIZE.toLong(), PATCH_SIZE.toLong(), melBands.toLong()),
+            shape = listOf(batchSize.toLong(), PATCH_SIZE.toLong(), melBands.toLong()),
             realPatchCount = real,
             totalPatchCount = available,
         )
     }
 
     /** Number of batches needed to cover every patch. */
-    fun batchCountFor(frameCount: Int): Int {
+    fun batchCountFor(frameCount: Int, batchSize: Int = DEFAULT_BATCH_SIZE): Int {
+        require(batchSize > 0) { "batchSize must be positive, was $batchSize" }
         val patches = patchCountFor(frameCount)
         if (patches <= 0) return 0
-        return ceil(patches.toDouble() / BATCH_SIZE).toInt()
+        return ceil(patches.toDouble() / batchSize).toInt()
+    }
+
+    /**
+     * Every patch in ONE tensor, for a dynamic-batch graph.
+     *
+     * `bsdynamic` accepts any batch size, so the whole track can go
+     * through in a single session run with no padding. Returns null
+     * when there is not one complete patch — never a padded stand-in.
+     */
+    fun toSingleBatch(frames: Array<FloatArray>): PatchBatch? {
+        val available = patchCountFor(frames.size)
+        if (available <= 0) return null
+        return toBatch(frames, batchIndex = 0, batchSize = available)
     }
 }
 

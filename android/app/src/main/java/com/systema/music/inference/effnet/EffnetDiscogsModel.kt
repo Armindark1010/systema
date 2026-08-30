@@ -45,7 +45,21 @@ import com.systema.music.inference.TensorType
  */
 object EffnetDiscogsModel {
 
-    /** Model id, matching the official file name without extension. */
+    /**
+     * The canonical family prefix. NOT a full model id.
+     *
+     * Essentia publishes several exports of the same network that
+     * differ only in the batch axis — `discogs-effnet-bs64-1` and
+     * `discogs-effnet-bsdynamic-1` today. The real id is whatever the
+     * imported FILE is called, because that is the only thing that
+     * actually identifies which export is on the device. Hardcoding
+     * one would mean the other silently loads under the wrong
+     * identity, and a cache keyed on model id would then serve
+     * embeddings from a different graph.
+     */
+    const val MODEL_FAMILY = "discogs-effnet"
+
+    /** The default export referenced in docs and error messages. */
     const val MODEL_ID = "discogs-effnet-bs64-1"
 
     const val MODEL_NAME = "EffnetDiscogs"
@@ -79,32 +93,78 @@ object EffnetDiscogsModel {
      * time by [verifySignature]; a disagreement is an error, never
      * something to reconcile silently.
      */
-    fun descriptorFor(filePath: String, sizeBytes: Long = -1L): ModelDescriptor =
-        ModelDescriptor(
-            modelId = MODEL_ID,
+    fun descriptorFor(
+        filePath: String,
+        sizeBytes: Long = -1L,
+        /** The installed file name; the real identity of this export. */
+        fileName: String? = null,
+        /**
+         * Batch size the graph declares, or null for a dynamic axis.
+         * -1 is emitted in the descriptor for dynamic, exactly as ORT
+         * reports it, so nothing downstream mistakes it for a real 1.
+         */
+        batchSize: Int? = EffnetDiscogsMelFrontEnd.DEFAULT_BATCH_SIZE,
+    ): ModelDescriptor {
+        val id = fileName?.removeSuffix(".onnx")?.takeIf { it.isNotEmpty() } ?: MODEL_ID
+        val batchAxis = batchSize?.toLong() ?: -1L
+        return ModelDescriptor(
+            modelId = id,
             modelName = MODEL_NAME,
-            version = VERSION,
+            // Parsed from the file name, never assumed. "unknown" is
+            // an honest value; a fabricated "1" would key the cache
+            // wrongly and hide a checkpoint change.
+            version = fileName?.let(::versionFromFileName) ?: VERSION,
             filePath = filePath,
             inputShape = listOf(
-                EffnetDiscogsMelFrontEnd.BATCH_SIZE.toLong(),
+                batchAxis,
                 EffnetDiscogsMelFrontEnd.PATCH_SIZE.toLong(),
                 EffnetDiscogsMelFrontEnd.MEL_BANDS.toLong(),
             ),
             inputType = TensorType.FLOAT32,
             inputSampleRate = EffnetDiscogsMelFrontEnd.SAMPLE_RATE,
             inputChannels = 1,
-            outputShape = listOf(
-                EffnetDiscogsMelFrontEnd.BATCH_SIZE.toLong(),
-                EMBEDDING_DIM.toLong(),
-            ),
+            outputShape = listOf(batchAxis, EMBEDDING_DIM.toLong()),
             outputType = TensorType.FLOAT32,
             sizeBytes = sizeBytes,
             inputFormat = InputFormat.LOG_MEL_SPECTROGRAM,
         )
+    }
 
-    /** True when [model] is this model, by id. */
+    /** True when [model] belongs to the Discogs-EffNet family. */
     fun isEffnetDiscogs(model: ModelDescriptor): Boolean =
-        model.modelId == MODEL_ID || model.modelId.startsWith("discogs-effnet")
+        isEffnetDiscogsId(model.modelId)
+
+    /** True when [modelId] belongs to the Discogs-EffNet family. */
+    fun isEffnetDiscogsId(modelId: String): Boolean =
+        modelId.startsWith(MODEL_FAMILY)
+
+    /**
+     * The batch size a given export expects, or null when dynamic.
+     *
+     * Read from the GRAPH's declared input shape, never from the file
+     * name. A file called `bsdynamic` that actually declares a fixed
+     * 64 is a mislabelled file, and trusting the name would produce a
+     * shape error at session run time with a misleading message.
+     */
+    fun batchSizeFrom(inputShape: List<Long>): Int? {
+        val batch = inputShape.firstOrNull() ?: return null
+        return if (batch > 0) batch.toInt() else null
+    }
+
+    /**
+     * Version parsed from the official file naming convention.
+     *
+     * Essentia names releases `<model>-<version>`, so the trailing
+     * integer is the checkpoint version. Returns null when the name
+     * does not carry one — in which case the caller must record
+     * "unknown" rather than inventing "1". A wrong version string is
+     * worse than an absent one: cache invalidation keys on it.
+     */
+    fun versionFromFileName(fileName: String): String? {
+        val base = fileName.removeSuffix(".onnx")
+        val trailing = base.substringAfterLast('-', "")
+        return trailing.takeIf { it.isNotEmpty() && it.all(Char::isDigit) }
+    }
 
     /**
      * Why a given file cannot be used, or null when it looks usable.
@@ -189,6 +249,48 @@ object EffnetDiscogsModel {
                     "filterbank would produce meaningless embeddings.",
             )
         }
+
+        // The time axis must be the patch length the front end emits.
+        // A model wanting 96 frames would accept our 128-frame tensor
+        // on a dynamic axis and quietly analyse the wrong span.
+        val shape = info.inputs.firstOrNull()?.shape
+        if (shape != null && shape.size >= 3) {
+            val frames = shape[shape.size - 2].toInt()
+            if (frames > 0 && frames != EffnetDiscogsMelFrontEnd.PATCH_SIZE) {
+                throw InferenceException(
+                    InferenceErrorCode.INPUT_SHAPE_MISMATCH,
+                    "Model expects $frames frames per patch but the front end " +
+                        "produces ${EffnetDiscogsMelFrontEnd.PATCH_SIZE}.",
+                )
+            }
+        }
+    }
+
+    /**
+     * How this export handles batching, read from the loaded graph.
+     *
+     * Reported so the caller can choose between one session run for
+     * the whole track (dynamic) and fixed-size padded batches (bs64).
+     */
+    fun batchModeOf(info: LoadedModelInfo): BatchMode {
+        val batch = info.inputs.firstOrNull()?.shape?.firstOrNull()
+        return when {
+            batch == null -> BatchMode.Unknown
+            batch <= 0L -> BatchMode.Dynamic
+            else -> BatchMode.Fixed(batch.toInt())
+        }
+    }
+
+    /** Batch behaviour of a loaded graph. */
+    sealed interface BatchMode {
+        /** Any batch size accepted — `bsdynamic`. One run per track. */
+        data object Dynamic : BatchMode
+
+        /** Exactly [size] patches per run — `bs64`. Pad the last batch. */
+        data class Fixed(val size: Int) : BatchMode
+
+        /** The graph did not report a shape. Treat as fixed-default. */
+        data object Unknown : BatchMode
     }
 
     /**
@@ -232,7 +334,13 @@ object EffnetDiscogsModel {
         }
 
         val frames = frontEnd.melFrames(pcm)
-        val batch = frontEnd.toBatch(frames, batchIndex = 0)
+        // Batch axis from the descriptor: -1 (dynamic) means the whole
+        // track goes through in one run with no padding at all.
+        val declared = batchSizeFrom(model.inputShape)
+        val batch = (
+            if (declared == null) frontEnd.toSingleBatch(frames)
+            else frontEnd.toBatch(frames, batchIndex = 0, batchSize = declared)
+            )
             ?: throw InferenceException(
                 InferenceErrorCode.INPUT_SHAPE_MISMATCH,
                 "Could not build a complete patch from ${frames.size} frames.",

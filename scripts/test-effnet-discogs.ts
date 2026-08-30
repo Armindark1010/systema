@@ -57,7 +57,7 @@ section('1. Front-end constants match Essentia source exactly')
     ['96 mel bands', /const val MEL_BANDS = 96/],
     ['patch size is 128 frames', /const val PATCH_SIZE = 128/],
     ['patch hop is 62 frames', /const val PATCH_HOP = 62/],
-    ['batch size is 64', /const val BATCH_SIZE = 64/],
+    ['a default batch of 64', /const val DEFAULT_BATCH_SIZE = 64/],
     ['log shift is 1', /const val LOG_SHIFT = 1\.0f/],
     ['log scale is 10000', /const val LOG_SCALE = 10_000\.0f/],
   ]
@@ -152,13 +152,18 @@ section('3. Framing arithmetic mirrors Essentia padSignal')
 }
 
 // =====================================================================
-section('4. Output tensor shape is [64, 128, 96]')
+section('4. Output tensor shape is [batch, 128, 96]')
 {
   ok('toBatch emits the documented shape',
-    /listOf\(\s*BATCH_SIZE\.toLong\(\),\s*PATCH_SIZE\.toLong\(\),\s*melBands\.toLong\(\)\s*\)/
+    /listOf\(\s*batchSize\.toLong\(\),\s*PATCH_SIZE\.toLong\(\),\s*melBands\.toLong\(\)\s*\)/
       .test(frontEnd))
   ok('the tensor is sized batch*patch*bands',
-    /FloatArray\(BATCH_SIZE \* PATCH_SIZE \* melBands\)/.test(frontEnd))
+    /FloatArray\(batchSize \* PATCH_SIZE \* melBands\)/.test(frontEnd))
+  // The batch is a property of the EXPORT, not of the front end.
+  ok('the batch size is a parameter, not a constant',
+    /fun toBatch\([^)]*batchSize: Int/s.test(frontEnd))
+  ok('a dynamic export can run the whole track in one call',
+    /fun toSingleBatch\(/.test(frontEnd))
 
   const elements = 64 * 128 * 96
   ok('a full batch is 786432 floats', elements === 786432)
@@ -352,8 +357,9 @@ section('11. Runtime readiness is reported honestly')
     rt.RUNTIME_REQUIREMENTS.find(r => r.id === 'embedding-weights')?.done === false)
   ok('head conversion is still outstanding',
     rt.RUNTIME_REQUIREMENTS.find(r => r.id === 'head-conversion')?.done === false)
-  ok('the native bridge is still outstanding',
-    rt.RUNTIME_REQUIREMENTS.find(r => r.id === 'native-bridge')?.done === false)
+  // Phase 29.x: the EMBEDDING bridge now exists end to end.
+  ok('the native bridge for the embedding is wired',
+    rt.RUNTIME_REQUIREMENTS.find(r => r.id === 'native-bridge')?.done === true)
   ok('the tags label list is tracked as outstanding',
     rt.RUNTIME_REQUIREMENTS.find(r => r.id === 'head-labels-top50tags')?.done === false)
 
@@ -365,10 +371,18 @@ section('11. Runtime readiness is reported honestly')
   ok('it still names what is missing',
     /side-loaded/.test(rt.RUNTIME_NOT_READY_MESSAGE))
 
-  // And inference still refuses.
+  // Off-device, inference must refuse rather than simulate. This test
+  // runs in Node, where Capacitor reports a non-native platform.
   const emb = await rt.runEmbedding({ trackId: 't', uri: 'content://x' })
-  ok('runEmbedding still refuses to return data', emb.ok === false)
-  ok('with PROVIDER_NOT_READY', !emb.ok && emb.code === 'PROVIDER_NOT_READY')
+  ok('runEmbedding refuses to return data off-device', emb.ok === false)
+  ok('with PROVIDER_UNAVAILABLE, naming the platform as the reason',
+    !emb.ok && emb.code === 'PROVIDER_UNAVAILABLE')
+  ok('and never a simulated vector',
+    !emb.ok && !('value' in emb))
+
+  // A missing URI is a DIFFERENT failure from a missing platform.
+  const noUri = await rt.runEmbedding({ trackId: 't' })
+  ok('a track with no URI fails distinctly', noUri.ok === false)
 }
 
 // =====================================================================

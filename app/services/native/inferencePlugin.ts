@@ -1032,6 +1032,96 @@ export interface EvaluationReport {
   errorMessage?: string
 }
 
+
+/**
+ * PHASE 29 — DISCOGS-EFFNET (EXPERIMENTAL SEMANTIC EMBEDDING)
+ *
+ * A SEPARATE surface from the clap* methods, not an extension of them.
+ * The two models have different front ends, sample rates and output
+ * widths; the only thing worse than neither working would be a CLAP
+ * vector stored under an EffNet identity.
+ */
+export interface EffnetStatus {
+  available: boolean
+  runtime: string
+  /** Whether an EffNet export is present in model storage. */
+  installed: boolean
+  /** Derived from the installed file name, never invented. */
+  modelId: string | null
+  modelFile: string | null
+  modelVersion: string | null
+  loaded: boolean
+  embeddingDimension: number
+  sampleRate: number
+  melBands: number
+  experimental: boolean
+  /** This model emits a vector. */
+  producesEmbedding: boolean
+  /** It does NOT emit labels. The UI must respect this. */
+  producesLabels: boolean
+  notice: string
+  errorCode?: string
+  detail?: string
+}
+
+export interface EffnetLoadResult {
+  modelId: string
+  modelVersion: string | null
+  loadMs: number
+  sizeBytes: number
+  inputNames: string
+  outputNames: string
+  /** Dynamic, Fixed(n) or Unknown, read from the graph. */
+  batchMode: string
+  experimental: boolean
+}
+
+export interface EffnetEmbedResult {
+  trackId: string
+  modelId: string
+  modelVersion: string | null
+  embeddingDimension: number
+  patchesProcessed: number
+  patchesAvailable: number
+  sampleRate: number
+  sourceDurationSec: number
+  processedDurationSec: number
+  decodeMs: number
+  preprocessMs: number
+  inferenceMs: number
+  totalMs: number
+  experimental: boolean
+  producesLabels: false
+  frontEnd: string | null
+  /** The real vector. Absent when includeVector was false. */
+  embedding?: number[]
+}
+
+/**
+ * The four situations the web layer must tell apart.
+ *
+ * Each has a different remedy, which is the entire reason they are
+ * separate: import the model, import a DIFFERENT model, fix the audio,
+ * or report a runtime bug.
+ */
+export type EffnetErrorCode =
+  | 'MODEL_NOT_INSTALLED'
+  | 'MODEL_INCOMPATIBLE'
+  | 'PREPROCESSING_FAILED'
+  | 'INFERENCE_FAILED'
+
+export const EFFNET_ERROR_CODES: readonly EffnetErrorCode[] = [
+  'MODEL_NOT_INSTALLED',
+  'MODEL_INCOMPATIBLE',
+  'PREPROCESSING_FAILED',
+  'INFERENCE_FAILED',
+]
+
+export function isEffnetErrorCode(value: unknown): value is EffnetErrorCode {
+  return typeof value === 'string'
+    && (EFFNET_ERROR_CODES as readonly string[]).includes(value)
+}
+
 export interface InferencePlugin {
   getCapabilities(): Promise<InferenceCapabilities>
   runTestModel(options: {
@@ -1105,6 +1195,20 @@ export interface InferencePlugin {
   }): Promise<ClapSingleTrackResult>
   /** Releases the session and reports retained memory. */
   clapRelease(): Promise<ClapReleaseResult>
+  /** Phase 29: is an EffNet export installed and what can it do? */
+  effnetStatus(): Promise<EffnetStatus>
+  /** Loads the installed export. Rejects MODEL_NOT_INSTALLED if absent. */
+  effnetLoadModel(): Promise<EffnetLoadResult>
+  /** Embeds ONE named track. Never auto-selects. */
+  effnetEmbedTrack(options: {
+    trackId: string
+    uri: string
+    /** Seconds to analyse; 0 = whole track. Defaults to 120. */
+    durationSec?: number
+    includeVector?: boolean
+  }): Promise<EffnetEmbedResult>
+  /** Releases the EffNet session. Safe when nothing is loaded. */
+  effnetRelease(): Promise<{ released: boolean }>
   /** Records what an imported model consumes. Stamped as declared. */
   declareModelContract(options: {
     modelId: string

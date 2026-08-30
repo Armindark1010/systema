@@ -158,20 +158,41 @@ export class JamendoSemanticProvider implements MusicSemanticAnalysisProvider {
       heads.push(head)
     }
 
-    if (heads.length === 0) {
-      return {
-        ok: false,
-        code: 'INFERENCE_FAILED',
-        message: 'No classifier head produced a usable result.',
-        ...modelIdentity,
-      }
-    }
+    // AN EMBEDDING WITH NO HEADS IS A SUCCESS, NOT A FAILURE.
+    //
+    // This was previously an error, on the assumption that labels were
+    // the point. In Phase 29.x they are not: no classifier head has
+    // been converted or imported, so `heads` is legitimately empty
+    // while the backbone produced a real 1280-d vector at real cost.
+    //
+    // Reporting that as INFERENCE_FAILED would throw away the only
+    // genuine model output the project has, and would tell the user
+    // something is broken when nothing is. The embedding is the
+    // result; the missing labels are already itemised in `unsupported`
+    // with the reason for each.
+    //
+    // There is deliberately no "nothing was produced" guard here: the
+    // embedding length was already checked against
+    // EMBEDDING_MODEL.embeddingDim above, and TypeScript narrows it to
+    // exactly 1280 at this point. An extra `length === 0` test would
+    // be unreachable code that reads like a real safety net.
 
+    // IDENTITY COMES FROM THE MODEL THAT ACTUALLY RAN.
+    //
+    // modelIdentity above is the compile-time expectation, used for
+    // error paths where nothing ran. Once inference has happened, the
+    // native layer has reported which file produced this vector, and
+    // THAT is what gets stored — otherwise importing a different
+    // export would keep writing the old identity and the cache would
+    // never invalidate.
     const result: SemanticAnalysisResult = {
       trackId: input.trackId,
-      ...modelIdentity,
+      model: embedded.value.modelId || modelIdentity.model,
+      modelVersion: embedded.value.modelVersion || modelIdentity.modelVersion,
       heads,
       unsupported,
+      embedding: embedded.value.embedding,
+      embeddingDim: embedded.value.embedding.length,
       sourceDurationSec: embedded.value.sourceDurationSec,
       processedDurationSec: embedded.value.processedDurationSec,
       sampleRate: embedded.value.sampleRate,
