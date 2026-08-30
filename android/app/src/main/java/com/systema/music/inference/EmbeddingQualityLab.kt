@@ -137,7 +137,10 @@ class EmbeddingQualityLab(
         cancelRequested.set(false)
         running.set(true)
 
-        val config = AudioAnalysisConfig()
+        val config = AudioAnalysisConfig(
+            targetSampleRate = descriptor.inputSampleRate
+                ?: AudioAnalysisConfig().targetSampleRate,
+        )
         val decoder = PcmDecoder(context, config)
         val env = EnvironmentSnapshot.capture(context)
 

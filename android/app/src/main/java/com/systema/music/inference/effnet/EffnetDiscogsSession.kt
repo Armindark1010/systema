@@ -262,10 +262,13 @@ class EffnetDiscogsSession(
         val pcmChunks = ArrayList<FloatArray>()
         var totalSamples = 0
         val source = try {
-            PcmDecoder(context, config).decode(Uri.parse(uri)) { samples, count ->
-                pcmChunks.add(samples.copyOf(count))
-                totalSamples += count
-            }
+            PcmDecoder(context, config).decode(
+                Uri.parse(uri),
+                sink = { samples, count ->
+                    pcmChunks.add(samples.copyOf(count))
+                    totalSamples += count
+                },
+            )
         } catch (e: Throwable) {
             throw InferenceException(
                 InferenceErrorCode.INPUT_SHAPE_MISMATCH,

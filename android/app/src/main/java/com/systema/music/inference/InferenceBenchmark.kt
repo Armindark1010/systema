@@ -338,7 +338,10 @@ class InferenceBenchmark(
 
         val descriptor = registry.resolve(modelId)
         val env = EnvironmentSnapshot.capture(context)
-        val config = AudioAnalysisConfig()
+        val config = AudioAnalysisConfig(
+            targetSampleRate = descriptor.inputSampleRate
+                ?: AudioAnalysisConfig().targetSampleRate,
+        )
         val decoder = PcmDecoder(context, config)
 
         val rows = ArrayList<TrackMeasurement>(tracks.size)

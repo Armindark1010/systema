@@ -1,5 +1,7 @@
 package com.systema.music.inference
 
+import com.systema.music.inference.effnet.EffnetDiscogsModel
+
 /**
  * The boundary between decoded PCM and what a specific model eats.
  *
