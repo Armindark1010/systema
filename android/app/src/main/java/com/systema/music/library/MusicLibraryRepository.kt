@@ -255,13 +255,12 @@ class MusicLibraryRepository private constructor(
                 ),
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Scan failed", e)
+            Log.e(TAG, "Scan failed with unexpected exception", e)
             publish(
                 state.copy(
                     state = ScanState.ERROR,
                     errorCode = MusicLibraryException.Code.UNKNOWN.name,
-                    // Deliberately generic: no stack traces cross the bridge.
-                    errorMessage = "The library scan could not be completed.",
+                    errorMessage = e.message ?: "The library scan could not be completed.",
                     finishedAt = System.currentTimeMillis(),
                 ),
             )

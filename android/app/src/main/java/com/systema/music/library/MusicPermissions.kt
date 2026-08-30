@@ -31,8 +31,14 @@ object MusicPermissions {
             Manifest.permission.READ_EXTERNAL_STORAGE
         }
 
-    fun hasPermission(context: Context): Boolean =
-        ContextCompat.checkSelfPermission(context, required) == PackageManager.PERMISSION_GRANTED
+    fun hasPermission(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
+    }
 
     /**
      * Capacitor-style permission state string.

@@ -22,6 +22,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  *     persistence for user and AI playlists.
  * 6 — Phase 29: adds `listenedRangesJson` & `totalListenedSeconds` to `playlist_sessions`
  *     for true listened-time tracking without index assumptions.
+ * 7 — Phase 29: schema integrity verification for `playlist_sessions`.
+ * 8 — Phase 29: ensures `track_ai_analysis.semanticJson` exists on all devices.
  *
  * Migration policy: destructive migration is deliberately NOT enabled.
  * A user's library index must survive app updates, and later phases
@@ -38,7 +40,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PlaylistEntity::class,
         PlaylistTrackEntity::class,
     ],
-    version = 6,
+    version = 8,
     exportSchema = true,
 )
 abstract class MusicLibraryDatabase : RoomDatabase() {
@@ -326,6 +328,47 @@ abstract class MusicLibraryDatabase : RoomDatabase() {
         }
 
         /**
+         * 6 -> 7: Database integrity verification and playlist_sessions safety.
+         *
+         * Ensures any device with interim development schemas has required columns.
+         */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                android.util.Log.i("SystemaDb", "DATABASE_VERSION upgrading 6 -> 7 (verifying schema integrity)")
+                // Ensure playlist_sessions columns exist (may already be present from v6).
+                try {
+                    db.execSQL("ALTER TABLE `playlist_sessions` ADD COLUMN `listenedRangesJson` TEXT")
+                } catch (ignored: Exception) {}
+                try {
+                    db.execSQL("ALTER TABLE `playlist_sessions` ADD COLUMN `totalListenedSeconds` REAL NOT NULL DEFAULT 0.0")
+                } catch (ignored: Exception) {}
+                // Ensure track_ai_analysis.semanticJson exists (MIGRATION_3_4 may have
+                // been skipped on devices that hit the earlier schema merge conflict).
+                try {
+                    db.execSQL("ALTER TABLE `track_ai_analysis` ADD COLUMN `semanticJson` TEXT")
+                } catch (ignored: Exception) {}
+            }
+        }
+
+        /**
+         * 7 -> 8: Ensure track_ai_analysis.semanticJson exists.
+         *
+         * The column was supposed to be added by MIGRATION_3_4, but
+         * some dev builds reached v7 without it due to a schema merge
+         * conflict. This migration heals those databases.
+         */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                android.util.Log.i("SystemaDb", "DATABASE_VERSION upgrading 7 -> 8 (ensuring semanticJson column)")
+                try {
+                    db.execSQL("ALTER TABLE `track_ai_analysis` ADD COLUMN `semanticJson` TEXT")
+                } catch (ignored: Exception) {
+                    // Column already exists — no-op.
+                }
+            }
+        }
+
+        /**
          * Explicit migrations. Every schema change appends one here
          * rather than dropping user data.
          */
@@ -335,6 +378,8 @@ abstract class MusicLibraryDatabase : RoomDatabase() {
             MIGRATION_3_4,
             MIGRATION_4_5,
             MIGRATION_5_6,
+            MIGRATION_6_7,
+            MIGRATION_7_8,
         )
 
         @Volatile
@@ -344,7 +389,7 @@ abstract class MusicLibraryDatabase : RoomDatabase() {
             return instance ?: synchronized(this) {
                 instance ?: build(context.applicationContext).also {
                     instance = it
-                    android.util.Log.i("SystemaDb", "DATABASE_OPEN db=systema-music-library.db version=6")
+                    android.util.Log.i("SystemaDb", "DATABASE_OPEN db=systema-music-library.db version=8")
                 }
             }
         }

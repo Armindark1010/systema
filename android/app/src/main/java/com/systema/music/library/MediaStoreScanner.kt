@@ -43,22 +43,23 @@ class MediaStoreScanner(private val context: Context) {
         private const val UNKNOWN_TAG = "<unknown>"
     }
 
+    private val baseProjection = arrayOf(
+        MediaStore.Audio.Media._ID,
+        MediaStore.Audio.Media.TITLE,
+        MediaStore.Audio.Media.ARTIST,
+        MediaStore.Audio.Media.ALBUM,
+        MediaStore.Audio.Media.ALBUM_ID,
+        MediaStore.Audio.Media.DURATION,
+        MediaStore.Audio.Media.TRACK,
+        MediaStore.Audio.Media.YEAR,
+        MediaStore.Audio.Media.MIME_TYPE,
+        MediaStore.Audio.Media.SIZE,
+        MediaStore.Audio.Media.DATE_ADDED,
+        MediaStore.Audio.Media.DATE_MODIFIED,
+    )
+
     private val projection: Array<String> = buildList {
-        add(MediaStore.Audio.Media._ID)
-        add(MediaStore.Audio.Media.TITLE)
-        add(MediaStore.Audio.Media.ARTIST)
-        add(MediaStore.Audio.Media.ALBUM)
-        add(MediaStore.Audio.Media.ALBUM_ID)
-        add(MediaStore.Audio.Media.DURATION)
-        add(MediaStore.Audio.Media.TRACK)
-        add(MediaStore.Audio.Media.YEAR)
-        add(MediaStore.Audio.Media.MIME_TYPE)
-        add(MediaStore.Audio.Media.SIZE)
-        add(MediaStore.Audio.Media.DATE_ADDED)
-        add(MediaStore.Audio.Media.DATE_MODIFIED)
-        // ALBUM_ARTIST, DISC_NUMBER and GENRE became queryable columns
-        // on API 30. On older devices they stay null rather than
-        // triggering an extra per-track lookup.
+        addAll(baseProjection)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             add(MediaStore.Audio.Media.ALBUM_ARTIST)
             add(MediaStore.Audio.Media.DISC_NUMBER)
@@ -67,35 +68,68 @@ class MediaStoreScanner(private val context: Context) {
     }.toTypedArray()
 
     private val collection: Uri
-        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
-        } else {
-            @Suppress("DEPRECATION")
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-        }
+        get() = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
 
     private val volumeName: String
-        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            MediaStore.VOLUME_EXTERNAL
-        } else {
-            "external"
-        }
-
-    /** `IS_MUSIC` plus a sane duration keeps ringtones and UI blips out. */
-    private val selection =
-        "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DURATION} >= ?"
-
-    private val selectionArgs = arrayOf(MIN_DURATION_MS.toString())
+        get() = "external"
 
     /**
-     * Exact number of audio items MediaStore will return, so scan
-     * progress reports a real total instead of a fabricated one.
-     * Returns null when the count cannot be determined; the caller
-     * then reports an indeterminate scan.
+     * Resilient selection query:
+     * - Accepts IS_MUSIC != 0 OR IS_MUSIC IS NULL OR audio MIME types (captures Telegram/browser downloads).
+     * - Excludes system ringtones, notifications, and alarms.
+     * - Allows zero/uncomputed duration for newly downloaded files while filtering clicks < 500ms.
+     */
+    private val selection = buildString {
+        append("(")
+        append("${MediaStore.Audio.Media.IS_MUSIC} != 0")
+        append(" OR ${MediaStore.Audio.Media.IS_MUSIC} IS NULL")
+        append(" OR ${MediaStore.Audio.Media.MIME_TYPE} LIKE 'audio/%'")
+        append(")")
+        append(" AND (${MediaStore.Audio.Media.IS_RINGTONE} = 0 OR ${MediaStore.Audio.Media.IS_RINGTONE} IS NULL)")
+        append(" AND (${MediaStore.Audio.Media.IS_NOTIFICATION} = 0 OR ${MediaStore.Audio.Media.IS_NOTIFICATION} IS NULL)")
+        append(" AND (${MediaStore.Audio.Media.IS_ALARM} = 0 OR ${MediaStore.Audio.Media.IS_ALARM} IS NULL)")
+        append(" AND (${MediaStore.Audio.Media.DURATION} >= ? OR ${MediaStore.Audio.Media.DURATION} IS NULL OR ${MediaStore.Audio.Media.DURATION} = 0)")
+    }
+
+    private val selectionArgs = arrayOf("500")
+
+    private fun queryMediaStore(
+        proj: Array<String>,
+        sel: String?,
+        args: Array<String>?,
+        sortOrder: String?,
+    ): Cursor? {
+        try {
+            return context.contentResolver.query(collection, proj, sel, args, sortOrder)
+        } catch (e: SecurityException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Full query failed, retrying with base projection and simple filter", e)
+        }
+
+        try {
+            return context.contentResolver.query(
+                collection,
+                baseProjection,
+                "${MediaStore.Audio.Media.DURATION} >= ? OR ${MediaStore.Audio.Media.DURATION} IS NULL OR ${MediaStore.Audio.Media.DURATION} = 0",
+                arrayOf("500"),
+                sortOrder,
+            )
+        } catch (e: SecurityException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Simple query failed, querying without selection", e)
+        }
+
+        return context.contentResolver.query(collection, baseProjection, null, null, sortOrder)
+    }
+
+    /**
+     * Exact number of audio items MediaStore will return.
+     * Returns null when the count cannot be determined.
      */
     fun countTracks(): Int? = try {
-        context.contentResolver.query(
-            collection,
+        queryMediaStore(
             arrayOf(MediaStore.Audio.Media._ID),
             selection,
             selectionArgs,
@@ -108,14 +142,6 @@ class MediaStoreScanner(private val context: Context) {
 
     /**
      * Streams the audio index in batches.
-     *
-     * Suspending, and the batch callback suspends too, so persistence
-     * happens inside the same structured-concurrency scope — no
-     * `runBlocking`, no thread hand-off per batch.
-     *
-     * @param batchSize rows handed to [onBatch] at a time.
-     * @param isCancelled polled between rows so a cancelled scan stops promptly.
-     * @return total number of valid tracks emitted.
      */
     suspend fun scan(
         batchSize: Int,
@@ -124,19 +150,18 @@ class MediaStoreScanner(private val context: Context) {
     ): Int {
         var emitted = 0
         val cursor: Cursor = try {
-            context.contentResolver.query(
-                collection,
+            queryMediaStore(
                 projection,
                 selection,
                 selectionArgs,
                 "${MediaStore.Audio.Media._ID} ASC",
             )
         } catch (e: SecurityException) {
-            throw e // handled by the repository as a permission problem
+            throw e
         } catch (e: Exception) {
             throw MusicLibraryException(
                 MusicLibraryException.Code.MEDIASTORE_QUERY_FAILED,
-                "The device media index could not be queried.",
+                "The device media index could not be queried: ${e.message}",
                 e,
             )
         } ?: throw MusicLibraryException(
@@ -145,22 +170,43 @@ class MediaStoreScanner(private val context: Context) {
         )
 
         cursor.use { c ->
-            val idCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-            val titleCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-            val artistCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-            val albumCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
-            val albumIdCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
-            val durationCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
-            val trackCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
-            val yearCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR)
-            val mimeCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
-            val sizeCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
-            val addedCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
-            val modifiedCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
-            // Optional columns — absent on API < 30.
-            val albumArtistCol = c.getColumnIndex(MediaStore.Audio.Media.ALBUM_ARTIST)
-            val discCol = c.getColumnIndex(MediaStore.Audio.Media.DISC_NUMBER)
-            val genreCol = c.getColumnIndex(MediaStore.Audio.Media.GENRE)
+            val idCol = c.getColumnIndex(MediaStore.Audio.Media._ID)
+            val titleCol = c.getColumnIndex(MediaStore.Audio.Media.TITLE)
+            val artistCol = c.getColumnIndex(MediaStore.Audio.Media.ARTIST)
+            val albumCol = c.getColumnIndex(MediaStore.Audio.Media.ALBUM)
+            val albumIdCol = c.getColumnIndex(MediaStore.Audio.Media.ALBUM_ID)
+            val durationCol = c.getColumnIndex(MediaStore.Audio.Media.DURATION)
+            val trackCol = c.getColumnIndex(MediaStore.Audio.Media.TRACK)
+            val yearCol = c.getColumnIndex(MediaStore.Audio.Media.YEAR)
+            val mimeCol = c.getColumnIndex(MediaStore.Audio.Media.MIME_TYPE)
+            val sizeCol = c.getColumnIndex(MediaStore.Audio.Media.SIZE)
+            val addedCol = c.getColumnIndex(MediaStore.Audio.Media.DATE_ADDED)
+            val modifiedCol = c.getColumnIndex(MediaStore.Audio.Media.DATE_MODIFIED)
+            // ALBUM_ARTIST, DISC_NUMBER, GENRE are API 30+ (Android 11) constants.
+            // Accessing the field reference on API < 30 throws NoSuchFieldError,
+            // so we guard each one behind a version check.
+            val albumArtistCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                c.getColumnIndex(MediaStore.Audio.Media.ALBUM_ARTIST)
+            } else {
+                -1
+            }
+            val discCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                c.getColumnIndex(MediaStore.Audio.Media.DISC_NUMBER)
+            } else {
+                -1
+            }
+            val genreCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                c.getColumnIndex(MediaStore.Audio.Media.GENRE)
+            } else {
+                -1
+            }
+
+            if (idCol < 0) {
+                throw MusicLibraryException(
+                    MusicLibraryException.Code.MEDIASTORE_QUERY_FAILED,
+                    "MediaStore cursor missing _ID column",
+                )
+            }
 
             val batch = ArrayList<MusicTrack>(batchSize)
 
@@ -174,7 +220,6 @@ class MediaStoreScanner(private val context: Context) {
                         albumArtistCol, discCol, genreCol,
                     )
                 } catch (e: Exception) {
-                    // One malformed row must never abort a whole scan.
                     Log.w(TAG, "Skipping unreadable MediaStore row", e)
                     null
                 }
@@ -201,17 +246,22 @@ class MediaStoreScanner(private val context: Context) {
         durationCol: Int, trackCol: Int, yearCol: Int, mimeCol: Int, sizeCol: Int,
         addedCol: Int, modifiedCol: Int, albumArtistCol: Int, discCol: Int, genreCol: Int,
     ): MusicTrack? {
+        if (idCol < 0 || c.isNull(idCol)) return null
         val mediaId = c.getLong(idCol)
-        val duration = if (c.isNull(durationCol)) 0L else c.getLong(durationCol)
-        if (duration < MIN_DURATION_MS) return null
+        val duration = if (durationCol >= 0 && !c.isNull(durationCol)) c.getLong(durationCol) else 0L
+        if (duration in 1..499) return null
 
-        val mime = c.stringOrNull(mimeCol)
-        if (mime != null && ACCEPTED_MIME_PREFIXES.none { mime.startsWith(it, ignoreCase = true) }) {
+        val mime = if (mimeCol >= 0) c.stringOrNull(mimeCol) else null
+        val isAudioMime = mime == null ||
+            ACCEPTED_MIME_PREFIXES.any { mime.startsWith(it, ignoreCase = true) } ||
+            mime.equals("application/octet-stream", ignoreCase = true) ||
+            mime.equals("video/mp4", ignoreCase = true) ||
+            mime.equals("video/3gpp", ignoreCase = true)
+        if (!isAudioMime) {
             return null
         }
 
-        // MediaStore packs disc and track as DDDTTT (e.g. 2005 -> disc 2, track 5).
-        val rawTrack = if (c.isNull(trackCol)) null else c.getInt(trackCol)
+        val rawTrack = if (trackCol >= 0 && !c.isNull(trackCol)) c.getInt(trackCol) else null
         val trackNumber = rawTrack?.let { if (it > 1000) it % 1000 else it }?.takeIf { it > 0 }
         val packedDisc = rawTrack?.let { if (it > 1000) it / 1000 else null }
         val discNumber = when {
@@ -219,7 +269,7 @@ class MediaStoreScanner(private val context: Context) {
             else -> packedDisc
         }
 
-        val albumId = if (c.isNull(albumIdCol)) null else c.getLong(albumIdCol)
+        val albumId = if (albumIdCol >= 0 && !c.isNull(albumIdCol)) c.getLong(albumIdCol) else null
         val contentUri = ContentUris.withAppendedId(collection, mediaId)
 
         return MusicTrack(
@@ -227,25 +277,19 @@ class MediaStoreScanner(private val context: Context) {
             mediaStoreId = mediaId,
             volumeName = volumeName,
             uri = contentUri.toString(),
-            // TITLE is the only field we substitute, because a row with
-            // no title at all cannot be rendered. Everything else stays
-            // honestly null.
-            title = c.stringOrNull(titleCol) ?: "Unknown title",
-            // MediaStore writes the literal "<unknown>" when a tag is
-            // absent. That is not real metadata, so we store null and
-            // let the UI supply its own fallback label.
-            artist = c.stringOrNull(artistCol)?.takeUnless { it == UNKNOWN_TAG },
-            album = c.stringOrNull(albumCol)?.takeUnless { it == UNKNOWN_TAG },
+            title = (if (titleCol >= 0) c.stringOrNull(titleCol) else null) ?: "Unknown title",
+            artist = if (artistCol >= 0) c.stringOrNull(artistCol)?.takeUnless { it == UNKNOWN_TAG } else null,
+            album = if (albumCol >= 0) c.stringOrNull(albumCol)?.takeUnless { it == UNKNOWN_TAG } else null,
             albumArtist = if (albumArtistCol >= 0) c.stringOrNull(albumArtistCol) else null,
             duration = duration,
             trackNumber = trackNumber,
             discNumber = discNumber,
             genre = if (genreCol >= 0) c.stringOrNull(genreCol) else null,
-            year = if (c.isNull(yearCol)) null else c.getInt(yearCol).takeIf { it > 0 },
+            year = if (yearCol >= 0 && !c.isNull(yearCol)) c.getInt(yearCol).takeIf { it > 0 } else null,
             mimeType = mime,
-            fileSize = if (c.isNull(sizeCol)) 0L else c.getLong(sizeCol),
-            dateAdded = if (c.isNull(addedCol)) 0L else c.getLong(addedCol),
-            dateModified = if (c.isNull(modifiedCol)) 0L else c.getLong(modifiedCol),
+            fileSize = if (sizeCol >= 0 && !c.isNull(sizeCol)) c.getLong(sizeCol) else 0L,
+            dateAdded = if (addedCol >= 0 && !c.isNull(addedCol)) c.getLong(addedCol) else 0L,
+            dateModified = if (modifiedCol >= 0 && !c.isNull(modifiedCol)) c.getLong(modifiedCol) else 0L,
             artworkUri = albumId?.let { ArtworkUris.forAlbum(it) },
             albumId = albumId,
         )

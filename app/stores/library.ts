@@ -421,10 +421,16 @@ export const useLibraryStore = defineStore('library', () => {
         }
       }
 
-      const count = await nativeGetLibraryCount()
-      libLog('init: getLibraryCount', { count })
+      let count = 0
+      try {
+        count = await nativeGetLibraryCount()
+        libLog('init: getLibraryCount', { count })
+      } catch (countError) {
+        libWarn('init: count failed or unpopulated, attempting first scan', countError)
+        count = 0
+      }
 
-      // A fresh install has an empty index — scan once so the user
+      // A fresh install or empty index — scan once so the user
       // sees their music without having to find the Settings action.
       if (count === 0) {
         libLog('init: empty index, starting first scan')
