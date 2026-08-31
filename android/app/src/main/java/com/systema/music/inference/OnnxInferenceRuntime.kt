@@ -331,6 +331,27 @@ class OnnxInferenceRuntime : InferenceRuntime {
 
                     val readMs = (System.nanoTime() - readStartNs) / 1_000_000.0
 
+                    val styleIndex = allOutputs.indexOfFirst {
+                        it.shape.lastOrNull()?.toInt() == 400
+                    }
+                    var styleActivations: FloatArray? = null
+                    var styleShape: List<Long> = emptyList()
+                    var styleName = ""
+                    if (styleIndex >= 0) {
+                        styleShape = allOutputs[styleIndex].shape
+                        styleName = allOutputs[styleIndex].name
+                        styleActivations = if (styleIndex == 0) {
+                            flat
+                        } else {
+                            try {
+                                flattenFloats(results.get(styleIndex).value)
+                            } catch (t: Throwable) {
+                                Log.w(TAG, "Could not read style activations", t)
+                                null
+                            }
+                        }
+                    }
+
                     InferenceResult(
                         output = flat,
                         outputShape = outShape,
@@ -343,6 +364,10 @@ class OnnxInferenceRuntime : InferenceRuntime {
                         embeddingFrames = embeddingFrames,
                         embeddingShape = embeddingShape,
                         embeddingOutputIndex = embeddingIndex.takeIf { it >= 0 },
+                        styleActivations = styleActivations,
+                        styleShape = styleShape,
+                        styleOutputIndex = styleIndex.takeIf { it >= 0 },
+                        styleOutputName = styleName,
                     )
                 } catch (e: InferenceException) {
                     throw e

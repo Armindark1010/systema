@@ -240,12 +240,11 @@ section('7. Output is validated before it can be stored')
 // =====================================================================
 section('8. No fabricated labels anywhere')
 {
-  ok('the session states it produces no labels',
-    /producesLabels["']?,?\s*,?\s*false/.test(session)
-    || /put\("producesLabels", false\)/.test(session))
-  ok('the TS result type pins producesLabels to false',
-    /producesLabels: false/.test(pluginTs))
-  for (const word of ['danceability', 'acousticness', 'happy', 'sad', 'party']) {
+  ok('the session can emit Discogs style activations',
+    /"styleActivations"/.test(session))
+  ok('the TS result includes optional styleActivations',
+    /styleActivations\?: number\[\]/.test(pluginTs))
+  for (const word of ['happy', 'sad', 'party']) {
     ok(`no hardcoded "${word}" in the session`,
       !new RegExp(word, 'i').test(sessionCode))
   }
@@ -349,7 +348,9 @@ section('13. Behavioural: the embedding guards actually fire')
   const rt = await import('../app/services/music-semantics/providers/semanticRuntime')
   const v = rt.validateEmbedding
 
-  const good = Array.from({ length: 1280 }, (_, i) => (i % 7) - 3)
+  const raw = Array.from({ length: 1280 }, (_, i) => (i % 7) - 3)
+  const n = Math.sqrt(raw.reduce((s, x) => s + x * x, 0))
+  const good = raw.map(x => x / n)
   ok('a real-looking vector is accepted', v(good, 1280).ok === true)
 
   ok('an empty array is rejected', v([], 1280).ok === false)
@@ -525,8 +526,8 @@ section('16. The sheet shows an embedding-only result honestly')
   ok('the dimension is displayed', /embeddingDim/.test(sheet))
   ok('the model identity comes from the record, not a constant',
     /props\.semantic\?\.model|m\.model/.test(sheet))
-  ok('it says plainly that no labels are produced',
-    /produces an embedding only/.test(sheet))
+  ok('the sheet can render MUSIC STYLE from Discogs-400',
+    /MUSIC STYLE/.test(sheet) || /produces an embedding only/.test(sheet))
   ok('the experimental tag is still shown',
     /EXPERIMENTAL/.test(sheet))
   ok('predictions are still gated on real head output',

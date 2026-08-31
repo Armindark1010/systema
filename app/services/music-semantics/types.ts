@@ -48,6 +48,7 @@ export interface SemanticAudioInput {
 export type SemanticField =
   | 'mood'
   | 'genre'
+  | 'style'
   | 'tags'
   | 'vocalInstrumental'
   | 'instrument'
@@ -166,6 +167,17 @@ export interface SemanticAnalysisResult {
   embedding: number[] | null
   /** Length of [embedding], recorded separately so a truncated read is detectable. */
   embeddingDim: number | null
+
+  /**
+   * How per-frame style activations were collapsed, when a style head ran.
+   * Official Discogs-EffNet uses mean over patches.
+   */
+  styleAggregation?: 'mean'
+  /** Patch/frame count that was mean-pooled for style scores. */
+  styleFrameCount?: number
+  /** Versioned taxonomy id, e.g. Discogs-400. Absent when no style head ran. */
+  styleTaxonomy?: string
+  styleContractVersion?: number
 
   /** Audio actually seen by the model. */
   sourceDurationSec: number | null

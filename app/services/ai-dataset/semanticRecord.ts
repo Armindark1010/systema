@@ -87,6 +87,11 @@ export interface SemanticAnalysis {
   embedding?: number[] | null
   embeddingDim?: number | null
 
+  styleAggregation?: 'mean'
+  styleFrameCount?: number
+  styleTaxonomy?: string
+  styleContractVersion?: number
+
   sourceDurationSec: number | null
   processedDurationSec: number | null
   sampleRate: number | null
@@ -112,7 +117,7 @@ export interface SemanticAnalysis {
 }
 
 /** The pipeline version for semantic analysis. Bump on shape changes. */
-export const SEMANTIC_ANALYZER_VERSION = 1
+export const SEMANTIC_ANALYZER_VERSION = 2
 
 /**
  * Structural guard for a semantic region read back from storage.

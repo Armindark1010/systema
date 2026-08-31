@@ -19,6 +19,7 @@ import { createProvider } from '~/services/ai-similarity/index'
 import { createMusicSemanticProvider } from '~/services/music-semantics'
 import {
   cachedSemanticFor,
+  cachedSemanticOnEmbeddingRow,
   persistSemanticToDataset,
   toStoredSemantic,
 } from '~/services/ai-dataset/semanticBridge'
@@ -148,6 +149,31 @@ export function useTrackAiAnalysis() {
       results.set(trackId, stored)
       states.set(trackId, 'done')
       cacheHits.add(trackId)
+      void hydrateSemantic(trackId, stored.model)
+    }
+  }
+
+  async function hydrateSemantic(
+    trackId: string,
+    embeddingModel: { id: string, version: string },
+  ): Promise<void> {
+    if (semantics.has(trackId)) return
+    try {
+      const cached = await cachedSemanticFor(
+        trackId,
+        embeddingModel.id,
+        embeddingModel.version,
+        ANALYZER_VERSION,
+        embeddingModel.id,
+        embeddingModel.version,
+      )
+      if (cached) {
+        semantics.set(trackId, cached)
+        semanticCacheHits.add(trackId)
+      }
+    }
+    catch {
+      // Absence is fine; the sheet stays on the embedding result.
     }
   }
 

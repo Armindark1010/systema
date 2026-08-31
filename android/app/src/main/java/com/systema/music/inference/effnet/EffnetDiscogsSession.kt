@@ -125,12 +125,14 @@ class EffnetDiscogsSession(
             // What this model can and cannot produce. The UI reads
             // this rather than assuming.
             put("producesEmbedding", true)
-            put("producesLabels", false)
+            put("producesLabels", true)
+            put("producesDiscogsStyles", true)
+            put("styleClassCount", EffnetDiscogsModel.STYLE_CLASS_COUNT)
             put(
                 "notice",
                 "Discogs-EffNet produces a ${EffnetDiscogsModel.EMBEDDING_DIM}-d embedding " +
-                    "only. Genre, mood, tags and vocal/instrumental require separate " +
-                    "classifier heads that are not installed.",
+                    "and ${EffnetDiscogsModel.STYLE_CLASS_COUNT} Discogs style activations. " +
+                    "Mood, language, danceability and Jamendo genre heads are not installed.",
             )
             if (file == null) {
                 put("errorCode", "MODEL_NOT_INSTALLED")
@@ -342,11 +344,40 @@ class EffnetDiscogsSession(
         // Mean over the REAL patches only. Averaging the zero-padded
         // tail of a fixed-batch run would drag every embedding toward
         // the origin by an amount that varies with track length.
+        val embeddingTensor = when {
+            result.embeddingFrames != null &&
+                result.embeddingShape.lastOrNull()?.toInt() == EffnetDiscogsModel.EMBEDDING_DIM ->
+                result.embeddingFrames!!
+            result.outputShape.lastOrNull()?.toInt() == EffnetDiscogsModel.EMBEDDING_DIM ->
+                result.output
+            else -> throw InferenceException(
+                InferenceErrorCode.MODEL_INFERENCE_FAILED,
+                "INFERENCE_FAILED: no ${EffnetDiscogsModel.EMBEDDING_DIM}-d embedding tensor. " +
+                    "outputs=${result.outputs.joinToString { "${it.name}${it.shape}" }}",
+            )
+        }
+
+        val styleTensor = when {
+            result.styleActivations != null &&
+                result.styleShape.lastOrNull()?.toInt() == EffnetDiscogsModel.STYLE_CLASS_COUNT ->
+                result.styleActivations
+            result.outputShape.lastOrNull()?.toInt() == EffnetDiscogsModel.STYLE_CLASS_COUNT ->
+                result.output
+            else -> null
+        }
+
         val pooled = meanPool(
-            output = result.output,
+            output = embeddingTensor,
             patches = batch.realPatchCount,
             dim = EffnetDiscogsModel.EMBEDDING_DIM,
         )
+        val styleScores = styleTensor?.let {
+            meanPool(
+                output = it,
+                patches = batch.realPatchCount,
+                dim = EffnetDiscogsModel.STYLE_CLASS_COUNT,
+            )
+        }
 
         // ---- NORMALIZE ----
         // L2 normalization produces a unit-length vector required by similarity.
@@ -416,13 +447,23 @@ class EffnetDiscogsSession(
             put("inferenceMs", result.inferenceMs)
             put("totalMs", totalMs)
             put("experimental", true)
-            // No labels. This model does not produce any.
-            put("producesLabels", false)
+            put("producesLabels", styleScores != null)
+            put("styleClassCount", EffnetDiscogsModel.STYLE_CLASS_COUNT)
+            put("styleAggregation", "mean")
+            put("styleTaxonomy", "Discogs-400")
+            put("styleFrameCount", batch.realPatchCount)
+            put("styleOutputName", result.styleOutputName)
             put("frontEnd", MelFrontEnds.frontEndFor(loadedModelId ?: "")?.id)
             if (includeVector) {
                 put(
                     "embedding",
                     JSArray().apply { embedding.forEach { put(it.toDouble()) } },
+                )
+            }
+            if (styleScores != null) {
+                put(
+                    "styleActivations",
+                    JSArray().apply { styleScores.forEach { put(it.toDouble()) } },
                 )
             }
         }

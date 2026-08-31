@@ -265,6 +265,15 @@ data class InferenceResult(
     val embeddingFrames: FloatArray? = null,
     val embeddingShape: List<Long> = emptyList(),
     val embeddingOutputIndex: Int? = null,
+
+    /**
+     * Per-frame 400-d style activations when the graph exposes them.
+     * Flattened row-major [frames, 400]. Never a flattened 115600-d vector.
+     */
+    val styleActivations: FloatArray? = null,
+    val styleShape: List<Long> = emptyList(),
+    val styleOutputIndex: Int? = null,
+    val styleOutputName: String = "",
 ) {
     // Data classes with an array member need these by hand; the
     // generated versions compare references, which would make two
@@ -283,7 +292,12 @@ data class InferenceResult(
             embeddingShape == other.embeddingShape &&
             embeddingOutputIndex == other.embeddingOutputIndex &&
             (embeddingFrames?.contentEquals(other.embeddingFrames)
-                ?: (other.embeddingFrames == null))
+                ?: (other.embeddingFrames == null)) &&
+            styleShape == other.styleShape &&
+            styleOutputIndex == other.styleOutputIndex &&
+            styleOutputName == other.styleOutputName &&
+            (styleActivations?.contentEquals(other.styleActivations)
+                ?: (other.styleActivations == null))
     }
 
     override fun hashCode(): Int {
@@ -298,6 +312,10 @@ data class InferenceResult(
         result = 31 * result + (embeddingFrames?.contentHashCode() ?: 0)
         result = 31 * result + embeddingShape.hashCode()
         result = 31 * result + (embeddingOutputIndex ?: -1)
+        result = 31 * result + (styleActivations?.contentHashCode() ?: 0)
+        result = 31 * result + styleShape.hashCode()
+        result = 31 * result + (styleOutputIndex ?: -1)
+        result = 31 * result + styleOutputName.hashCode()
         return result
     }
 }

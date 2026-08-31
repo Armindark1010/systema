@@ -190,7 +190,7 @@ const evaluations = computed(() => [
  * the column renders "n/a", which is the honest state. Hiding it would
  * make a missing capability invisible.
  */
-const SEMANTIC_COLUMNS = ['mood', 'genre', 'tags', 'vocalInstrumental'] as const
+const SEMANTIC_COLUMNS = ['mood', 'style', 'genre', 'tags', 'vocalInstrumental'] as const
 
 /**
  * Highest score the model emitted for a track, across all heads.
@@ -556,7 +556,7 @@ function distRows(d: { counts: Record<string, number>, unlabelled: number }) {
                 </th>
                 <th
                   class="text-left font-normal px-4 py-2 label bg-base/40 border-x border-line"
-                  colspan="6"
+                  colspan="7"
                 >
                   MODEL PREDICTION · EXPERIMENTAL
                 </th>
@@ -585,10 +585,10 @@ function distRows(d: { counts: Record<string, number>, unlabelled: number }) {
             </thead>
             <tbody>
               <tr v-if="dataset.loading.value">
-                <td colspan="18" class="px-4 py-6 text-fg-faint">Loading…</td>
+                <td colspan="19" class="px-4 py-6 text-fg-faint">Loading…</td>
               </tr>
               <tr v-else-if="!dataset.rows.value.length">
-                <td colspan="18" class="px-4 py-6 text-fg-faint">
+                <td colspan="19" class="px-4 py-6 text-fg-faint">
                   No records yet. Analyse a track from the Full Player.
                 </td>
               </tr>

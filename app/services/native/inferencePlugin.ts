@@ -1057,8 +1057,9 @@ export interface EffnetStatus {
   experimental: boolean
   /** This model emits a vector. */
   producesEmbedding: boolean
-  /** It does NOT emit labels. The UI must respect this. */
   producesLabels: boolean
+  producesDiscogsStyles?: boolean
+  styleClassCount?: number
   notice: string
   errorCode?: string
   detail?: string
@@ -1091,10 +1092,17 @@ export interface EffnetEmbedResult {
   inferenceMs: number
   totalMs: number
   experimental: boolean
-  producesLabels: false
+  producesLabels: boolean
   frontEnd: string | null
   /** The real vector. Absent when includeVector was false. */
   embedding?: number[]
+  /** Mean-pooled 400 Discogs style activations. Absent if the graph has no 400-wide output. */
+  styleActivations?: number[]
+  styleClassCount?: number
+  styleAggregation?: 'mean'
+  styleTaxonomy?: string
+  styleFrameCount?: number
+  styleOutputName?: string
 }
 
 /**

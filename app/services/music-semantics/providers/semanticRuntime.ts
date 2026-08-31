@@ -70,6 +70,11 @@ export interface EmbeddingRunResult {
   patchesProcessed: number
   /** Always true for this model. */
   experimental: boolean
+  /** Mean-pooled Discogs-400 activations, length 400 when present. */
+  styleActivations: number[] | null
+  styleFrameCount: number | null
+  styleAggregation: 'mean' | null
+  styleTaxonomy: string | null
 }
 
 export type RuntimeOutcome<T> =
@@ -346,6 +351,12 @@ export async function runEmbedding(
         totalMs: result.totalMs,
         patchesProcessed: result.patchesProcessed,
         experimental: true,
+        styleActivations: Array.isArray(result.styleActivations)
+          ? result.styleActivations
+          : null,
+        styleFrameCount: result.styleFrameCount ?? result.patchesProcessed ?? null,
+        styleAggregation: result.styleAggregation === 'mean' ? 'mean' : null,
+        styleTaxonomy: result.styleTaxonomy ?? null,
       },
     }
   }

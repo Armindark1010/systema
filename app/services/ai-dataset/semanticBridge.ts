@@ -58,6 +58,10 @@ export function toStoredSemantic(result: SemanticAnalysisResult): SemanticAnalys
     // later mutation there must not rewrite what was stored.
     embedding: result.embedding ? [...result.embedding] : null,
     embeddingDim: result.embeddingDim ?? result.embedding?.length ?? null,
+    styleAggregation: result.styleAggregation,
+    styleFrameCount: result.styleFrameCount,
+    styleTaxonomy: result.styleTaxonomy,
+    styleContractVersion: result.styleContractVersion,
     sourceDurationSec: result.sourceDurationSec,
     processedDurationSec: result.processedDurationSec,
     sampleRate: result.sampleRate,
@@ -138,9 +142,38 @@ export async function cachedSemanticFor(
     const stored = record?.semantic ?? null
     if (!stored) return null
 
+    if (stored.analyzerVersion !== SEMANTIC_ANALYZER_VERSION) return null
     return isSameSemanticBuild(stored, semanticModel, semanticModelVersion)
       ? stored
       : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Load a stored semantic region from the embedding dataset row
+ * without requiring the semantic model id to match the embedding id.
+ * Invalidates when the semantic analyzer version changed.
+ */
+export async function cachedSemanticOnEmbeddingRow(
+  trackId: string,
+  embeddingModel: string,
+  embeddingModelVersion: string,
+  embeddingAnalyzerVersion: number,
+): Promise<SemanticAnalysis | null> {
+  try {
+    const id = datasetRecordId(
+      trackId,
+      embeddingModel,
+      embeddingModelVersion,
+      embeddingAnalyzerVersion,
+    )
+    const record = await getRecord(id)
+    const stored = record?.semantic ?? null
+    if (!stored) return null
+    if (stored.analyzerVersion !== SEMANTIC_ANALYZER_VERSION) return null
+    return stored
   } catch {
     return null
   }

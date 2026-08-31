@@ -94,8 +94,8 @@ export const UNSUPPORTED_SEMANTICS: readonly UnsupportedFeature[] = [
   },
   {
     feature: 'genre',
-    reason: 'Not produced by the embedding. A separate experimental '
-      + 'semantic model predicts genre.',
+    reason: 'Not produced by the embedding. Discogs-EffNet predicts '
+      + 'Discogs styles (Discogs-400), not a universal genre taxonomy.',
     handledBy: 'semantic-provider',
   },
   {

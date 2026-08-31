@@ -53,6 +53,7 @@ const SHEET_TOP_N = 5
 
 const moodPredictions = computed(() => topNFor(props.semantic, 'mood', SHEET_TOP_N))
 const genrePredictions = computed(() => topNFor(props.semantic, 'genre', SHEET_TOP_N))
+const stylePredictions = computed(() => topNFor(props.semantic, 'style', SHEET_TOP_N))
 const tagPredictions = computed(() => topNFor(props.semantic, 'tags', SHEET_TOP_N))
 const vocalPredictions = computed(() =>
   topNFor(props.semantic, 'vocalInstrumental', 2))
@@ -95,6 +96,13 @@ const semanticUnsupported = computed(() => props.semantic?.unsupported ?? [])
 /** Score as a percentage string. The raw value is never discarded. */
 function pct(score: number): string {
   return `${Math.round(score * 100)}%`
+}
+
+/** Official Discogs `Parent---Style` → style name, parent kept in the label. */
+function styleDisplay(raw: string): string {
+  const i = raw.indexOf('---')
+  if (i <= 0) return raw
+  return `${raw.slice(i + 3)}  (${raw.slice(0, i)})`
 }
 
 /** A dash, never a plausible-looking placeholder. */
@@ -235,10 +243,37 @@ const analysedAt = computed(() => {
             <span class="ai-semantic-score tnum">{{ Math.round(semantic.inferenceMs) }} ms</span>
           </div>
           <p v-if="!hasSemantic" class="ai-semantic-caption">
-            This model produces an embedding only. Genre, mood, tags and
+            This model produces an embedding only. Mood, tags and
             vocal detection need separate classifier heads that are not
             installed, so none are shown.
           </p>
+        </div>
+
+        <div v-if="stylePredictions.length" class="ai-semantic-group">
+          <p class="ai-semantic-label">MUSIC STYLE</p>
+          <p class="ai-semantic-caption">
+            Discogs 400 Styles. Scores are model activations, not calibrated confidence.
+          </p>
+          <div v-for="p in stylePredictions" :key="`style-${p.label}`" class="ai-semantic-row">
+            <span class="ai-semantic-name">{{ styleDisplay(p.label) }}</span>
+            <span class="ai-semantic-score tnum">{{ pct(p.score) }}</span>
+          </div>
+          <div class="ai-semantic-row">
+            <span class="ai-semantic-name">Model</span>
+            <span class="ai-semantic-score">Discogs-EffNet</span>
+          </div>
+          <div class="ai-semantic-row">
+            <span class="ai-semantic-name">Taxonomy</span>
+            <span class="ai-semantic-score">{{ semantic?.styleTaxonomy || 'Discogs 400 Styles' }}</span>
+          </div>
+          <div class="ai-semantic-row">
+            <span class="ai-semantic-name">Frames</span>
+            <span class="ai-semantic-score tnum">{{ semantic?.styleFrameCount ?? DASH }}</span>
+          </div>
+          <div class="ai-semantic-row">
+            <span class="ai-semantic-name">Embedding</span>
+            <span class="ai-semantic-score tnum">{{ embeddingDim ? `${embeddingDim}-d` : DASH }}</span>
+          </div>
         </div>
 
         <div v-if="moodPredictions.length" class="ai-semantic-group">

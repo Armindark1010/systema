@@ -47,11 +47,21 @@ import {
 } from './jamendoTaxonomy'
 import {
   RUNTIME_NOT_READY_MESSAGE,
+  embeddingStatus,
   isRuntimeReady,
+  isRuntimeReadyForEmbedding,
   releaseRuntime,
   runEmbedding,
   runHead,
 } from './semanticRuntime'
+import {
+  DISCOGS_400_LABELS,
+  DISCOGS_STYLE_AGGREGATION,
+  DISCOGS_STYLE_CONTRACT_VERSION,
+  DISCOGS_STYLE_DIM,
+  DISCOGS_STYLE_TAXONOMY,
+  zipDiscogsStyles,
+} from './discogsStyleContract'
 
 export const JAMENDO_PROVIDER_ID = 'mtg-jamendo-discogs-effnet'
 
@@ -59,14 +69,16 @@ export class JamendoSemanticProvider implements MusicSemanticAnalysisProvider {
   readonly id = JAMENDO_PROVIDER_ID
 
   async status(): Promise<SemanticProviderStatus> {
-    const ready = isRuntimeReady()
+    const native = await embeddingStatus()
+    const embeddingReady = isRuntimeReadyForEmbedding() && Boolean(native?.installed)
+    const ready = isRuntimeReady() || embeddingReady
+    const supports: SemanticField[] = ['style', ...usableTaxonomies().map(t => t.field)]
     return {
-      // The provider could exist here; whether it can RUN is `ready`.
       available: true,
       ready,
-      model: EMBEDDING_MODEL.id,
-      modelVersion: EMBEDDING_MODEL.version,
-      supports: usableTaxonomies().map(t => t.field),
+      model: native?.modelId || EMBEDDING_MODEL.id,
+      modelVersion: native?.modelVersion || EMBEDDING_MODEL.version,
+      supports,
       detail: ready
         ? `${MODEL_LICENSE.spdx}. ${MODEL_LICENSE.note}`
         : RUNTIME_NOT_READY_MESSAGE,
@@ -193,6 +205,10 @@ export class JamendoSemanticProvider implements MusicSemanticAnalysisProvider {
       unsupported,
       embedding: embedded.value.embedding,
       embeddingDim: embedded.value.embedding.length,
+      styleAggregation: embedded.value.styleAggregation ?? DISCOGS_STYLE_AGGREGATION,
+      styleFrameCount: embedded.value.styleFrameCount ?? embedded.value.patchesProcessed,
+      styleTaxonomy: DISCOGS_STYLE_TAXONOMY,
+      styleContractVersion: DISCOGS_STYLE_CONTRACT_VERSION,
       sourceDurationSec: embedded.value.sourceDurationSec,
       processedDurationSec: embedded.value.processedDurationSec,
       sampleRate: embedded.value.sampleRate,

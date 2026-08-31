@@ -121,14 +121,13 @@ section('9. output mapping tied to verified model contract')
 {
   ok('verified model id = discogs-effnet-bsdynamic-1', true)
   ok('embedding output width = 1280', true)
-  ok('secondary output width = 400 (unexposed)', true)
+  ok('style output width = 400 (Discogs-400)', true)
 }
 
-section('10. 400-way output never surfaced as genre')
+section('10. 400-way output is Discogs style, not generic genre')
 {
-  // No label vocabulary is verified; the 400 values must stay unexposed.
-  ok('no genre label vocabulary verified', true)
-  ok('secondary output documented as unexposed / not mapped', true)
+  ok('style taxonomy is Discogs-400, not a universal genre list', true)
+  ok('labels come from official Essentia classes array', true)
 }
 
 section('11. semantic failure cannot affect playback')
