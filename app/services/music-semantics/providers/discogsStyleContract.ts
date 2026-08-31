@@ -102,6 +102,6 @@ export function zipDiscogsStyles(
   scores: readonly number[],
 ): { label: string, score: number }[] | null {
   if (scores.length !== DISCOGS_400_LABELS.length) return null
-  if (!scores.every(s => typeof s === 'number' && Number.isFinite(s))) return null
+  if (!scores.every(s => typeof s === 'number' && Number.isFinite(s) && s >= 0 && s <= 1)) return null
   return DISCOGS_400_LABELS.map((label, i) => ({ label, score: scores[i] as number }))
 }

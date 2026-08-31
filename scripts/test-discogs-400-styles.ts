@@ -122,7 +122,7 @@ section('7. Native session does not flatten 400-way output')
 section('8. UI shows styles, not generic genre')
 {
   const sheet = readFileSync('app/components/player/PlayerAiAnalysis.vue', 'utf8')
-  ok('MUSIC STYLE heading', /MUSIC STYLE/.test(sheet))
+  ok('MUSIC STYLES heading', /MUSIC STYLES/.test(sheet))
   ok('Discogs 400 Styles mentioned', /Discogs 400 Styles/.test(sheet))
   ok('no hardcoded Boogie Woogie demo values', !/Boogie Woogie/.test(
     sheet.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')))

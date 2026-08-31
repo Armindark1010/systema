@@ -19,11 +19,11 @@ import { createProvider } from '~/services/ai-similarity/index'
 import { createMusicSemanticProvider } from '~/services/music-semantics'
 import {
   cachedSemanticFor,
-  cachedSemanticOnEmbeddingRow,
+  cachedSemanticForTrack,
   persistSemanticToDataset,
   toStoredSemantic,
 } from '~/services/ai-dataset/semanticBridge'
-import type { SemanticAnalysis } from '~/services/ai-dataset/semanticRecord'
+import { isSameSemanticBuild, type SemanticAnalysis } from '~/services/ai-dataset/semanticRecord'
 import type {
   TrackAnalysisFailureRecord,
   TrackAnalysisRecord,
@@ -142,23 +142,29 @@ export function useTrackAiAnalysis() {
   function hydrate(trackId: string | null | undefined): void {
     if (!trackId) return
     if (inFlight.has(trackId)) return
-    if (results.has(trackId)) return
 
     const stored = loadAnalysis(trackId)
-    if (stored) {
+    if (!results.has(trackId) && stored) {
       results.set(trackId, stored)
       states.set(trackId, 'done')
       cacheHits.add(trackId)
-      void hydrateSemantic(trackId, stored.model)
     }
+    void hydrateSemantic(trackId, stored?.model ?? results.get(trackId)?.model)
   }
 
   async function hydrateSemantic(
     trackId: string,
-    embeddingModel: { id: string, version: string },
+    embeddingModel?: { id: string, version: string },
   ): Promise<void> {
     if (semantics.has(trackId)) return
     try {
+      const fromTrack = await cachedSemanticForTrack(trackId)
+      if (fromTrack) {
+        semantics.set(trackId, fromTrack)
+        semanticCacheHits.add(trackId)
+        return
+      }
+      if (!embeddingModel) return
       const cached = await cachedSemanticFor(
         trackId,
         embeddingModel.id,
@@ -248,7 +254,7 @@ export function useTrackAiAnalysis() {
         // written onto that row. Wrapped so that a semantic failure —
         // the expected state until the models are installed — never
         // affects the embedding result the user is already looking at.
-        await runSemantic(id, track, outcome.record.model, force)
+        await runSemantic(id, track, outcome.record.model, force, dspFeatures)
       } else {
         failures.set(id, outcome.failure)
         states.set(id, 'failed')
@@ -289,6 +295,7 @@ export function useTrackAiAnalysis() {
     track: AudioInput,
     embeddingModel: { id: string, version: string },
     force: boolean,
+    dsp: Awaited<ReturnType<typeof readStoredDsp>> = null,
   ): Promise<void> {
     semanticNotes.delete(id)
     semanticCacheHits.delete(id)
@@ -310,8 +317,8 @@ export function useTrackAiAnalysis() {
           ANALYZER_VERSION,
           status.model,
           status.modelVersion,
-        )
-        if (cached) {
+        ) ?? await cachedSemanticForTrack(id)
+        if (cached && isSameSemanticBuild(cached, status.model, status.modelVersion)) {
           semantics.set(id, cached)
           semanticCacheHits.add(id)
           return
@@ -319,9 +326,6 @@ export function useTrackAiAnalysis() {
       }
 
       if (!status.ready) {
-        // The expected state today. Reported as a plain explanation
-        // rather than an error, because nothing is broken — a
-        // documented setup step has not been done.
         semantics.delete(id)
         semanticNotes.set(id, status.detail ?? 'The semantic model is not ready.')
         return
@@ -339,16 +343,68 @@ export function useTrackAiAnalysis() {
         return
       }
 
+      semantics.set(id, toStoredSemantic(outcome.result))
+
+      const vec = outcome.result.embedding
+      if (vec && vec.length === 1280) {
+        const existing = results.get(id)
+        const next: TrackAnalysisRecord = existing
+          ? {
+              ...existing,
+              model: {
+                id: outcome.result.model,
+                version: outcome.result.modelVersion,
+                experimental: true,
+              },
+              embedding: {
+                vector: [...vec],
+                dimension: 1280,
+                normalised: existing.embedding.normalised,
+                preNormL2: existing.embedding.preNormL2,
+              },
+            }
+          : {
+              trackId: id,
+              model: {
+                id: outcome.result.model,
+                version: outcome.result.modelVersion,
+                experimental: true,
+              },
+              embedding: {
+                vector: [...vec],
+                dimension: 1280,
+                normalised: true,
+                preNormL2: null,
+              },
+              audio: {
+                durationSec: outcome.result.sourceDurationSec,
+                processedDurationSec: outcome.result.processedDurationSec,
+                sourceSampleRate: outcome.result.sampleRate,
+                modelSampleRate: outcome.result.sampleRate,
+                windowsProcessed: outcome.result.styleFrameCount ?? null,
+              },
+              dsp,
+              timings: {
+                decodeMs: outcome.result.decodeMs,
+                inferenceMs: outcome.result.inferenceMs,
+                totalMs: outcome.result.inferenceMs,
+              },
+              analyzedAt: outcome.result.analyzedAt,
+              unsupported: [],
+              groundTruth: null,
+            }
+        results.set(id, next)
+        const persistedEmb = await persistAnalysisToDataset(next, track, dsp)
+        if (!persistedEmb.ok && persistedEmb.error) semanticNotes.set(id, persistedEmb.error)
+      }
+
       const stored = await persistSemanticToDataset(
         outcome.result,
-        embeddingModel.id,
-        embeddingModel.version,
+        outcome.result.model,
+        outcome.result.modelVersion,
         ANALYZER_VERSION,
       )
 
-      // Display the live result whether or not the write succeeded, but
-      // never claim it was saved when it was not.
-      semantics.set(id, toStoredSemantic(outcome.result))
       if (!stored.ok && stored.error) semanticNotes.set(id, stored.error)
     } catch (e) {
       semantics.delete(id)

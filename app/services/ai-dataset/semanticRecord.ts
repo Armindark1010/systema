@@ -91,6 +91,10 @@ export interface SemanticAnalysis {
   styleFrameCount?: number
   styleTaxonomy?: string
   styleContractVersion?: number
+  /** Same identity as styleContractVersion; persisted for cache invalidation. */
+  taxonomyVersion?: number
+  /** Display Top-K copy. The complete 400 stay on the style head. */
+  styleTopK?: StoredPrediction[]
 
   sourceDurationSec: number | null
   processedDurationSec: number | null

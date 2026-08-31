@@ -17,7 +17,7 @@
 
 import type { SemanticAnalysisResult } from '../music-semantics/types'
 import { datasetRecordId } from './datasetRecord'
-import { getRecord, saveSemanticAnalysis } from './datasetService'
+import { getCurrentRecord, getRecord, saveSemanticAnalysis } from './datasetService'
 import {
   SEMANTIC_ANALYZER_VERSION,
   type SemanticAnalysis,
@@ -62,6 +62,11 @@ export function toStoredSemantic(result: SemanticAnalysisResult): SemanticAnalys
     styleFrameCount: result.styleFrameCount,
     styleTaxonomy: result.styleTaxonomy,
     styleContractVersion: result.styleContractVersion,
+    taxonomyVersion: result.styleContractVersion,
+    styleTopK: result.heads
+      .find(h => h.field === 'style')
+      ?.predictions.slice(0, 5)
+      .map(p => ({ label: p.label, score: p.score })),
     sourceDurationSec: result.sourceDurationSec,
     processedDurationSec: result.processedDurationSec,
     sampleRate: result.sampleRate,
@@ -92,8 +97,8 @@ export async function persistSemanticToDataset(
   try {
     const id = datasetRecordId(
       result.trackId,
-      embeddingModel,
-      embeddingModelVersion,
+      result.model || embeddingModel,
+      result.modelVersion || embeddingModelVersion,
       embeddingAnalyzerVersion,
     )
 
@@ -175,6 +180,22 @@ export async function cachedSemanticOnEmbeddingRow(
     if (stored.analyzerVersion !== SEMANTIC_ANALYZER_VERSION) return null
     return stored
   } catch {
+    return null
+  }
+}
+
+/** Newest current Room row for a track, if the semantic region is valid. */
+export async function cachedSemanticForTrack(
+  trackId: string,
+): Promise<SemanticAnalysis | null> {
+  try {
+    const row = await getCurrentRecord(trackId)
+    const stored = row?.semantic ?? null
+    if (!stored) return null
+    if (stored.analyzerVersion !== SEMANTIC_ANALYZER_VERSION) return null
+    return stored
+  }
+  catch {
     return null
   }
 }

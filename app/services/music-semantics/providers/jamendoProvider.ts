@@ -131,9 +131,30 @@ export class JamendoSemanticProvider implements MusicSemanticAnalysisProvider {
       }
     }
 
-    // Stage two: every usable head, over the one embedding.
     const heads: SemanticHeadResult[] = []
     const unsupported: UnsupportedSemanticField[] = []
+
+    const styleScores = embedded.value.styleActivations
+    if (styleScores && styleScores.length === DISCOGS_STYLE_DIM) {
+      const zipped = zipDiscogsStyles(styleScores)
+      if (zipped) {
+        heads.push({
+          field: 'style',
+          head: 'discogs-effnet-styles',
+          headVersion: DISCOGS_STYLE_CONTRACT_VERSION.toString(),
+          activation: 'sigmoid',
+          multiLabel: true,
+          classCount: DISCOGS_400_LABELS.length,
+          predictions: rankPredictions(zipped),
+        })
+      }
+    }
+    else {
+      unsupported.push({
+        field: 'style',
+        reason: 'Discogs-400 style activations were not returned with this embedding run.',
+      })
+    }
 
     for (const taxonomy of ALL_TAXONOMIES) {
       if (taxonomy.labelsUnavailable || taxonomy.labels.length === 0) {

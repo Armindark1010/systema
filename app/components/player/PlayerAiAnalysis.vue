@@ -102,7 +102,7 @@ function pct(score: number): string {
 function styleDisplay(raw: string): string {
   const i = raw.indexOf('---')
   if (i <= 0) return raw
-  return `${raw.slice(i + 3)}  (${raw.slice(0, i)})`
+  return raw.slice(i + 3)
 }
 
 /** A dash, never a plausible-looking placeholder. */
@@ -250,13 +250,12 @@ const analysedAt = computed(() => {
         </div>
 
         <div v-if="stylePredictions.length" class="ai-semantic-group">
-          <p class="ai-semantic-label">MUSIC STYLE</p>
+          <p class="ai-semantic-label">MUSIC STYLES</p>
           <p class="ai-semantic-caption">
             Discogs 400 Styles. Scores are model activations, not calibrated confidence.
           </p>
           <div v-for="p in stylePredictions" :key="`style-${p.label}`" class="ai-semantic-row">
-            <span class="ai-semantic-name">{{ styleDisplay(p.label) }}</span>
-            <span class="ai-semantic-score tnum">{{ pct(p.score) }}</span>
+            <span class="ai-semantic-name">{{ styleDisplay(p.label) }} — {{ pct(p.score) }}</span>
           </div>
           <div class="ai-semantic-row">
             <span class="ai-semantic-name">Model</span>
