@@ -349,10 +349,16 @@ class InferenceBenchmark(
         try {
             // COLD LOAD: once, before any track (§12).
             val loaded = rt.loadModel(descriptor)
+            val liveShape = loaded.actualInputShape
+            val shaped = if (liveShape.size >= 3) {
+                descriptor.copy(inputShape = liveShape)
+            } else {
+                descriptor
+            }
 
             for (track in tracks) {
                 rows.add(
-                    measureOne(track, decoder, config, descriptor, rt, aggregationStrategy),
+                    measureOne(track, decoder, config, shaped, rt, aggregationStrategy),
                 )
             }
 
@@ -485,6 +491,25 @@ class InferenceBenchmark(
 
         val totalMs = decodeMs + prepared.preparationMs + result.inferenceMs + result.tensorMs
 
+        val styles = result.styleActivations
+        val embeds = result.embeddingFrames
+        val styleFiniteNonZero = styles != null &&
+            styles.any { it.isFinite() && it != 0f } &&
+            styles.all { it.isFinite() }
+        val embeddingFiniteNonZero = embeds != null &&
+            embeds.any { it.isFinite() && it != 0f } &&
+            embeds.all { it.isFinite() }
+
+        Log.i(
+            TAG,
+            "[AI-BENCHMARK] effnet_prep track=${track.trackId} " +
+                "prepMs=${"%.1f".format(prepared.preparationMs)} " +
+                "inferMs=${"%.1f".format(result.inferenceMs)} " +
+                "input=${result.inputName}${result.inputTensorShape.ifEmpty { prepared.tensorShape }} " +
+                "style=${result.styleShape} emb=${result.embeddingShape} " +
+                "styleOk=$styleFiniteNonZero embOk=$embeddingFiniteNonZero",
+        )
+
         return TrackMeasurement(
             trackId = track.trackId,
             ok = true,
@@ -520,6 +545,12 @@ class InferenceBenchmark(
             sourceChannels = info.channels,
             errorCode = null,
             errorMessage = null,
+            inputName = result.inputName.takeIf { it.isNotEmpty() } ?: prepared.inputName,
+            inputTensorShape = result.inputTensorShape.ifEmpty { prepared.tensorShape },
+            styleOutputShape = result.styleShape.takeIf { it.isNotEmpty() },
+            embeddingOutputShape = result.embeddingShape.takeIf { it.isNotEmpty() },
+            styleFiniteNonZero = styleFiniteNonZero,
+            embeddingFiniteNonZero = embeddingFiniteNonZero,
         )
     }
 }
@@ -622,6 +653,12 @@ data class TrackMeasurement(
     val sourceChannels: Int?,
     val errorCode: String?,
     val errorMessage: String?,
+    val inputName: String? = null,
+    val inputTensorShape: List<Long>? = null,
+    val styleOutputShape: List<Long>? = null,
+    val embeddingOutputShape: List<Long>? = null,
+    val styleFiniteNonZero: Boolean? = null,
+    val embeddingFiniteNonZero: Boolean? = null,
 ) {
     companion object {
         fun failed(trackId: String, code: String, message: String) = TrackMeasurement(

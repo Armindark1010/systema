@@ -168,11 +168,16 @@ class OnnxInferenceRuntime : InferenceRuntime {
                     )
                 }
 
-                val actualShape = readInputShape(created, inputNames.first())
+                val boundInput = selectInputName(created.inputNames)
+                val actualShape = readInputShape(created, boundInput)
 
                 environment = env
                 session = created
-                descriptor = model
+                descriptor = if (actualShape.isNotEmpty()) {
+                    model.copy(inputShape = actualShape)
+                } else {
+                    model
+                }
 
                 val loaded = LoadedModelInfo(
                     modelId = model.modelId,
@@ -233,9 +238,7 @@ class OnnxInferenceRuntime : InferenceRuntime {
                     )
                 }
 
-                val inputName = active.inputNames.first()
-                // A dynamic batch/length dimension is resolved from the
-                // actual input so a model declaring [1, -1] still runs.
+                val inputName = selectInputName(active.inputNames)
                 val shape = resolveShape(model.inputShape, input.size)
 
                 val tensorStartNs = System.nanoTime()
@@ -475,6 +478,12 @@ class OnnxInferenceRuntime : InferenceRuntime {
     } catch (t: Throwable) {
         Log.w(TAG, "Could not read tensor signatures", t)
         emptyList()
+    }
+
+    private fun selectInputName(names: Set<String>): String {
+        val preferred = "serving_default_melspectrogram"
+        if (names.contains(preferred)) return preferred
+        return names.first()
     }
 
     private fun readInputShape(session: OrtSession, name: String): List<Long> = try {

@@ -50,35 +50,33 @@ object ModelInputPreparer {
     ): PreparedInput {
         val startNs = System.nanoTime()
 
+        if (EffnetDiscogsModel.isEffnetDiscogs(model)) {
+            val batch = EffnetDiscogsModel.prepareMel(pcm, pcmSampleRate, model)
+            return PreparedInput(
+                data = batch.data,
+                sampleRate = model.inputSampleRate ?: pcmSampleRate,
+                preparationMs = (System.nanoTime() - startNs) / 1_000_000.0,
+                format = InputFormat.LOG_MEL_SPECTROGRAM,
+                tensorShape = batch.shape,
+                inputName = EffnetDiscogsModel.INPUT_NAME,
+            )
+        }
+
         val prepared = when (model.inputFormat) {
             InputFormat.RAW_TENSOR -> pcm.copyOf()
 
             InputFormat.RAW_WAVEFORM -> prepareWaveform(pcm, pcmSampleRate, model)
 
-            // Phase 29 implements a log-mel front end for ONE model:
-            // Discogs-EffNet. Its filterbank was transcribed from
-            // Essentia's own source (see EffnetDiscogsMelFrontEnd), so
-            // it is correct for that model and no other.
-            //
-            // Every other mel-consuming model still hits the refusal
-            // below. That is deliberate: "we have a mel front end now"
-            // must not become "any mel model will work", because a
-            // filterbank that does not match training produces
-            // confident, meaningless output.
             InputFormat.LOG_MEL_SPECTROGRAM ->
-                if (EffnetDiscogsModel.isEffnetDiscogs(model)) {
-                    EffnetDiscogsModel.prepareMel(pcm, pcmSampleRate, model)
-                } else {
-                    throw InferenceException(
-                        InferenceErrorCode.INPUT_SHAPE_MISMATCH,
-                        "Model ${model.modelId} requires ${model.inputFormat}, and " +
-                            "SYSTEMA has no front end matching ITS training " +
-                            "configuration. A mel front end is only valid for the " +
-                            "model it was transcribed from; reusing another model's " +
-                            "would produce meaningless embeddings. Refusing rather " +
-                            "than guessing.",
-                    )
-                }
+                throw InferenceException(
+                    InferenceErrorCode.INPUT_SHAPE_MISMATCH,
+                    "Model ${model.modelId} requires ${model.inputFormat}, and " +
+                        "SYSTEMA has no front end matching ITS training " +
+                        "configuration. A mel front end is only valid for the " +
+                        "model it was transcribed from; reusing another model's " +
+                        "would produce meaningless embeddings. Refusing rather " +
+                        "than guessing.",
+                )
 
             InputFormat.MEL_SPECTROGRAM
             -> throw InferenceException(
@@ -198,6 +196,8 @@ data class PreparedInput(
     val sampleRate: Int,
     val preparationMs: Double,
     val format: InputFormat,
+    val tensorShape: List<Long> = emptyList(),
+    val inputName: String? = null,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -205,7 +205,9 @@ data class PreparedInput(
         return data.contentEquals(other.data) &&
             sampleRate == other.sampleRate &&
             preparationMs == other.preparationMs &&
-            format == other.format
+            format == other.format &&
+            tensorShape == other.tensorShape &&
+            inputName == other.inputName
     }
 
     override fun hashCode(): Int {
@@ -213,6 +215,8 @@ data class PreparedInput(
         result = 31 * result + sampleRate
         result = 31 * result + preparationMs.hashCode()
         result = 31 * result + format.hashCode()
+        result = 31 * result + tensorShape.hashCode()
+        result = 31 * result + (inputName?.hashCode() ?: 0)
         return result
     }
 }

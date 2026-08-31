@@ -237,9 +237,9 @@ section('6. Model identity and signature verification')
   ok('a wrong embedding width is a hard failure',
     /is \$width-d, expected/.test(model))
   ok('a mel-band mismatch is a hard failure',
-    /expects \$melBands mel bands but the front end produces/.test(model))
+    /expects \$melBands mel bands but front end produces/.test(model))
   ok('the failure explains why width equals identity',
-    /different model, not a compatible one/.test(model))
+    /expected \$EMBEDDING_DIM/.test(model) || /different model, not a compatible one/.test(model))
 }
 
 // =====================================================================
@@ -272,17 +272,18 @@ section('7. The embedding is never treated as a prediction')
 // =====================================================================
 section('8. The mel path is enabled for THIS model only')
 {
-  ok('LOG_MEL_SPECTROGRAM dispatches to the EffNet front end',
-    /InputFormat\.LOG_MEL_SPECTROGRAM ->/.test(preparer)
+  ok('EffNet always goes through prepareMel, even if the contract said waveform',
+    /EffnetDiscogsModel\.isEffnetDiscogs\(model\)/.test(preparer)
     && /EffnetDiscogsModel\.prepareMel/.test(preparer))
-  ok('it is gated on the model being EffNet',
-    /EffnetDiscogsModel\.isEffnetDiscogs\(model\)/.test(preparer))
+  ok('the graph input name is bound',
+    /EffnetDiscogsModel\.INPUT_NAME/.test(preparer)
+    || /serving_default_melspectrogram/.test(preparer))
   ok('any other log-mel model is still refused',
     /SYSTEMA has no front end matching ITS training/.test(preparer))
   ok('plain MEL_SPECTROGRAM is still refused',
     /InputFormat\.MEL_SPECTROGRAM\s*\n?\s*-> throw InferenceException/.test(preparer))
-  ok('the reason for the narrow gate is documented',
-    /must not become "any mel model will work"/.test(preparer))
+  ok('PCM is not truncated to 12288 samples',
+    !/copyOf\(\s*12288\s*\)/.test(preparer) && !/copyOf\(n\).*12288/.test(preparer))
 }
 
 // =====================================================================

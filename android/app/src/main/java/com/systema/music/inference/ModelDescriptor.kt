@@ -231,6 +231,10 @@ data class InferenceResult(
      * after the fact.
      */
     val modelId: String = "",
+    /** Graph input node actually bound for this run. */
+    val inputName: String = "",
+    /** Resolved input tensor shape, e.g. [batch, 128, 96]. */
+    val inputTensorShape: List<Long> = emptyList(),
 
     /**
      * Which output [output] was read from. Empty for runtimes that do
@@ -286,6 +290,8 @@ data class InferenceResult(
             inferenceMs == other.inferenceMs &&
             tensorMs == other.tensorMs &&
             modelId == other.modelId &&
+            inputName == other.inputName &&
+            inputTensorShape == other.inputTensorShape &&
             selectedOutputName == other.selectedOutputName &&
             selectedOutputIndex == other.selectedOutputIndex &&
             outputs == other.outputs &&
@@ -306,6 +312,8 @@ data class InferenceResult(
         result = 31 * result + inferenceMs.hashCode()
         result = 31 * result + tensorMs.hashCode()
         result = 31 * result + modelId.hashCode()
+        result = 31 * result + inputName.hashCode()
+        result = 31 * result + inputTensorShape.hashCode()
         result = 31 * result + selectedOutputName.hashCode()
         result = 31 * result + selectedOutputIndex
         result = 31 * result + outputs.hashCode()

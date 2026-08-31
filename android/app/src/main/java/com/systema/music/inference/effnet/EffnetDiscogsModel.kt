@@ -330,7 +330,7 @@ object EffnetDiscogsModel {
         pcm: FloatArray,
         pcmSampleRate: Int,
         model: ModelDescriptor,
-    ): FloatArray {
+    ): PatchBatch {
         val expected = model.inputSampleRate ?: EffnetDiscogsMelFrontEnd.SAMPLE_RATE
         if (pcmSampleRate != expected) {
             throw InferenceException(
@@ -354,8 +354,6 @@ object EffnetDiscogsModel {
         }
 
         val frames = frontEnd.melFrames(pcm)
-        // Batch axis from the descriptor: -1 (dynamic) means the whole
-        // track goes through in one run with no padding at all.
         val declared = batchSizeFrom(model.inputShape)
         val batch = (
             if (declared == null) frontEnd.toSingleBatch(frames)
@@ -366,6 +364,6 @@ object EffnetDiscogsModel {
                 "Could not build a complete patch from ${frames.size} frames.",
             )
 
-        return batch.data
+        return batch
     }
 }

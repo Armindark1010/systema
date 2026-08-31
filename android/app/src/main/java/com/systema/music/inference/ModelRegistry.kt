@@ -304,7 +304,12 @@ class ModelRegistry(context: Context) {
         } else {
             modelId + ModelStorage.EXTENSION
         }
-        return descriptorForInstalled(fileName, sampleRate = sampleRate)
+        val desc = descriptorForInstalled(fileName, sampleRate = sampleRate)
+        val front = MelFrontEnds.frontEndFor(desc.modelId) ?: return desc
+        return desc.copy(
+            inputFormat = InputFormat.LOG_MEL_SPECTROGRAM,
+            inputSampleRate = front.sampleRate,
+        )
     }
 
     fun sideloadInstructions(): String = storage.sideloadInstructions()

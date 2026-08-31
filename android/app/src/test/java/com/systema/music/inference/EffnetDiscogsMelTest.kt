@@ -366,6 +366,39 @@ class EffnetDiscogsMelTest {
         check("a 64-band model is rejected", threw)
     }
 
+    fun testBenchmarkPreparesMelNotPcm() {
+        val sr = EffnetDiscogsMelFrontEnd.SAMPLE_RATE
+        val pcm = FloatArray(sr * 4) { i -> sin(2.0 * PI * 440.0 * i / sr).toFloat() }
+        val model = ModelDescriptor(
+            modelId = "discogs-effnet-bsdynamic-1",
+            modelName = "EffnetDiscogs",
+            version = "1",
+            filePath = "/tmp/discogs-effnet-bsdynamic-1.onnx",
+            inputShape = listOf(-1L, 128L, 96L),
+            inputType = TensorType.FLOAT32,
+            inputSampleRate = 16_000,
+            inputChannels = 1,
+            outputShape = listOf(-1L, 1280L),
+            outputType = TensorType.FLOAT32,
+            inputFormat = InputFormat.RAW_WAVEFORM,
+        )
+        val prepared = ModelInputPreparer.prepare(pcm, sr, model)
+        val patch = 128 * 96
+        check("format is log-mel, not waveform",
+            prepared.format == InputFormat.LOG_MEL_SPECTROGRAM)
+        check("input name is serving_default_melspectrogram",
+            prepared.inputName == EffnetDiscogsModel.INPUT_NAME)
+        check("tensor rank is 3", prepared.tensorShape.size == 3, "${prepared.tensorShape}")
+        check("time axis is 128", prepared.tensorShape[1] == 128L)
+        check("mel axis is 96", prepared.tensorShape[2] == 96L)
+        check("buffer divides into 128x96 patches",
+            prepared.data.size % patch == 0 && prepared.data.size >= patch)
+        check("PCM was not truncated to one patch of 12288 samples",
+            pcm.size == sr * 4 && prepared.data.size != 12288)
+        check("output is not the raw PCM buffer",
+            prepared.data.size != pcm.size)
+    }
+
     fun runAll() {
         testConstants()
         testMelScale()
@@ -377,6 +410,7 @@ class EffnetDiscogsMelTest {
         testDeterminism()
         testModelDescriptor()
         testSignatureVerification()
+        testBenchmarkPreparesMelNotPcm()
         println("EffnetDiscogsMelTest: all checks passed")
     }
 }
